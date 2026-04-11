@@ -327,6 +327,10 @@ def cmd_copy(args):
     if bg_image and ('Program Files/Git/' in bg_image or 'Program Files\\Git\\' in bg_image):
         bg_image = '/' + bg_image.split('Git/', 1)[-1].split('Git\\', 1)[-1]
     page_id = create_page(name, style='bigScreen', theme='dark', background_image=bg_image)
+    # Fix: create_page 后立即 query 获取最新的 updateCount，避免乐观锁冲突
+    _raw = bi_utils._request('GET', '/drag/page/queryById', params={'id': page_id})
+    _p = (_raw.get('result') or {})
+    bi_utils._page_info[page_id]['updateCount'] = _p.get('updateCount', 1)
     bi_utils._page_components[page_id] = template_components
     save_page(page_id)
 

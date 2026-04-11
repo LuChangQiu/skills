@@ -182,3 +182,15 @@ JAreaMap 初始化
 | `packages/components/echarts/Map/AreaMap/AreaMap.vue` | JAreaMap 组件 |
 | `packages/hooks/charts/useEChartsMap.ts` | 地图核心 hook |
 | `packages/dragEngine/api.ts` → `getMapDataByCode()` | 获取地图 GeoJSON |
+
+## 静态数据参考
+
+> **添加静态数据地图组件时，必须读取并使用 `map-static-data.md` 中的数据，禁止自行设计简陋数据。**
+
+`references/map-static-data.md` 包含：
+- 省份 GDP 数据（31省，2023年实际值）→ JAreaMap / JBarMap（省级）
+- 城市经纬度散点数据（24城）→ JBubbleMap / JBarMap / JHeatMap
+- 飞线数据（15条路线）→ JFlyLineMap
+- 时间轴飞线数据（4季度×8路线）→ JTotalFlyLineMap
+- 分组柱形数据（7大区×3产业）→ JTotalBarMap
+- JAreaMap 美化 option 配置（深蓝渐变 + 金色标注 + 炫光边框）

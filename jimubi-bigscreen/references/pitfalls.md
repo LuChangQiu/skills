@@ -21,6 +21,10 @@
 
 | 问题 | 说明 |
 |------|------|
+| **⚠️ 脚本中所有显示用字段必须写汉字，严禁拼音或英文替代（2026-04-09 违规被用户指出）** | `fieldTxt`、`formName`、`componentName`、`showName`、`fieldTxt` 等所有面向用户展示的字段值，必须直接写汉字（如 `'fieldTxt': '文本框'`），禁止用拼音（`'wenbenk'`）或英文替代。Python 脚本统一加 `PYTHONIOENCODING=utf-8` 前缀，可直接写中文字符串，无编码问题。 |
+| **⚠️ 禁止在自定义脚本内用 subprocess 调用 comp_ops.py 再二次直接调用** | 在 Python 脚本中通过 `subprocess.run(comp_ops.py add ...)` 添加组件后，**禁止**在脚本外再单独执行一次 `py comp_ops.py add` 相同命令。两次调用都会成功，导致大屏出现两个位置和名称完全相同的重复组件。正确做法：创建数据集用自定义脚本，添加组件**只用一种方式**——要么在脚本内 subprocess 调用，要么脚本外直接调用，二选一。推荐：**脚本只负责创建数据集，组件添加统一用脚本外 `py comp_ops.py add --dataset-name`**，流程最清晰不易出错。 |
+| **⚠️ 创建数据集前必须询问数据来源（Step 0.1 强制流程）** | 用户未明确说明数据来源时，**禁止**擅自使用公开 mock API 或任何默认 URL 创建数据集。必须先问：①使用 mock 系统还是自己编写代码？②接口需要实现什么业务需求？可跳过的情况：用户已提供 mock 地址/账号、已指定 Controller 文件路径、已指定已有数据集或 SQL 数据源、任务不涉及数据集创建。 |
+| **⚠️ 创建 API 数据集后必须回写字段列表（onlDragDatasetItemList）** | 创建 API 类型数据集后，系统不会自动解析字段。必须：①调 `POST /drag/onlDragDatasetHead/getAllChartData` 解析字段；②用 `GET /drag/onlDragDatasetHead/queryById` 获取完整数据集实体；③构建 `onlDragDatasetItemList`（含 fieldName/fieldTxt/fieldType/izShow/orderNum）；④调 `POST /drag/onlDragDatasetHead/edit` 回写。不回写则数据集字段配置为空，设计器无法选字段，fieldOption 也为空。完整代码：`items = [{'fieldName':k,'fieldTxt':k,'fieldType':'String','izShow':'Y','izWhere':'N','izTotal':'N','orderNum':i} for i,k in enumerate(field_names)]; ds_full = bi_utils._request('GET','/drag/onlDragDatasetHead/queryById',params={'id':DS_ID})['result']; ds_full['onlDragDatasetItemList']=items; bi_utils._request('POST','/drag/onlDragDatasetHead/edit',data=ds_full)` |
 | `POST /drag/page/edit` 乐观锁 | 必须传 `updateCount`（当前数据库值） |
 | **chartData 必须是 JSON 字符串** | `config.chartData` 的值必须是 `json.dumps(...)` 后的字符串 |
 | **dataMapping 的 filed 拼写** | 系统中 `filed` 不是 `field`（少一个 d） |
@@ -29,35 +33,126 @@
 | **图表标题去重** | `option.card.title` 必须为空字符串，标题仅通过 `option.title.text` 显示 |
 | **图层顺序由数组索引决定** | `template` 数组索引 0=最顶层，`orderNum` 不控制 z-index |
 
+## 数据源相关
+
+| 问题 | 说明 |
+|------|------|
+| **`--db-type` 必须大写** | `sqlserver` 报 `invalid choice: sqlserver`，必须写 `SQLSERVER`；MySQL 用 `MYSQL5.7`，不是 `mysql`/`MySQL`/`MYSQL` |
+| **`--code` 为必填参数** | `datasource_ops.py create` 漏传 `--code` 直接报 usage 错误，必须提供唯一编码（如 `bigscreen_stat`） |
+| **`--host/--port/--db` 必须分开传** | `--db` 只接受数据库名（如 `jeecg-boot`），不能传 `host:port/dbname` 格式；主机和端口分别用 `--host` 和 `--port` 传 |
+| **`comp_ops.py add` 指定数据源用 `--db-source`** | `--db-key` 不是合法参数，会报 `unrecognized arguments`，正确参数名是 `--db-source` |
+| **需先 list 拿 ID 再传 --db-source** | `datasource_ops.py create` 不返回 ID 到命令行，需通过 `datasource_ops.py list` 查询 ID 后传给 `comp_ops.py add --db-source` |
+| **datasource_ops.py create 返回值是 ID 字符串** | `result` 直接是数据源 ID 字符串，不是对象（与数据集 create 返回对象不同） |
+| **⚠️ 创建SQL数据集前必须询问用户选择数据源** | 即使刚创建了数据源，也不能自动使用，必须：①`datasource_ops.py list` 列出所有数据源 ②`AskUserQuestion` 让用户选择 ③用选中的 ID 执行 `comp_ops.py add --create-sql --db-source <ID>` |
+
 ## 数据集相关
 
 | 问题 | 说明 |
 |------|------|
-| **"数据源不存在"** | SQL 数据集未设置 `dbSource` |
-| **字段列表不生效** | 用了 `onlDragDatasetItemList`，正确是 `datasetItemList` |
+| **"数据源连接失败"** | 直接调用 API `POST /drag/onlDragDatasetHead/add` 创建 SQL 数据集时报"数据源连接失败"，但数据源测试 (`datasource_ops.py test`) 显示连接成功。**原因**：直接调 API 时请求体格式与预置脚本不同，可能缺少某些必填字段或格式不匹配。**解决方案**：始终使用 `comp_ops.py add --create-sql` 或 `dataset_ops.py create-sql` 预置脚本创建 SQL 数据集，禁止直接调 `/drag/onlDragDatasetHead/add` API。comp_ops.py 内部封装了正确的请求体格式和字段处理逻辑。若必须直接调 API，需确保包含完整字段：`dataType: 'sql', dataName, dbSource, querySql, dataRemark, parentId`（示例数据集 parentId=`1516743332632494082`），并检查 dbSource 是否为有效数字 ID 字符串。 |
+| **"数据源不存在"** | SQL 数据集未设置 `dbSource`，或误用了 `dbKey`（无效字段）。直接调 `/drag/onlDragDatasetHead/add` 时字段必须是 `dbSource`，值是数据源 **数字 ID**（不是 code 字符串）。正确：`{'dbSource': '1199611644876644352', ...}`；错误：`{'dbKey': '1199611644876644352', ...}` |
+| **`onlDragDatasetItemList` vs `datasetItemList`** | 直接调 add API 时用 `onlDragDatasetItemList` 可以创建成功，但字段有时会被忽略；`comp_ops.py --create-sql` 内部用 `datasetItemList`。如果数据集创建后字段为空，改用 `datasetItemList` |
+| **⚠️ 自定义脚本创建SQL数据集禁止用 `dbKey`** | `dbKey` 是 comp_ops.py / datasource_ops.py 的 CLI 参数名，不是 API 字段名。直接写 API 时必须用 `dbSource`（数据源 ID），否则 getAllChartData 报"数据源不存在" |
+| **⚠️ 验证表名时别从其他数据库的数据集推断** | 不同数据源连接不同的库，A 数据源有 `jmreport_big_screen` 不代表 B 数据源的库也有。验证表名应：先创建测试数据集 → getAllChartData → 成功则表名正确，失败换下一个候选表 |
+| **jeecg-boot 主库大屏相关表名速查** | `onl_drag_page`（大屏页面）、`onl_drag_dataset`（数据集）。`jmreport_big_screen` 通常在单独的统计库（非 jeecg-boot 主库）中 |
+| **⚠️ 禁止用 `py -` heredoc 执行动态脚本** | `py -` 读 stdin 时 Python 的 `sys.path.insert(0,'.')` 指向的是进程启动目录而非当前 shell 目录，导致 `import bi_utils` 报 ModuleNotFoundError。必须先 Write 脚本到文件再 `py script.py` 执行 |
+| **⚠️ 删除数据集可能报"没有权限"** | 某些系统配置下非超级管理员无法删除已有数据集；脚本中删除操作失败不影响新建流程，可跳过报错继续执行 |
+| **⚠️ `getAllGroup` 分组节点字段是 `name` 不是 `groupName`** | `getAllGroup` 返回的条目字段是 `name`（非 `groupName`）。用 `item.get('groupName')` 永远是 None，导致找不到"示例数据集"→ 触发 `addGroup` → 报唯一约束失败 → `parentId=''` → 数据集落入根目录（显示"0"）。必须用 `item.get('name') == '示例数据集'`，且仅匹配分组节点（`dataType is None AND dbSource is None`）。本环境"示例数据集"固定 id=`1516743332632494082`，可直接硬编码 |
 | **编辑数据集 510 权限错误** | 确保用户 Token 拥有 `drag:dataset:save` 权限 |
 | **API 地址存在 querySql 字段** | API 数据集没有独立 url 字段，`querySql` 存 API URL |
 | **API 数据集不需要 dbSource** | `dbSource` 设为 `None` |
-| **创建数据集 parentId 必须为 '0'** | 不设或留空导致管理界面无法正确归类 |
-| **数据集创建返回值是 dict** | `result` 是完整实体对象，需取 `result.id` |
+| **创建数据集 parentId 含义** | `parentId='0'` 表示根目录（无分组）；指定分组时 `parentId` = 分组节点的 `id`。**注意：分组关联用 `parentId`，不是 `groupCode`**（groupCode 是另一个字段，通常为 null） |
+| **数据集创建返回值二义性** | `POST /drag/onlDragDatasetHead/add` 的 `result` 可能是包含 `id` 的对象，也可能直接是 ID 字符串。**必须同时兼容两种格式**：`DS_ID = result.get('id') if isinstance(result, dict) else result` |
 | **数据源创建返回值是 string** | `result` 直接是数据源 ID 字符串 |
+| **`onlDragDatasetItemList` 是创建时的正确字段名** | `POST /drag/onlDragDatasetHead/add` payload 中用 `onlDragDatasetItemList`（不是 `datasetItemList`）传字段列表；但 `queryAllById` 返回的字段名也是 `onlDragDatasetItemList` |
+| **⚠️ 创建数据集后必须调用查询解析API（强制流程）** | 创建数据集后，**必须**调用对应的查询解析API，这是前端"查询解析"按钮的逻辑。**【2026-04-03 已修复】** comp_ops.py 和 dataset_ops.py 已内置自动调用。<br><br>**SQL数据集**：调用 `POST /drag/onlDragDatasetHead/queryFieldBySql`，data: `{'sql': SQL, 'dbCode': 数据源ID, 'paramArray': '[]'}`<br>**API数据集**：调用 `POST /drag/onlDragDatasetHead/queryFieldByApi`，data: `{'api': URL, 'method': 'get/post', 'paramArray': '[]'}`<br>**JSON数据集**：直接解析JSON字符串提取字段名（无需API调用）<br>**FILES/文件数据集**：调用 `POST /drag/onlDragDatasetHead/queryFileFieldBySql` <br><br>**正确流程**：① `POST /add` 创建数据集 → ② 调用对应 queryFieldBy* 解析字段 → ③ `POST /edit` 保存字段到数据集。**注意**：字段保存到 `datasetItemList`（不是 `onlDragDatasetItemList`）。已修复记录在 comp_ops.py 和 dataset_ops.py 中。 |
+| **⚠️ SQL 数据集创建后字段为空（手动点查询解析才出现字段）** | 调 `/add` 时未传 `onlDragDatasetItemList`，系统不会自动解析 SQL 字段。**修复①（推荐，add 时一并传入）**：在 add 请求体中加 `"onlDragDatasetItemList": [{"fieldName":"name","fieldTxt":"日期","fieldType":"String","izShow":"Y","sort":0}, {"fieldName":"value","fieldTxt":"数量","fieldType":"Integer","izShow":"Y","sort":1}]`。**修复②（事后补救，通过 edit 回写）**：先 `getAllChartData` 拿第一行数据 → 推断字段类型（int/float→Integer，其余→String）→ `queryById` 获取完整数据集实体 → 将 `onlDragDatasetItemList` 填入实体 → `edit` 保存。代码：`items=[{'fieldName':k,'fieldTxt':k,'fieldType':'Integer' if isinstance(v,(int,float)) else 'String','izShow':'Y','sort':i} for i,(k,v) in enumerate(test_data[0].items())]; ds=bi_utils._request('GET','/drag/onlDragDatasetHead/queryById',params={'id':ds_id})['result']; ds['onlDragDatasetItemList']=items; bi_utils._request('POST','/drag/onlDragDatasetHead/edit',data=ds)` |
+| **⚠️ 直接调 `/drag/onlDragDataSource/add` 时 result 是字符串 ID** | 响应体 `result` 直接是字符串（如 `"1199640199413063680"`），非包含 `id` 字段的对象。直接用 `DS_ID = add_resp.get('result')` 即可。**禁止用 `getOptions` 按名称查找**（同名重复时会取到旧数据源，返回错误 ID）。MySQL 8.x 的 `dbType` 填 `MYSQL8`（不是 `MYSQL5.7`） |
 | **queryAllById 返回 result=null** | 权限或数据隔离问题，不要依赖此接口 |
 | **编辑数据集字段名与查询不同** | `queryAllById` 返回 `onlDragDatasetItemList`，`edit` 需要 `datasetItemList` |
 | **comp_ops.py --dataset-name 绑定后无数据** | list 接口不返回字段列表，已修复：自动从 getAllChartData 推断 |
 | **字典翻译用 jimu_dict 不是 sys_dict** | 大屏字典 API 为 `/jmreport/dict/*`，不是 `/sys/dict/*`。`/sys/dict/getDictItems/` 需要签名且是系统字典表，大屏不使用 |
 | **SQL 最大返回 1000 条** | 后端限制 |
 | **⚠️ list 接口不返回 datasetItemList/datasetParamList** | `GET /drag/onlDragDatasetHead/list` 返回的记录中 `datasetItemList` 和 `datasetParamList` 始终为空数组，但数据实际已保存。验证方式：调用 `getAllChartData` 检查 `dictOptions` 是否生效 |
+| **⚠️ dataset_ops.py create-sql 参数名必须是 --db-source** | 命令行参数 `--db-source` 对应脚本内部 `args.db_source`（下划线），但脚本内部错误引用了 `args.dbsource`（无下划线）导致 `AttributeError`。**正确做法**：使用自定义脚本直接调用 API 创建数据集，避免依赖 dataset_ops.py 的参数问题。参考代码：
+```python
+# 先获取或创建"示例数据集"分组
+resp = bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup')
+result = resp.get('result')
+parent_id = None
+if isinstance(result, list):
+    for item in result:
+        if item.get('name') == '示例数据集' and item.get('dataType') is None and item.get('dbSource') is None:
+            parent_id = item.get('id')
+            break
+if not parent_id:
+    add_resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup', data={
+        'name': '示例数据集', 'code': 'example_dataset', 'parentId': '0'
+    })
+    parent_id = add_resp.get('result')
+# 创建SQL数据集时设置 parentId
+payload = {
+    'name': '数据集名称', 'code': 'ds_xxx', 'dataType': 'sql',
+    'dbSource': '数据源ID', 'querySql': 'SELECT ...',
+    'parentId': parent_id,  # 关键：设置为示例数据集分组ID
+    'datasetItemList': [...]
+}
+bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=payload)
+``` |
+| **⚠️ SQL数据集必须创建在"示例数据集"分组下（强制流程）** | 创建任意类型数据集时，分组必须使用"示例数据集"（`parentId='1516743332632494082'`），禁止创建在根目录（`parentId='0'`）或其他分组。**流程**：①调用 `GET /drag/onlDragDatasetHead/getAllGroup` 查询分组；②找到 `name='示例数据集'` 且 `dataType is None` 的节点，取其 `id` 作为 `parentId`；③如不存在则调用 `POST /drag/onlDragDatasetHead/addGroup` 创建后再使用；④创建数据集时将 `parentId` 设为分组ID。**本环境固定ID**：`示例数据集 = 1516743332632494082`，可直接硬编码使用。 |
 | **⚠️ 带 FreeMarker 的 SQL 禁止通过 bash 命令行传递** | `${age}` 被 shell 解释为空变量，`<#if>` 中的 `>` 被解释为重定向。**必须用 `--sql-file sql.txt`** 将 SQL 写入文件再传给 comp_ops.py / dataset_ops.py，或写自定义 Python 脚本在代码内部定义 SQL 字符串 |
 | **⚠️ FreeMarker 判空必须用 `isNotEmpty()`** | JimuReport 内置函数 `isNotEmpty(param)` 判断 null 和空字符串均返回 false。正确：`<#if isNotEmpty(age)>`。**错误：`<#if age?? && age?length gt 0>`**（标准 FreeMarker 语法但 JimuReport 不支持，会导致条件不生效） |
 | **⚠️ `${}` 和 `#{}` 不可混用** | `${param}` 是查询参数占位符，`#{sys_user_code}` 是系统变量。混用会导致解析失败 |
 | **⚠️ 数据集字典绑定在 datasetItemList 中** | 字典翻译通过 `datasetItemList[].dictCode` 绑定（如 `'dictCode': 'sex'`），不是在组件 config 中手动构建 `dictOptions`。绑定后 `getAllChartData` 会自动返回 `dictOptions` |
 | **⚠️ 组件 dictOptions 必须从 getAllChartData 获取** | 创建组件时，先调 `getAllChartData` 获取数据集的 `dictOptions`，再写入组件 `config.dictOptions`。手动构建 dictOptions 容易遗漏格式（需包含 value/text/color/label/title 等字段） |
+| **⚠️ 批量绑定数据集：API 端点错误** | 获取数据集字段不能用 `GET /drag/view/getAllChartData`（该接口返回格式不同，`result` 为 None 导致报错）。**必须用 `POST /drag/onlDragDatasetHead/getAllChartData`**，data 传 `{'id': DS_ID}`，从 `result.data[0]` 的 key 推断字段列表 |
+| **⚠️ 批量绑定数据集：dataMapping 格式错误** | `dataMapping` 的 `filed` 字段是**语义槽位标签**（如 `"维度"/"数值"/"分组"`），不是字段名本身。字段名放在 `mapping` 键中。错误：`{"filed":"name","mappingField":"name"}`。正确：`{"filed":"维度","mapping":"name"}` |
+| **⚠️ 批量绑定数据集：缺少 fieldOption** | 不设 `fieldOption` 会导致前端字段选项面板为空，用户无法在设计器中修改字段映射。格式：`[{"label":"name","text":"name","type":"String","value":"name","show":"Y"},...]` |
+| **⚠️ 数据集分组：用 `parentId`，不是 `groupCode`** | 分组节点的特征：`dataType=null`（无 dbSource/querySql）。创建数据集时 `parentId = 分组id`。**正确查询流程**：①`GET /drag/onlDragDatasetHead/getAllGroup`（⚠️ 不是 `/drag/onlDragDatasetGroup/getAllGroup`，后者 404）②该接口返回所有记录，**必须过滤 `dataType=None` 才是分组节点** ③从分组节点中找 `name='示例数据集'` 取其 `id` ④不存在则 `POST /drag/onlDragDatasetHead/addGroup` 创建再重查。`示例数据集` 固定 id = `1516743332632494082` |
+| **⚠️ `getAllGroup` 只返回部分分组（非全量）** | `GET /drag/onlDragDatasetHead/getAllGroup` 无分页但有内部过滤（按租户/权限），可能不返回已存在的分组。不要因为 getAllGroup 里没有就重复 addGroup——否则唯一约束报错。正确：先查，再 addGroup（失败时说明已存在），再通过 `getAllGroup?groupName=xxx` 反查同组数据集的 parentId |
+| **⚠️ SQL 数据集必须在创建后立即测试** | 创建 SQL 数据集后，**必须立即**调 `POST /drag/onlDragDatasetHead/getAllChartData`（data: `{'id': DS_ID}`）验证 SQL 可执行。若返回 `success=false` 或 `message` 含 `bad SQL grammar`，立刻停止生成图表并报错，否则所有绑定该数据集的图表都会显示"暂无数据" |
+| **⚠️ API 数据集创建后必须调 getAllChartData 触发查询解析** | `POST /drag/onlDragDatasetHead/add` 仅保存元数据配置，**不会**触发系统对接口响应的解析。必须随后调 `POST /drag/onlDragDatasetHead/getAllChartData`（data: `{'id': DS_ID}`）触发一次查询解析，系统才能缓存字段 schema。跳过此步导致：图表绑定后显示"暂无数据"、设计器字段面板为空、dataMapping 无法生效。**在 `create_api_dataset()` 函数末尾必须加此调用**：`bi_utils._request('POST', '/drag/onlDragDatasetHead/getAllChartData', data={'id': ds_id})` |
+| **⚠️ API 数据集 getAllChartData 必须 try/except 包裹（后端未重启时返回 null）** | 自写 Java 接口需要重启后端才能访问。在重启前调 `getAllChartData` 时，接口 404/500 导致响应为 `{"result": {"data": null}}`。**必须用 try/except 包裹，失败时打印提示并继续，不能让脚本崩溃**。正确模式：`try: parse_r = bi_utils._request(...); rows = ((parse_r.get('result') or {}).get('data') or []); print(f'解析: {len(rows)} 条') except Exception as e: print(f'解析跳过({e})，后端重启后自动生效')`。**绝对不能让 getAllChartData 失败阻断整个脚本执行** |
+| **⚠️ API 数据集 onlDragDatasetItemList 已在 /add 时传入，禁止再 queryById + edit 回写（浪费 4 个请求）** | 创建 API 数据集时 `/add` 请求体已包含 `onlDragDatasetItemList`，字段已一次性保存到数据库。**禁止**再做 `queryById` → 填 `onlDragDatasetItemList` → `edit` 这三步回写——这是完全多余的操作，浪费 4 个 HTTP 请求（2个数据集 × 2次请求），且在后端未重启时还会因 getAllChartData 返回空而得到无意义的字段列表。正确做法：`/add` 时一次性传字段，随后只做 `getAllChartData`（try/except 包裹）即可 |
+| **⚠️ JeecgBoot 大屏记录表名是 `jmreport_big_screen`，不是 `drag_page`** | `drag_page` 表在默认 jeecgbootsy 库中不存在。统计大屏创建情况时正确表名为 `jmreport_big_screen`（字段含 `screen_name`、`create_time`、`type` 等）。另：`onl_drag_page` 是 drag 模块的新页面表（存在，216+条记录），两个表用途不同 |
+| **⚠️ 批量绑定数据集：缺少必要字段** | 完整绑定配置除 `dataType/dataSetId/dataMapping/fieldOption` 外，还需要：`dataSetName`（设计器显示用）、`dataSetType`（`"sql"`）、`dataSetApi`（querySql）、`dataSetMethod`（`"get"`）、`dataSetIzAgent`（`"1"`）、`paramOption`（`[]`）、`viewLoading`（`True`）、`chartData`（`"[]"`）。缺少任一字段均可能导致绑定在设计器中显示异常 |
+| **⚠️ dataMapping 槽位标签必须从项目源码获取** | `dataMapping.filed` 的值必须是**项目源码中定义的语义槽位标签**，严禁自行创建不存在的标签（如 `"数值2"`、`"分组2"`）。源码位置：`references/core-configs/data.ts`。常见正确标签：`维度`、`数值`、`分组`、`总计`、`已用`、`名称`、`起点名称`、`终点名称`、`内容`、`数值1`、`数值2`、`总量`、`当前`。具体映射规则见下方「组件 dataMapping 槽位配置速查表」 |
+| **⚠️ 双轴图（DoubleLineBar）的 slot_labels 是 `['分组','维度','数值']`** | 经源码验证，DoubleLineBar 的 dataMapping 是 `['分组','维度','数值']`（不是 `['维度','数值','数值2']`）。数据中 type 字段映射到"分组"，name 映射到"维度"，value 映射到"数值" |
+| **⚠️ 不同图表类型有不同的 slot_labels** | 批量生成全组件时，每个组件类型的 dataMapping 槽位数量和标签不同。单系列图表（维度+数值）≠ 多系列图表（分组+维度+数值）。**必须为每个组件单独设置 dataMapping**，禁止全局统一配置 |
+| **组件 dataMapping 槽位配置速查表** | 源码文件：`packages/dragEngine/components/bigScreenComponents/data.ts`。单系列（2槽位）：`['维度','数值']` → JBar/JPie/JLine/JArea/JSmoothLine/JStepLine/JFunnel/JRadar/JRing 等；多系列（3槽位）：`['分组','维度','数值']` → JStackBar/JMultipleBar/JNegativeBar/JPercentBar/JMixLineBar/JMultipleLine/DoubleLineBar/JBubble/JBarGroup3d；仪表盘：`['总计','已用']` → JGauge/JColorGauge/JAntvGauge/JSemiGauge；表格列表：`['名称','数值']` → JScrollBoard/JScrollTable/JCommonTable/JList/JScrollRankingBoard；翻牌器：`['数值']` → JCountTo；颜色块：`['数值']` → JColorBlock |
+| **⚠️ `dataset_ops.py create-api` 必填 `--code`** | 文档未提及，但 `--code` 是必填参数（数据集唯一编码，如 `mock_monthly_orders`），漏传直接报 usage 错误 |
+| **⚠️ `dataset_ops.py create-api` 不支持 `--data-path`** | 该命令无 `--data-path` 参数，无法配置 JSON 提取路径。若接口返回包装格式 `{"code":200,"result":[...]}` 则 `dataset test` 显示 `data: null` |
+| **⚠️ API 数据集接口必须返回裸数组** | API 接口应直接返回 JSON 数组（如 `[{"name":"1月","value":320},...]`），**不要包装成** `{"code":200,"result":[...]}` 格式。包装格式需要配置 data-path 才能解析，而该工具不支持此参数。Java 接口返回类型写 `String`，直接 `return "[{...}]"` 最简单 |
+| **⚠️ `datasource_ops.py create` 示例命令必须含 `--code`** | pitfalls.md 有记录但 SKILL.md 示例未展示，实际运行时必须提供。完整示例：`py datasource_ops.py create $API_BASE $TOKEN --name "名称" --code "唯一编码" --db-type MYSQL5.7 --host 127.0.0.1 --port 3306 --db dbname --user root --password root` |
+
+## 文件数据集相关（singleFile / FILES）
+
+| 问题 | 说明 |
+|------|------|
+| **⚠️ 文件数据集 `dbSource` 含义完全不同** | 文件数据集（FILES/singleFile）的 `dbSource` 是**大屏页面 ID（reportId）**，不是 SQL 数据源 ID，**也不是上传接口返回的文件记录 `id`**。填成文件记录 `id` 同样报"数据源不存在" |
+| **⚠️ 解析接口必须用 `queryFileFieldBySql`** | 文件数据集字段解析必须调 `POST /drag/onlDragDatasetHead/queryFileFieldBySql`，**不是** `/queryFieldBySql`。用后者会因找不到对应 SQL 数据库连接而报错 |
+| **⚠️ SQL 表名 = 文件名（含扩展名）** | 文件名即虚拟表名，必须写完整扩展名：`SELECT * FROM employees.xlsx`，写 `FROM employees` 会报表不存在 |
+| **⚠️ FILES 类型不在前端 dataType 下拉中** | 前端 dataType 选择器只有 sql/api/json/websocket 四项，FILES 需通过 `showModal(id, pid, 'FILES')` 明确传入。直接 API 创建时 `dataType` 传字符串 `'FILES'` |
+| **⚠️ `getAllChartData` 文件数据集支持传 `dataMapping`** | 文件数据集的 `getAllChartData` 请求体中额外的 `dataMapping` 字段会被传入 `getFileData()`，影响字段映射；SQL/API/JSON 数据集忽略此字段 |
+| **⚠️ 删除文件前必须检查引用** | 直接删除文件数据库中的文件可能导致现有数据集查询失败。必须先调 `GET /drag/onlDragDatasetHead/getDbSetByCodeAndDb?code=filename&dbSource=fileDbId` 确认无引用后再删 |
+| **singleFile vs FILES 区别** | `singleFile` 关联单个文件（一张虚拟表）；`FILES` 关联多文件（多张虚拟表），SQL 可跨文件 JOIN。后端两者都路由到 `getFileData()` 处理 |
+| **`queryFileFieldBySql` 参数结构** | body 参数：`{sql: 'SELECT ...', dbCode: 'FILE_DB_ID', paramArray: '[]'}`，`dbCode` 传的是文件数据库 ID（非 SQL 数据源 ID） |
+| **文件列表从 `dbUrl` 字段解析** | `getFileDbById(reportId)` 返回的 `result.dbUrl` 是 JSON 字符串，需 `JSON.parse()` 后得到文件数组 |
+| **组件 dataSetIzAgent 文件数据集用 `'1'`** | 文件数据集走后端代理（与 SQL 数据集一样），`dataSetIzAgent` 设为 `'1'` |
+| **⚠️ singleFile 数据集 `code` 必须等于上传返回的实际表名（核心坑）** | Calcite 引擎将数据集 `code` 直接用作 FROM 子句的虚拟表名（`FROM {code}`）。若 `code` 是自定义字符串（如 `ds_file_default_xxx`），Calcite 找不到对应表，图表渲染报错。**创建时必须从上传接口返回的 `dbUrl[0].name` 中取值赋给 `code`**（格式：`jmf.{SheetName}_{文件名去后缀}_excel`，如 `jmf.Sheet1_default_excel`）。`querySql` 保持 `select * from {tableName}` 即可，不影响 FROM 子句构建 |
+| **⚠️ 文件上传接口三要素缺一不可** | `POST /jmreport/source/datasource/files/add` 必须同时传：`reportId`=大屏页面ID、`isSingle`=true（单文件）、`file`=文件内容（multipart）。**必须用 `requests.post(..., files=...)` 直接调用，不能用 `bi_utils._request()`**（后者无 `files` 参数，调用报 `TypeError: _request() got an unexpected keyword argument 'files'`）。正确写法：`requests.post(f'{API_BASE}/jmreport/source/datasource/files/add', headers={'X-Access-Token': TOKEN}, params={'reportId': PAGE_ID, 'isSingle': 'true'}, files={'file': (filename, file_data, 'application/octet-stream')})` |
+| **⚠️ 上传响应中表名必须从 `result.dbUrl` 解析，不是 `result.tableName`（2026-04-09实测）** | `/jmreport/source/datasource/files/add` 上传成功后，响应 `result` 是文件数据源记录对象，**不含 `tableName` 字段**。实际表名（带 `jmf.` 前缀）在 `result.dbUrl` 中以 JSON 字符串存储：`"[{\"fileName\":\"xxx.xls\",\"name\":\"jmf.Sheet1_xxx_excel\"}]"`。**正确提取方式**：`import json; db_url_items = json.loads(result.get("dbUrl","[]")); table_name = db_url_items[0].get("name") if db_url_items else None`。错误方式：`result.get("tableName")` / `result.get("table")` / `result.get("code")` → 全为 None → 猜出的表名缺少 `jmf.` 前缀 → `getAllChartData` 返回0行 |
+| **⚠️ singleFile SQL 表名必须含 `jmf.` Schema 前缀** | `querySql` 必须写 `select * from jmf.Sheet1_default_excel`，**不能**写 `select * from Sheet1_default_excel`（无前缀）。无 `jmf.` 前缀时 Calcite 找不到虚拟表，`getAllChartData` 返回0行，`fields_meta` 为空，饼状图字段映射为默认 name/value 无法展示真实数据。同时 `code` 字段也应设为含 `jmf.` 前缀的全名 |
+| **⚠️ singleFile `dataSetIzAgent` 必须是空字符串 `''`，不是 `'1'`** | FILES 多文件数据集用 `'1'`；singleFile 单文件数据集必须用空字符串 `''`（空字符串，不是 `'0'`/`'1'`/`None`）。用错会导致前端代理判断错误，图表无法正确加载数据。来源：SKILL.md「单文件数据集创建标准流程」条目（2026-04-09实测）|
+| **⚠️ comp_ops.py 参数顺序：子命令在前，API_BASE/TOKEN/PAGE_ID 随后** | 正确：`py comp_ops.py add API_BASE TOKEN PAGE_ID --comp JPie ...`；错误：`py comp_ops.py API_BASE TOKEN PAGE_ID add --comp JPie ...`。颠倒顺序时 argparse 把 API_BASE URL 当作 subcommand 解析，报 `argument command: invalid choice: 'http://...'`（2026-04-09 实测） |
+| **⚠️ 自定义脚本内 subprocess 调用其他脚本禁止使用 `/c/Users/...` Unix 路径** | Python subprocess 在 Windows 下不经过 Git Bash 路径转换，`/c/Users/25067/.../comp_ops.py` 被直接拼成 `C:\c\Users\25067\...`，报 `can't open file ... No such file or directory`。正确做法：提前 `cp` 目标脚本到当前工作目录，subprocess 直接用脚本文件名调用，无需绝对路径（2026-04-09 实测） |
 
 ## 组件相关
 
 | 问题 | 说明 |
 |------|------|
 | **⚠️ 严禁直接用 bi_utils.add_xxx + save_page** | `add_component` 内部初始化空列表 `_page_components[page_id] = []`，不会加载已有组件。`save_page` 会用这个空列表+新组件覆盖整个页面，**导致已有组件全部丢失**。必须用 `comp_ops.py add` 或手动先执行 `bi_utils._page_components[PAGE_ID] = page.get('template', [])` |
+| **⚠️ 批量添加多组件到现有页面的安全模式** | 需要一次性添加多个组件且只保存一次时，正确顺序：①`page = bi_utils.query_page(PAGE_ID)` ②`bi_utils._page_components[PAGE_ID] = page.get('template', [])` ③循环调 `bi_utils.add_component(...)` ④最后 `bi_utils.save_page(PAGE_ID)`。跳过步骤②会导致已有组件被清空 |
 | **添加组件必须用 comp_ops.py add** | comp_ops.py 在 cmd_add 中会先 `load_template` 再赋值 `_page_components`，安全保留已有组件。直接调 bi_utils 函数是危险操作 |
 | **新增组件不显示** | config 不完整或被背景图遮挡，将新组件 `insert(0, ...)` 到数组开头 |
 | **comp_ops.py add 渲染失败** | 缺少 `default_configs.json`，使用 add 时必须同时复制 |
@@ -69,6 +164,79 @@
 | **联动 linkageId 必须精确** | 值是目标组件的 `i` 字段（UUID） |
 | **source 字段来自 ECharts params** | `name`/`value`/`type` 对应 ECharts 点击事件 params |
 | **多系列 chartData 格式** | 需要 `type` 字段：`[{"name":"1月","value":10,"type":"系列A"}]` |
+| **⚠️ 替换图表类型时共通配置未继承** | delete+add 替换图表类型时，仅继承数据集绑定字段（dataSetId/dataMapping 等）是不够的。用户在旧图表中定制的 `option` 字段（标题文字、坐标轴显隐、图例位置、配色等）也必须合并到新图表。使用 `merge_common_option()` 辅助函数，见下方「图表类型替换」章节 |
+| **⚠️ JBar 柱体颜色：`option.color[0]` 不生效，必须同时改 `series[0].itemStyle.color`** | ECharts 中 `series[0].itemStyle.color` 的优先级高于 `option.color` 数组。JBar 默认配置中 `itemStyle.color` 硬编码了蓝色（`#64b5f6`），仅设置 `option.color[0]` 无法覆盖柱体颜色。**正确做法**：必须同时设置两个字段：`--set "option.color[0]=目标色" --set "option.series[0].itemStyle.color=目标色"`（2026-04-09 实测） |
+
+### 图表类型替换（更换图表种类时保留共通配置）
+
+**问题**：将基础柱形图换成基础折线图时，原图表中用户定制的标题文字、X轴显隐、图例位置等共通配置项未被保留，新图表展示默认配置。
+
+**原因**：替换时直接从 `default_configs.json` 加载新图表的默认 option，没有将旧图表 option 中的共通字段合并过来。
+
+**fix：merge_common_option 辅助函数（替换场景必用）**
+
+```python
+import copy
+
+# 可安全跨图表类型继承的 option 字段（跳过 series，series.type 是图表类型专属）
+COMMON_OPTION_KEYS = ['title', 'xAxis', 'yAxis', 'legend', 'grid', 'color', 'tooltip', 'backgroundColor']
+
+def merge_common_option(old_opt, new_opt):
+    """将旧图表 option 的共通字段合并到新图表 option（以旧值覆盖新值中的同名字段）"""
+    if not isinstance(old_opt, dict) or not isinstance(new_opt, dict):
+        return new_opt
+    result = copy.deepcopy(new_opt)
+    for key in COMMON_OPTION_KEYS:
+        if key not in old_opt or key not in result:
+            continue
+        old_val = old_opt[key]
+        new_val = result[key]
+        if isinstance(old_val, dict) and isinstance(new_val, dict):
+            # dict 字段：以旧值更新新值（保留新图表特有字段）
+            merged = copy.deepcopy(new_val)
+            merged.update(old_val)
+            result[key] = merged
+        else:
+            # 非 dict（如 color 数组、backgroundColor 字符串）：直接替换
+            result[key] = copy.deepcopy(old_val)
+    return result
+```
+
+**完整替换流程（正确模式）：**
+
+```python
+# 1. 获取旧图表 option
+bar_cfg = json.loads(bar_cfg_raw) if isinstance(bar_cfg_raw, str) else bar_cfg_raw
+old_opt = bar_cfg.get('option', {})
+if isinstance(old_opt, str):
+    try: old_opt = json.loads(old_opt)
+    except: old_opt = {}
+
+# 2. 加载新图表 defaults
+line_cfg = json.loads(json.dumps(defaults.get('JLine', {})))
+new_opt = line_cfg.get('option', {})
+if isinstance(new_opt, str):
+    try: new_opt = json.loads(new_opt)
+    except: new_opt = {}
+
+# 3. 合并共通配置（核心步骤，不可省略）
+line_cfg['option'] = merge_common_option(old_opt, new_opt)
+```
+
+**典型继承场景：**
+
+| 字段 | 说明 |
+|------|------|
+| `option.title.text` | 用户改过的标题文字 |
+| `option.title.show` | 是否显示标题 |
+| `option.xAxis.show` | X 轴显隐 |
+| `option.yAxis.show` | Y 轴显隐 |
+| `option.legend.show` | 图例显隐 |
+| `option.color` | 自定义配色方案 |
+| `option.grid` | 图表内边距 |
+| `option.tooltip` | 悬浮提示配置 |
+
+**严禁继承的字段：** `series`（图表类型专属，继承会导致折线图渲染为柱形图）
 
 ## 模板相关
 
@@ -82,9 +250,16 @@
 
 | 问题 | 说明 |
 |------|------|
-| **datasource_ops.py create 参数名** | `--db`（不是 `--db-name`），`--user`（不是 `--username`） |
+| **datasource_ops.py create 参数名** | `--db`（不是 `--db-name`），`--user`（不是 `--username`），`--host`/`--port`/`--db` 分开传（不能合并为 `host:port/dbname`） |
+| **datasource_ops.py create --db-type 枚举值** | 必须从 `MYSQL5.7`/`MYSQL5.5`/`ORACLE`/`SQLSERVER`/`POSTGRESQL`/`es`/`redis`/`mongodb` 中选，全部大写，用 `mysql` 会报 `invalid choice` |
 | **datasource_ops.py test 不支持 --name** | 只能用 `--id` 或直接传连接参数（`--db-type --host --port --db --user --password`） |
 | **datasource_ops.py 创建+测试不能链式执行** | test 不支持按名称查找，创建后需用连接参数重复传递来测试 |
+| **⚠️ `response.get('result', {})` 返回 None 陷阱** | Python 的 `.get(key, default)` 只在 key **不存在**时才返回 default；当 JSON 响应中 `"result": null` 时，`.get('result', {})` 返回 `None` 而非 `{}`，导致后续 `.get(...)` 报 `AttributeError: 'NoneType' has no attribute 'get'`。**正确写法**：`result = response.get('result') or {}`（None 和不存在均安全）。注意：`add_r.get('result', {}).get('groupCode', '')` 是典型错误模式 |
+| **⚠️ `.get('data', [])` 默认值对 null 值无效（TypeError: NoneType has no len）** | `.get(key, default)` 的 default 只在 key **不存在**时生效；当响应为 `{"result": {"data": null}}` 时，`result` 是一个 dict（非 None），`or {}` 不触发，`.get('data', [])` 返回 `None`（key 存在但值为 null），后续 `len(rows)` 报 `TypeError: object of type 'NoneType' has no len()`。**这是比 result=null 更隐蔽的陷阱**。正确写法：在链末加 `or []`：`rows = ((resp.get('result') or {}).get('data') or [])`。适用于所有可能返回 `{"data": null}` 的嵌套响应字段，如 `getAllChartData`、`queryById` 等 |
+| **⚠️ cp 依赖文件必须用绝对目标路径，严禁 `.`（强制）** | `cp ... bi_utils.py .` 中 `.` 依赖 shell 启动目录，Git Bash 下不可靠，文件会复制到意外位置，导致 `py script.py` 报 `ModuleNotFoundError: No module named 'bi_utils'`，引发 3 轮额外调用。**强制规范（违反此规则是严重错误）**：目标路径必须写绝对路径：`cp "...bi_utils.py" "C:/Users/25067/" && cp "...default_configs.json" "C:/Users/25067/" && ls "C:/Users/25067/bi_utils.py" "C:/Users/25067/default_configs.json"`，脚本也必须写到同一目录：`Write file_path=C:/Users/25067/script.py`，执行时：`cd "C:/Users/25067" && py script.py` |
+| **⚠️ 并行 Bash+Write 时 Bash 失败会取消 Write** | 同一轮中 Bash 和 Write 并行执行，若 Bash 报错，Write 工具调用也会被取消（`Cancelled: parallel tool call...errored`）。需要将 cp（依赖） 和 Write（脚本文件）分开两轮，或在 cp 成功后再 Write |
+| **⚠️ information_schema 被 SQL 注入保护拦截** | 大屏系统对数据集 SQL 做注入检测，`information_schema`/`SHOW TABLES` 等 DDL/元数据查询会触发 `操作失败，请注意，值可能存在SQL注入风险`。**无法通过 BI 系统的数据集接口查表结构**，只能用 trial-and-error：对已知候选表名逐一执行 `SELECT COUNT(*) FROM table LIMIT 1` 判断表是否存在 |
+| **⚠️ JeecgBoot 大屏常见表名候选列表** | 当 SQL 报 `bad SQL grammar` 时，按以下优先级试：① `jmreport_big_screen`（大屏页面，JimuReport 历史版本）② `onl_drag_page`（drag 模块新版本）③ `drag_page`（不存在）。`jmreport_big_screen` 字段：`screen_name, create_time, type, status, tenant_id` 等 |
 
 ## bi_utils 内部结构相关
 
@@ -106,9 +281,240 @@
 | **Git Bash `!` 转义** | SQL 中 `!=` 变成 `\!=`。必须用 Python 脚本传递 SQL |
 | **⚠️ Git Bash shell 变量传递给 py 脚本为空** | `API_BASE="http://..." && py script.py "$API_BASE"` 变量可能为空（尤其含特殊字符的长 JWT token）。**必须直接内联字面值**：`py script.py "http://..." "eyJ..."` |
 | **⚠️ comp_ops.py list 中文乱码** | Git Bash 终端默认编码非 UTF-8，`comp_ops.py list` 输出的中文组件名全部乱码。**解决方案：不要单独调 list 查看名称，直接在自定义 Python 脚本中用 `query_page()` + `json.dumps(ensure_ascii=False)` 输出，或用 `py -X utf8` 执行** |
+| **⚠️ Git Bash 下 cp 目标路径必须用 `/c/Users/` 格式（2026-04-09 实测）** | `cp "C:/Users/25067/.../bi_utils.py" "C:/Users/25067/"` 在 Git Bash 中**静默成功但文件实际不存在**——`cp` 无报错、`ls` 命令也看似通过，但随后 `py script.py` 报 `No such file or directory` 或 `ModuleNotFoundError`。**必须用 Unix 格式路径**：`cp "/c/Users/25067/.../bi_utils.py" "/c/Users/25067/bi_utils.py"`。同理：`ls /c/Users/25067/bi_utils.py` 验证（不是 `ls C:/Users/25067/bi_utils.py`）。这一个错误会导致额外 2-3 轮修复调用。 |
 | **签名验证失败：时间戳为空** | 需要 `X-TIMESTAMP` + `X-Sign` + `V-Sign`，见 `signing-datasource-guide.md` |
 | **HTTPS 连接问题** | api3.boot.jeecg.com 使用 HTTP 协议 |
 | **后端项目目录不存在** | bi_utils.py 复制到当前工作目录 |
+
+---
+
+## 完整工作流：自写API接口 + API数据集 + 批量图表（标准流程）
+
+> 适用场景：用户想用自己写的后端 API 接口作为大屏数据来源，并批量生成多个图表
+
+### Step 1：询问三个关键信息（开始前必须问）
+
+> **⚠️ 严禁用 find/Glob/Grep/Bash 自行搜索 Controller 文件路径**（路径未知时必须询问用户，不得自行探索文件系统）
+
+1. **接口写在哪个文件？**（Java Controller 完整路径，**必须直接问用户**）
+2. **接口展示什么数据？**（业务含义，如"访客流量"、"每月销售额"）
+3. **需要几个接口？**（单系列 / 多系列 / 双轴 → 影响字段设计和 dataMapping）
+
+**已知 Controller 路径（可直接使用，无需询问）：**
+- Mock 接口：`D:\jeecgboot2025\jeecg-boot-framework\jeecg-boot-platform\jeecg-boot-module-drag\src\main\java\org\jeecg\modules\drag\controller\OnlDragMockController.java`
+  - 已有接口：`/drag/mock/visitorFlow`（单系列）、`/drag/mock/visitorFlowMulti`（多系列）、`/drag/mock/salesFlowDouble`（双轴）等
+
+### Step 2：编写 Java 接口
+
+**关键规则（强制）：**
+- 返回类型必须是 `String`，直接返回裸 JSON 数组字符串
+- **严禁包装格式**（不要 `{"code":200,"result":[...]}`，API 数据集无法配置 data-path）
+- 必须加 `@JimuNoLoginRequired` 注解，否则大屏预览时被鉴权拦截 401
+- 写完接口后**必须重启后端**，API 数据集才能拿到数据
+
+**单系列模板**（适用：折线图/柱形图/饼图/面积图等）：
+```java
+// 数据字段：name=维度, value=数值
+@JimuNoLoginRequired
+@RequestMapping(value = "/xxxFlow", method = RequestMethod.GET)
+public String getXxxFlow() {
+    return "[{\"name\":\"1月\",\"value\":1280},{\"name\":\"2月\",\"value\":1050},...{\"name\":\"12月\",\"value\":3120}]";
+}
+```
+
+**多系列模板**（适用：对比折线图、分组柱形图，+ type 字段）：
+```java
+// 数据字段：name=维度, value=数值, type=分组（一组数据重复 N 次，每次 type 不同）
+@JimuNoLoginRequired
+@RequestMapping(value = "/xxxFlowMulti", method = RequestMethod.GET)
+public String getXxxFlowMulti() {
+    return "["
+        // 线上渠道（12条）
+        + "{\"name\":\"1月\",\"value\":680,\"value2\":68,\"type\":\"线上\"},"
+        // ... 线下渠道（12条）
+        + "{\"name\":\"1月\",\"value\":380,\"value2\":45,\"type\":\"线下\"},"
+        // ... APP渠道（12条）
+        + "{\"name\":\"1月\",\"value\":220,\"value2\":35,\"type\":\"APP\"},"
+        // ...
+        + "{\"name\":\"12月\",\"value\":350,\"value2\":62,\"type\":\"APP\"}"
+        + "]";
+}
+```
+
+> `value2` 字段可选，同时支持双轴图（双 Y 轴）；`type` 字段用于多系列分组
+
+**接口 URL 规律**：`http://{host}:{port}/jeecg-boot/drag/mock/{methodPath}`
+
+### Step 3：在自定义 Python 脚本中创建 API 数据集
+
+> **用自定义脚本（不是 dataset_ops.py）**，原因：dataset_ops.py create-api 的 `--code` 为必填，且 1 次只能创建 1 个数据集；自定义脚本可一次创建多个并获取 ID 用于后续绑定
+
+```python
+def get_dataset_group_id(group_name='示例数据集'):
+    """
+    ⚠️ 正确端点是 /drag/onlDragDatasetHead/getAllGroup（不是 /drag/onlDragDatasetGroup/getAllGroup，后者 404）
+    ⚠️ 该接口返回所有记录（含数据集和分组），必须过滤 dataType=None 才是分组节点
+    ⚠️ 示例数据集固定 id = 1516743332632494082
+    """
+    r = bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup')
+    all_records = (r.get('result') or [])
+    # 分组节点特征：dataType is None
+    groups = [x for x in all_records if x.get('dataType') is None]
+    grp = next((g for g in groups if g.get('name') == group_name), None)
+    if grp:
+        return grp['id']
+    # 尝试创建（用 addGroup，不是 /drag/onlDragDatasetGroup/add）
+    add_r = bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup',
+                               data={'name': group_name})
+    r2 = bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup')
+    groups2 = [x for x in (r2.get('result') or []) if x.get('dataType') is None]
+    grp2 = next((g for g in groups2 if g.get('name') == group_name), None)
+    return grp2['id'] if grp2 else '0'
+
+def create_api_dataset(name, api_url, fields):
+    # 先查是否已存在（幂等）
+    resp = bi_utils._request('GET', '/drag/onlDragDatasetHead/list', params={'pageNo': 1, 'pageSize': 200})
+    records = (resp.get('result') or {}).get('records', [])
+    existing = next((r for r in records if r.get('name') == name), None)
+    if existing:
+        return existing['id']
+
+    # ⚠️ 正确字段是 parentId（不是 groupCode），值为分组节点的 id
+    group_id = get_dataset_group_id('示例数据集')
+
+    body = {
+        "name": name,
+        "dataType": "api",        # ⚠️ 字符串 'api'，不是数字
+        "querySql": api_url,      # ⚠️ URL 存在 querySql 字段，没有独立 url 字段
+        "apiMethod": "get",
+        "parentId": group_id,     # ⚠️ 用 parentId 不是 groupCode
+        "onlDragDatasetItemList": fields   # ⚠️ 创建时用 onlDragDatasetItemList
+    }
+    result = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=body)
+    r = (result.get('result') or {})
+    # ⚠️ 返回值二义性：result 可能是 dict{id:...} 也可能是 id 字符串
+    return r.get('id') if isinstance(r, dict) else r
+```
+
+**字段定义示例：**
+```python
+single_fields = [
+    {"fieldName": "name",   "fieldTxt": "月份",  "fieldType": "String",  "izShow": "Y"},
+    {"fieldName": "value",  "fieldTxt": "访客量", "fieldType": "Integer", "izShow": "Y"},
+]
+multi_fields = [
+    {"fieldName": "name",   "fieldTxt": "月份",  "fieldType": "String",  "izShow": "Y"},
+    {"fieldName": "value",  "fieldTxt": "访客量", "fieldType": "Integer", "izShow": "Y"},
+    {"fieldName": "value2", "fieldTxt": "转化率", "fieldType": "Integer", "izShow": "Y"},
+    {"fieldName": "type",   "fieldTxt": "渠道",  "fieldType": "String",  "izShow": "Y"},
+]
+```
+
+### Step 4：构建 dataMapping（不同图表类型 slot labels 不同）
+
+```python
+def make_ds_config(ds_id, ds_name, api_url, fields, slot_labels):
+    return {
+        'dataType': 2,              # 数据集模式
+        'dataSetId': ds_id,
+        'dataSetName': ds_name,
+        'dataSetType': 'api',
+        'dataSetApi': api_url,
+        'dataSetMethod': 'get',
+        'dataSetIzAgent': '1',
+        'chartData': '[]',
+        'viewLoading': True,
+        'paramOption': [],
+        # ⚠️ filed 是语义槽位标签（不是字段名！），mapping 才是字段名
+        'dataMapping': [
+            {'filed': slot_labels[i] if i < len(slot_labels) else f'字段{i}', 'mapping': f['fieldName']}
+            for i, f in enumerate(fields[:len(slot_labels)])
+        ],
+        # ⚠️ fieldOption 必须设置，否则设计器字段选项面板为空
+        'fieldOption': [
+            {'label': f['fieldName'], 'text': f.get('fieldTxt', f['fieldName']),
+             'type': f.get('fieldType', 'String'), 'value': f['fieldName'], 'show': f.get('izShow', 'Y')}
+            for f in fields
+        ],
+    }
+
+# ⚠️ 不同图表类型的 slot labels（必须按此对应，否则绑定后无数据）
+single_cfg = make_ds_config(..., slot_labels=['维度', '数值'])           # JLine/JSmoothLine/JArea/JStepLine
+multi_cfg  = make_ds_config(..., slot_labels=['维度', '数值', '分组'])   # JMultipleLine（对比折线图）
+double_cfg = make_ds_config(..., slot_labels=['维度', '数值', '数值2'])  # DoubleLineBar（双轴图）
+```
+
+### Step 5：批量添加图表（自定义脚本，1次保存）
+
+> **必须先加载已有页面组件，再追加新组件**，否则已有组件全部丢失
+
+```python
+# ⚠️ 关键：先加载已有组件到 _page_components，再调 add_component（不初始化为空）
+page = bi_utils.query_page(PAGE_ID)
+bi_utils._page_components[PAGE_ID] = page.get('template', [])
+
+charts = [
+    ('JLine',         '基础折线图', single_cfg),
+    ('JSmoothLine',   '平滑曲线图', single_cfg),
+    ('JStepLine',     '阶梯折线图', single_cfg),
+    ('JArea',         '面积图',     single_cfg),
+    ('JMultipleLine', '对比折线图', multi_cfg),
+    ('DoubleLineBar', '双轴图',     double_cfg),
+]
+COLS, W, H, MARGIN = 2, 900, 380, 20
+for idx, (comp_type, name, ds_cfg) in enumerate(charts):
+    x = 20 + (idx % COLS) * (W + MARGIN)
+    y = 20 + (idx // COLS) * (H + MARGIN)
+    cfg = json.loads(json.dumps(defaults.get(comp_type, {})))
+    cfg.pop('w', None); cfg.pop('h', None)
+    cfg['background'] = '#FFFFFF00'; cfg['borderColor'] = '#FFFFFF00'
+    # ⚠️ option.title 可能是 str，需检查类型后转为 dict
+    opt = cfg.get('option', {})
+    if isinstance(opt, str): opt = json.loads(opt); cfg['option'] = opt
+    t = opt.get('title')
+    if isinstance(t, str): opt['title'] = {'text': name, 'show': True}
+    elif isinstance(t, dict): t['text'] = name
+    else: opt['title'] = {'text': name, 'show': True}
+    cfg.update(copy.deepcopy(ds_cfg))
+    if not isinstance(cfg.get('chartData', '[]'), str):
+        cfg['chartData'] = json.dumps(cfg['chartData'], ensure_ascii=False)
+    bi_utils.add_component(PAGE_ID, comp_type, name, x, y, W, H, cfg)
+
+bi_utils.save_page(PAGE_ID)
+```
+
+### Step 6：脚本末尾必须输出接口地址和重启提示（强制）
+
+> **每次写完 Java 接口后，必须在脚本末尾打印接口地址和重启提示，让用户知道下一步操作**
+
+```python
+# ── 最后输出 ─────────────────────────────────────────────────────────────────
+print("\n" + "="*60)
+print("✅ 大屏组件已生成完成！")
+print("="*60)
+print("\n📌 已写入的 API 接口地址（需重启后端后生效）：")
+print(f"  单系列：{API_BASE}/drag/mock/visitorFlow")
+print(f"  多系列：{API_BASE}/drag/mock/visitorFlowMulti")
+print("\n⚠️  请重启 Spring Boot 后端服务，接口才能生效！")
+print("   重启后 API 数据集将自动拉取数据，图表即可显示。")
+print("\n🔗 大屏预览地址：")
+print(f"   {API_BASE}/drag/share/view/{PAGE_ID}?token={TOKEN}&tenantId=2")
+print("="*60)
+```
+
+### 踩坑速查
+
+| 步骤 | 常见问题 | 解决方案 |
+|------|---------|---------|
+| Step 2 | Java 接口返回 `JSONObject`/`Result<T>`（包装格式） | 改为返回 `String`，直接拼裸 JSON 数组字符串 |
+| Step 2 | 大屏访问接口 401 | 加 `@JimuNoLoginRequired` 注解 |
+| Step 3 | `dataset_ops.py create-api` 的 `--code` 漏传 | 改用自定义 Python 脚本，或补加 `--code "唯一编码"` |
+| Step 3 | `dataType` 填了数字（如 3） | 必须是字符串 `'api'`，不是整数 |
+| Step 3 | 返回值取 ID 报错 | 兼容两种格式：`r.get('id') if isinstance(r, dict) else r` |
+| Step 4 | 图表绑定后显示"暂无数据" | 检查 slot_labels 是否与图表类型匹配；确认服务已重启 |
+| Step 4 | `option.title` 是 str 类型报 TypeError | `if isinstance(t, str): opt['title'] = {'text': name, 'show': True}` |
+| Step 5 | 已有组件被清空 | 必须先 `bi_utils._page_components[PAGE_ID] = page.get('template') or []`（注意用 `or []` 而非 `get('template', [])`，因为 template 字段存在但值为 null 时 `get(..., [])` 仍返回 None） |
+| Step 6 | 用户不知道下一步操作 | 脚本末尾必须打印接口地址 + 重启提示 + 预览地址 |
 
 ## 页面配置相关
 
@@ -127,3 +533,516 @@
 | **addMapData 的 name 格式** | 存储 adcode（`"650000"`），不是中文名 |
 | **china 地图不走后端** | 前端内置，不需要上传 |
 | **area.value 是数组** | `["650000"]`，取最后一个元素 |
+
+## 完整工作流：YApi Mock 系统创建 API 数据集（标准流程）
+
+> 适用场景：用户选择使用 mock 系统（YApi）来提供大屏数据，而非自写后端接口。
+> YApi 是 API 管理 + Mock 服务，可在线配置接口返回数据，无需重启后端。
+
+### Step 1：询问两个关键信息（开始前必须问）
+
+1. **mock 系统访问地址**（如 `https://api.jeecg.com`，注意是根域名，不是 `/login` 页面）
+2. **账号 + 密码**（用于登录 YApi 后台创建接口）
+3. **接口需要实现的业务需求**（如"2025年度成交量统计"，按季度/月份/分类）
+
+> 用户提供的是登录页 URL（如 `https://api.jeecg.com/login`），去掉 `/login` 路径即为 `YAPI_BASE`。
+
+### Step 2：查看大屏组件，确认数据格式
+
+**先用 `comp_ops.py list` + 自定义脚本查看组件 config，确认：**
+- 组件类型（JFunnel / JBar / JPie 等）→ 决定 `name+value` / `x+y` / 多字段格式
+- 当前 dataType 和 dataSetId（如已有数据集，可复用 ID 直接更新）
+- chartData 静态示例（参考格式设计 mock 返回值）
+
+**数据格式参考（按图表类型）：**
+
+| 图表类型 | 字段格式 | 示例 |
+|---------|---------|------|
+| 漏斗图/饼图/柱形图（单系列） | `[{name, value}]` | `[{"name":"Q1","value":1200}]` |
+| 折线图/对比柱形图（多系列） | `[{name, value, type}]` | `[{"name":"1月","value":800,"type":"2024年"}]` |
+| 散点图/双轴图 | `[{x, y}]` 或 `[{name, value, value2}]` | |
+| 轮播表/数据表格 | 任意字段 | `[{month, amount, growth}]` |
+
+### Step 3：使用 urllib 脚本完成全流程
+
+**重要：使用 `urllib` 而非 `requests`**（Windows 环境 requests 常未安装，urllib 是标准库，必须用 urllib）。
+
+**完整脚本模板：**
+
+```python
+import sys, json, urllib.request, urllib.parse, http.cookiejar
+sys.stdout.reconfigure(encoding='utf-8')
+sys.path.insert(0, '.')
+import bi_utils
+
+YAPI_BASE  = 'https://api.jeecg.com'   # 去掉 /login 路径
+YAPI_EMAIL = 'xxx@xxx.com'
+YAPI_PWD   = 'xxx'
+MOCK_PATH  = '/drag/yourApiPath'        # 自定义路径，建议 /drag/ 前缀
+
+# ── YApi HTTP 工具（带 cookie session） ──────────────────────────────
+jar = http.cookiejar.CookieJar()
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+def yapi_post(path, payload):
+    body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+    req = urllib.request.Request(
+        f'{YAPI_BASE}{path}', data=body,
+        headers={'Content-Type': 'application/json'}
+    )
+    with opener.open(req, timeout=15) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+def yapi_get(path, params=None):
+    url = f'{YAPI_BASE}{path}'
+    if params:
+        url += '?' + urllib.parse.urlencode(params)
+    with opener.open(urllib.request.Request(url), timeout=15) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+# ── Step 1: 登录 ─────────────────────────────────────────────────────
+d = yapi_post('/api/user/login', {'email': YAPI_EMAIL, 'password': YAPI_PWD})
+assert d.get('errcode') == 0, f'YApi 登录失败: {d}'
+print(f'登录成功: {d["data"].get("username","")}')
+
+# ── Step 2: 找第一个可用项目 ────────────────────────────────────────
+proj_id = None
+for g in yapi_get('/api/group/list').get('data', []):
+    projects = yapi_get('/api/project/list', {'group_id': g['_id'], 'page': 1, 'limit': 20}).get('data', {}).get('list', [])
+    if projects:
+        proj_id = projects[0]['_id']
+        print(f'使用项目: {projects[0]["name"]} (id={proj_id})')
+        break
+assert proj_id, '未找到项目'
+
+# ── Step 3: 获取分类 ID ──────────────────────────────────────────────
+cats = yapi_get('/api/interface/getCatMenu', {'project_id': proj_id}).get('data', [])
+cat_id = cats[0]['_id'] if cats else yapi_post('/api/interface/add_cat', {
+    'name': '大屏数据', 'project_id': proj_id, 'desc': '大屏数据接口'
+}).get('data', {}).get('_id')
+
+# ── Step 4: 创建或更新 Mock 接口 ─────────────────────────────────────
+MOCK_DATA = [
+    {"name": "四季度", "value": 38920},
+    {"name": "三季度", "value": 29870},
+    # ... 根据业务需求填充
+]
+
+iface_payload = {
+    'title': '接口标题',
+    'path': MOCK_PATH,
+    'method': 'GET',
+    'project_id': proj_id,
+    'catid': cat_id,
+    'status': 'done',
+    'res_body_type': 'raw',                                    # ⚠️ 必须 raw，不是 json
+    'res_body': json.dumps(MOCK_DATA, ensure_ascii=False),
+}
+
+# 先查是否已存在同路径
+try:
+    existing_list = yapi_get('/api/interface/list_menu', {'project_id': proj_id, 'catid': cat_id}).get('data', {}).get('list', [])
+    existing = next((i for i in existing_list if i.get('path') == MOCK_PATH), None)
+except:
+    existing = None
+
+if existing:
+    iface_payload['_id'] = existing['_id']
+    yapi_post('/api/interface/save', iface_payload)            # 更新用 save
+    print(f'接口已更新 id={existing["_id"]}')
+else:
+    r = yapi_post('/api/interface/add', iface_payload)         # 新建用 add
+    assert r.get('errcode') == 0, f'创建失败: {r}'
+    print(f'接口已创建 id={r["data"]["_id"]}')
+
+MOCK_URL = f'{YAPI_BASE}/mock/{proj_id}{MOCK_PATH}'
+print(f'Mock 地址: {MOCK_URL}')
+
+# ── Step 5: 验证 Mock 可访问 ─────────────────────────────────────────
+try:
+    with urllib.request.urlopen(MOCK_URL, timeout=8) as resp:
+        rows = json.loads(resp.read().decode('utf-8'))
+    print(f'Mock 验证 OK，返回 {len(rows)} 条')
+except Exception as e:
+    print(f'Mock 验证失败: {e}')
+
+# ── Step 6: 在 JimuBI 创建/更新 API 数据集 ──────────────────────────
+# 方案A：已有数据集（如旧 WebSocket 数据集）→ 直接 edit 改类型
+ds = bi_utils._request('GET', '/drag/onlDragDatasetHead/queryById', params={'id': DS_ID})['result']
+ds.update({
+    'dataType': 'api',
+    'querySql': MOCK_URL,
+    'apiMethod': 'get',
+    'onlDragDatasetItemList': [
+        {'fieldName': 'name', 'fieldTxt': '名称', 'fieldType': 'String', 'izShow': 'Y', 'izWhere': 'N', 'orderNum': 1},
+        {'fieldName': 'value', 'fieldTxt': '数值', 'fieldType': 'String', 'izShow': 'Y', 'izWhere': 'N', 'orderNum': 2},
+    ]
+})
+bi_utils._request('POST', '/drag/onlDragDatasetHead/edit', data=ds)
+
+# 方案B：新建 API 数据集（无已有数据集时）
+# dataset_ops.py create-api --code "deal2025" --name "2025成交量" --url "MOCK_URL" --method get --fields "name:String:名称,value:String:数值"
+
+# ── Step 7: 触发查询解析（强制，不可跳过）─────────────────────────────
+# ⚠️ /add 仅保存配置，不触发解析。必须随后调 getAllChartData 让系统缓存字段 schema，
+#    否则图表绑定后显示"暂无数据"，设计器字段面板为空。
+for ds_id in [DS_ID_1, DS_ID_2, DS_ID_3]:   # 所有新建的 API 数据集 ID
+    r = bi_utils._request('POST', '/drag/onlDragDatasetHead/getAllChartData',
+                          data={'id': ds_id})
+    ok  = r.get('success') or r.get('code') == 200
+    rows = (r.get('result') or {}).get('data', [])
+    print(f'解析 {ds_id}: {"OK" if ok else "FAIL"} ({len(rows)} 条)')
+    if not ok:
+        print(f'  错误: {r.get("message")}')
+```
+
+### 踩坑记录
+
+| 问题 | 说明 |
+|------|------|
+| **⚠️ API 数据集 /add 后必须调 getAllChartData 触发解析** | `/add` 只写元数据，不执行接口调用，系统不知道字段结构。必须在 `create_api_dataset()` 末尾立即调 `POST /drag/onlDragDatasetHead/getAllChartData`（data: `{'id': ds_id}`）。跳过导致图表无数据、设计器字段面板为空。本坑在 YApi Mock 流程中实测复现（2026-04-02） |
+| **⚠️ 禁止 import requests** | Windows 环境通常未安装 `requests`，必须用 `urllib`（标准库）。否则 `ModuleNotFoundError` |
+| **⚠️ sys.stdout.reconfigure(encoding='utf-8')** | Windows 默认 GBK 编码，print 中文 + Unicode 特殊字符（✓ ✗ 等）直接报 `UnicodeEncodeError`。脚本第 2 行必须加此行 |
+| **⚠️ YAPI_BASE 去掉 /login 路径** | 用户提供的是登录页 URL（`https://api.jeecg.com/login`），API 基址是 `https://api.jeecg.com`，直接用会导致所有接口 404 |
+| **⚠️ res_body_type 必须是 'raw'** | 使用 `'raw'` + `res_body` 字符串直接返回 JSON 数据。`'json'` 类型是 JSON Schema，mock 返回的不是实际数据 |
+| **⚠️ 新建接口用 add，更新接口用 save** | 同路径接口已存在时调 `add` 会报重复错误，必须先查询再决定用 `add` 还是 `save`（save 需传 `_id`） |
+| **⚠️ cookie 必须用 HTTPCookieProcessor** | YApi 登录后通过 cookie 维持 session，必须用 `CookieJar + build_opener`，否则后续请求 401 |
+| **⚠️ WebSocket 数据集改 API 类型** | `dataType: 'websocket'` → `'api'`，`querySql` 从 ws:// 地址改为 https:// Mock URL，直接 edit 原数据集即可，组件无需重新绑定 |
+| **⚠️ 字段列表 onlDragDatasetItemList 不能空** | API 数据集编辑时必须同步提交字段定义，否则数据集测试返回数据但前端字段选项面板为空，dataMapping 无法配置 |
+| **Mock URL 格式** | `{YAPI_BASE}/mock/{project_id}{interface_path}`，project_id 是整数，interface_path 必须以 `/` 开头 |
+| **YApi 登录字段** | 字段名为 `email`（不是 `username`），与 JeecgBoot 登录不同 |
+
+## JTabToggle 导航切换组件
+
+| 问题 | 说明 |
+|------|------|
+| **⚠️ chartData/dataType 必须在 config 内部** | 前端通过 `:config="item.config"` 传 props，`useDataSource`（useDataSource.ts）通过 `props.config.chartData` 和 `props.config.dataType` 读取数据源。自定义脚本创建 JTabToggle 时，`chartData`、`dataType`、`dataMapping`、`containDataType`、`timeOut`、`turnConfig`、`linkType`、`linkageConfig`、`size`、`chart` 等字段**必须放在 `config` JSON 字符串内部**（和 JBar/JPie 等组件一致），不能放在组件顶层。放在顶层会导致：数据源绑定失败（tab 项不渲染）、显隐关联不生效 |
+| **chartData 格式** | `[{"label":"柱形图","value":"1"},{"label":"折线图","value":"2"}]`，每项需有 `label`（显示文本）和 `value`（唯一标识） |
+| **option.items 与 chartData 的 value 必须匹配** | `option.items[n].value` 必须与 `chartData[n].value` 一一对应，`handleVisible()` 通过 `cfg.value == selectedVal.value` 判断显隐 |
+| **option.items[n].compVals** | 数组，存储被关联组件的 `i`（UUID），如 `["1774961844288_201693"]`。切换 tab 时对应组件 `visible=true`，其他 tab 的组件 `visible=false` |
+| **containDataType 固定为 [1]** | JTabToggle 只支持静态数据类型（dataType=1），不支持数据集 |
+| **option 使用 normal/active 嵌套结构** | 样式配置在 `option.normal`（通用）和 `option.active`（高亮）中，各含 `fontSize`、`color`、`backgroundColor`、`borderColor`、`borderWidth`、`gradient` 等。不是扁平的 `fontColor`/`activeFontColor` |
+| **被关联组件应位置重叠** | 被导航切换控制的多个组件应放在相同坐标（x/y/w/h 一致），通过切换显隐实现"同位切换"效果 |
+
+## 本次实战 checklist（数据源+SQL数据集+批量图表 完整流程踩坑）
+
+> 记录一次完整的「创建数据源 → 创建 SQL 数据集 → 批量绑定图表」操作中遇到的所有坑，供下次参考。
+
+### 执行顺序陷阱
+
+| 步骤 | 容易踩的坑 | 正确做法 |
+|------|-----------|---------|
+| cp 脚本文件 | cp 静默失败但显示 "done"，后续报 ModuleNotFoundError | cp 后立即 `ls bi_utils.py` 验证 |
+| 并行 cp + Write | Bash 失败时 Write 被取消 | cp 成功后再单独 Write 脚本 |
+| 创建数据源 | 忘记 `--code` 参数 | 必须传 `--code` 唯一编码 |
+| addGroup 返回值 | `response.get('result', {}).get('id')` 报 AttributeError | 用 `response.get('result') or {}` |
+| SQL 表名 | 猜测 `drag_page` 不存在 | 用 `SELECT COUNT(*) FROM 候选表` 逐一试 |
+| SQL 测试 | 创建数据集后未测试直接绑定图表 | 必须 `getAllChartData` 验证成功后再绑定 |
+| 分组字段 | 用 `groupCode` 而非 `parentId` | 分组节点 id 赋给 `parentId` 字段 |
+
+### 关键 Python 代码模式
+
+```python
+# 错误：result=null 时返回 None，后续 .get() 报 AttributeError
+result = response.get('result', {}).get('id')
+
+# 正确：or {} 处理 null
+result = (response.get('result') or {}).get('id')
+
+# 错误：groupCode
+data['groupCode'] = group_id
+
+# 正确：parentId
+data['parentId'] = group_id or '0'
+
+# 创建数据集后立即测试 SQL
+test_r = bi_utils._request('POST', '/drag/onlDragDatasetHead/getAllChartData', data={'id': DS_ID})
+if not (test_r.get('success') or test_r.get('code') == 200):
+    print(f"SQL 失败: {test_r.get('message')}"); sys.exit(1)
+```
+
+## API 数据集创建踩坑（YApi Mock + 批量折线图，2026-04-03）
+
+### 踩坑记录
+
+| 问题 | 错误做法 | 正确做法 |
+|------|---------|---------|
+| **⚠️ `/add` 返回的 `result` 是完整 dict，不是 ID 字符串** | `DS_ID = add_r.get('result')` → DS_ID 是整个对象 dict | `DS_ID = (add_r.get('result') or {}).get('id')` 或 `add_r['result']['id']` |
+| **⚠️ `edit` 接口保存字段列表用 `datasetItemList`，不是 `onlDragDatasetItemList`** | `ds['onlDragDatasetItemList'] = fields` → 字段不生效，静默丢失 | `ds['datasetItemList'] = fields`（后端 VO 字段名是 `datasetItemList`） |
+| **⚠️ `queryFieldByApi` 对外部 URL 可能返回空列表** | 解析到空就停止 | fallback 到 `getAllChartData` 从实际数据推断字段类型：`int/float → Integer，其余 → String` |
+| **⚠️ `queryAllById` 需要签名验证，bi_utils 签名与其不兼容** | 用 `queryAllById` 检查已保存字段 | 用 `queryById` 获取实体（只含头部字段），字段列表通过 `getAllChartData` 验证 |
+| **⚠️ 先改前端 Vue 代码再排查后端返回结构** | 假设后端返回 `onlDragDatasetItemList`，修改 `initFormData` 的字段映射 → 反而清空字段显示 | **先调 API 确认后端实际返回字段名，再决定是否改前端** |
+
+### 正确的 API 数据集创建 + 字段保存完整模板
+
+```python
+# ── 1. 创建 API 数据集（正确提取 DS_ID）──────────────────────────────
+add_r = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
+    'name': '数据集名', 'code': 'ds_xxx', 'dataType': 'api',
+    'querySql': MOCK_URL, 'apiMethod': 'get', 'parentId': parent_id,
+    'datasetItemList': [  # ⚠️ 字段名必须是 datasetItemList，不是 onlDragDatasetItemList
+        {'fieldName': 'name',  'fieldTxt': '名称', 'fieldType': 'String',  'izShow': 'Y', 'orderNum': 0},
+        {'fieldName': 'value', 'fieldTxt': '数值', 'fieldType': 'Integer', 'izShow': 'Y', 'orderNum': 1},
+        {'fieldName': 'type',  'fieldTxt': '分组', 'fieldType': 'String',  'izShow': 'Y', 'orderNum': 2},
+    ]
+})
+DS_ID = (add_r.get('result') or {}).get('id')  # ⚠️ result 是 dict，需取 .id
+assert DS_ID, f'创建失败，result={add_r.get("result")}'
+
+# ── 2. 触发解析（强制），queryFieldByApi 可能返空，fallback getAllChartData ──
+fields = (bi_utils._request('GET', '/drag/onlDragDatasetHead/queryFieldByApi',
+    params={'url': MOCK_URL, 'method': 'get'}).get('result') or [])
+if not fields:
+    rows = ((bi_utils._request('POST', '/drag/onlDragDatasetHead/getAllChartData',
+        data={'id': DS_ID}).get('result') or {}).get('data') or [])
+    if rows:
+        fields = [{'fieldName': k, 'fieldTxt': k,
+                   'fieldType': 'Integer' if isinstance(v, (int, float)) else 'String',
+                   'izShow': 'Y', 'orderNum': i}
+                  for i, (k, v) in enumerate(rows[0].items())]
+
+# ── 3. 若字段解析后与创建时不同，回写（用 datasetItemList）─────────────
+if fields:
+    ds = (bi_utils._request('GET', '/drag/onlDragDatasetHead/queryById',
+        params={'id': DS_ID}).get('result') or {})
+    ds['datasetItemList'] = fields  # ⚠️ 必须用 datasetItemList
+    bi_utils._request('POST', '/drag/onlDragDatasetHead/edit', data=ds)
+```
+
+### 字段名对照表（后端 API ↔ 前端表单）
+
+| 含义 | 后端 VO / API 字段名 | 前端 formState 字段名 |
+|------|--------------------|--------------------|
+| 数据集字段列表 | `datasetItemList` | `datasetItemList` |
+| 数据集参数列表 | `datasetParamList` | `datasetParamList` |
+| 查询全部（含子表）| `queryAllById` | — （需签名验证，bi_utils 不兼容） |
+| 查询头部信息 | `queryById` | — |
+
+---
+
+## Online 表单图表全组件批量生成踩坑（2026-04-03）
+
+> 源码参考：`D:\webstorm_project_2023\vue3-jeecg-drag-design-antd4\packages\utils\constant.ts`（chartConfig 函数）
+> 源码参考：`packages\dragEngine\modal\chartset\hooks\useChartBiz.ts`（onlyValueChart 逻辑）
+> 源码参考：`packages\dragEngine\modal\chartset\components\FieldConfig.vue`（字段槽位显示条件）
+
+### ⚠️ chart.category 必须与 constant.ts chartConfig 中的父级 type 一致
+
+**错误原因**：category 填错导致后端 `getTotalDataByCompId` 无法正确处理数据，图表一直加载中。
+
+**权威分类映射（来自 constant.ts chartConfig，不得自行猜测）：**
+
+| 组件类型 | category | 常见错误 |
+|---------|---------|---------|
+| JBar/JStackBar/JMultipleBar/JNegativeBar/JDynamicBar/JMixLineBar/JCapsuleChart/JPercentBar/JBackgroundBar | `Bar` | — |
+| JHorizontalBar/JRankingList/JTotalProgress | `HorizontalBar` | ~~`Bar`~~ |
+| JLine/JArea/JMultipleLine/DoubleLineBar/JStepLine/JSmoothLine | `Line` | — |
+| JCustomProgress/JProgress/JLiquid/JListProgress/JRoundProgress | `Progress` | — |
+| JPictorialBar/JPictorial/JGender | `Pictorial` | — |
+| **JPie/JRing/JBreakRing**/JRose/JRotatePie | `Pie` | **JRing 是 `Pie` 不是 `Ring`！** |
+| JFunnel/JPyramidFunnel/JPyramid3D | `Funnel` | — |
+| JRadar/JCircleRadar | `Radar` | — |
+| JRingProgress/JActiveRing/JRadialBar | `Ring` | — |
+| JRectangle | `Rectangle` | — |
+| **JBar3d/JBarGroup3d** | `threeD` | ~~`Bar3d`~~ |
+| JColorGauge/JGauge/JAntvGauge/JSemiGauge | `Gauge` | — |
+| JNumber/JCountTo/JColorBlock/JStatsSummary/JOrbitRing | `Number` | — |
+| JScatter/JBubble/JQuadrant | `Scatter` | — |
+| JPivotTable | `Table` | — |
+| JAreaMap/JBubbleMap/JHeatMap/JBarMap | `Map` | — |
+| JWordCloud/JImgWordCloud/JFlashCloud | `WordCloud` | — |
+
+### ⚠️ onlyValueChart 的精确判断条件（来自 useChartBiz.ts 源码）
+
+```typescript
+// useChartBiz.ts 第173-175行
+const onlyValueChart = computed(() => {
+  return ['Gauge', 'Number'].includes(selectedChart.category) || ['JTotalProgress', 'JLiquid'].includes(selectedChart.subclass);
+});
+```
+
+**onlyValueChart=true（这些组件 nameFields 必须为空！）：**
+- category='Gauge'：JColorGauge、JGauge、JAntvGauge、JSemiGauge
+- category='Number'：JNumber（以及归入 Number 类的 JCountTo、JColorBlock、JStatsSummary、JOrbitRing）
+- subclass='JTotalProgress'（即使 category 是 HorizontalBar）
+- subclass='JLiquid'（即使 category 是 Progress）
+
+**⚠️ 注意**：Ring 和 Progress 分类的图表 **不是** onlyValueChart，它们仍然需要 nameFields：
+- JRingProgress/JActiveRing/JRadialBar（Ring 类）→ 需要 nameFields
+- JCustomProgress/JProgress/JListProgress/JRoundProgress（Progress 类）→ 需要 nameFields
+
+### ⚠️ isGroup 图表必须设置 typeFields（来自 constant.ts chartConfig）
+
+typeFields 的显示条件（FieldConfig.vue 第 217 行）：
+```
+v-if="(valueFields.length < 2 && isGroup && !onlyValueChart) || chartObj.component == 'JPivotTable'"
+```
+
+**isGroup=true 的完整组件列表（必须设置 typeFields）：**
+
+| 分类 | 组件 |
+|------|------|
+| Bar | JStackBar、JMultipleBar、JNegativeBar、JMixLineBar、JPercentBar |
+| Line | JMultipleLine |
+| Radar | JRadar、JCircleRadar |
+| Scatter | JBubble、JQuadrant |
+| Table | JPivotTable |
+| threeD | JBarGroup3d |
+| Line（特殊）| DoubleLineBar（特殊处理，见下） |
+
+**规则**：当 valueFields 只有1个时，isGroup 图表显示 typeFields 区域。若有2个以上 valueFields，typeFields 区域隐藏。批量生成时用单 valueField，所以一律设置 typeFields。
+
+### ⚠️ DoubleLineBar 双轴图特殊字段结构
+
+双轴图切换时前端会清空 nameFields，结构与其他图表完全不同：
+
+```python
+# DoubleLineBar 正确字段配置
+cfg_double = {
+    'nameFields':       [],                      # 必须为空！切换时前端清空
+    'valueFields':      [VALUE_FIELD.copy()],    # 主 Y 轴数值
+    'typeFields':       [NAME_FIELD.copy()],     # 主分组（维度作分组）
+    'assistYFields':    [VALUE_FIELD.copy()],    # 辅助 Y 轴（FieldConfig.vue 第176行：v-if="component == 'DoubleLineBar'"）
+    'assistTypeFields': [NAME_FIELD.copy()],     # 辅助分组（第292行：v-if="assistYFields.length < 2 && subclass == 'DoubleLineBar'"）
+}
+```
+
+### ⚠️ record_count 字段的 fieldType 必须是 'count'，不能是 'int'（2026-04-09 实测）
+
+**错误现象**：图表报错 `SQL: SELECT sum(*) record_count ... `，`SUM(*)` 语法非法。
+
+**根本原因**：`record_count` 是系统虚拟字段，不是数据库真实列。后端根据 `fieldType` 决定聚合函数：
+- `fieldType: 'count'` → 生成 `COUNT(*) as record_count` ✅
+- `fieldType: 'int'` / `'double'` / `'String'` → 生成 `SUM(record_count)` → 展开为 `SUM(*)` → SQL 报错 ❌
+
+**正确写法（强制）：**
+```python
+# ✅ 正确
+RECORD_COUNT_FIELD = {
+    'fieldName': 'record_count',
+    'fieldTxt':  '记录数量',
+    'fieldType': 'count',    # ← 必须是 'count'，不能是 'int'/'String'/'double'
+    'widgetType': 'count',
+    'dictCode': '',
+}
+
+# ❌ 错误（会生成 SUM(*) 报错）
+# {'fieldName': 'record_count', 'fieldType': 'int', ...}
+```
+
+**规则**：凡是把 `record_count` 放进 `valueFields` / `nameFields` / `typeFields` 的场景，`fieldType` 必须是 `'count'`。
+
+---
+
+### Online 表单图表字段配置速查表（全量）
+
+```python
+# 完整的字段配置逻辑（直接复制使用）
+
+IS_GROUP = {
+    'JStackBar', 'JMultipleBar', 'JNegativeBar', 'JMixLineBar', 'JPercentBar',
+    'JMultipleLine', 'DoubleLineBar',
+    'JRadar', 'JCircleRadar',
+    'JBubble', 'JQuadrant',
+    'JPivotTable',
+    'JBarGroup3d',
+}
+
+# category in ['Gauge','Number'] 或 subclass in ['JTotalProgress','JLiquid']
+ONLY_VALUE_COMPS = {
+    'JGauge', 'JColorGauge', 'JAntvGauge', 'JSemiGauge',    # Gauge
+    'JNumber', 'JCountTo', 'JColorBlock', 'JStatsSummary', 'JOrbitRing',  # Number
+    'JTotalProgress', 'JLiquid',                              # 特殊 subclass
+}
+
+def get_fields(comp_type, NAME_FIELD, VALUE_FIELD):
+    if comp_type == 'DoubleLineBar':
+        return dict(nameFields=[], valueFields=[VALUE_FIELD], typeFields=[NAME_FIELD],
+                    assistYFields=[VALUE_FIELD], assistTypeFields=[NAME_FIELD])
+    elif comp_type in ONLY_VALUE_COMPS:
+        return dict(nameFields=[], valueFields=[VALUE_FIELD], typeFields=[],
+                    assistYFields=[], assistTypeFields=[])
+    elif comp_type in IS_GROUP:
+        return dict(nameFields=[NAME_FIELD], valueFields=[VALUE_FIELD], typeFields=[NAME_FIELD],
+                    assistYFields=[], assistTypeFields=[])
+    else:
+        return dict(nameFields=[NAME_FIELD], valueFields=[VALUE_FIELD], typeFields=[],
+                    assistYFields=[], assistTypeFields=[])
+```
+
+---
+
+## ⚠️ comp_ops.py delete 报成功但实际未删除（已修复 2026-04-08）
+
+**现象**：`comp_ops.py delete --name "XXX"` 输出"删除成功"，但刷新大屏后组件仍存在。
+
+**根因（已定位）**：`bi_utils.save_page` 第 303 行的 `if not components:` 是罪魁祸首：删除所有组件后 `_page_components[page_id] = []`，而 `if not []:` 为 True，导致 `save_page` 从服务端重新拉取旧模板并覆盖，等效于删除从未发生。（次要问题：save_page 内部额外调一次 `query_page` 增加延迟；payload 未含 `desJson` 可能导致页面宽高丢失。）
+
+**已修复**（`bi_utils.py`，2026-04-08）：
+- `if not components:` → `if page_id not in _page_components:`（区分"主动清空"与"未设置"）
+- 移除 `save_page` 内部的多余 `query_page` 调用，节省 1 次 API 往返
+- `query_page` 同步缓存 `desJson`；`save_page` payload 新增 `desJson` 字段回传
+
+**当前版本 `comp_ops.py delete/edit/move` 均可直接使用，无需自定义脚本。**
+
+历史应急方案（升级后不再需要，留档备查）：删除组件时用自定义脚本，一次 `queryById` 取到最新 `updateCount`，直接调 `edit` 保存：
+
+```python
+import sys, json
+sys.path.insert(0, 'C:/Users/25067')
+import bi_utils
+
+bi_utils.API_BASE = 'http://...'
+bi_utils.TOKEN = '...'
+PAGE_ID = '...'
+
+# 1. 一次性获取完整页面实体（含 updateCount）
+raw = bi_utils._request('GET', '/drag/page/queryById', params={'id': PAGE_ID})
+page_entity = (raw.get('result') or {})
+update_count = page_entity.get('updateCount', 1)
+
+# 2. 解析 template
+tmpl_raw = page_entity.get('template') or '[]'
+tmpl = json.loads(tmpl_raw) if isinstance(tmpl_raw, str) else (tmpl_raw or [])
+
+# 3. 按 componentName 删除
+target_name = '目标组件名'
+tmpl = [c for c in tmpl if c.get('componentName') != target_name]
+
+# 4. 直接调 edit 保存（使用同一次 queryById 拿到的 updateCount，无二次请求）
+payload = {
+    'id': PAGE_ID,
+    'name': page_entity.get('name', ''),
+    'template': json.dumps(tmpl, ensure_ascii=False),
+    'updateCount': update_count,
+    'style': page_entity.get('style', 'bigScreen'),
+    'theme': page_entity.get('theme', 'dark'),
+    'backgroundImage': page_entity.get('backgroundImage', ''),
+    'designType': page_entity.get('designType', 100),
+    'desJson': page_entity.get('desJson', ''),
+}
+bi_utils._request('POST', '/drag/page/edit', data=payload)
+```
+
+## 自定义脚本文件写入踩坑（2026-04-09 新增）
+
+> 当需要在工作流中动态写入 Python 脚本文件时，常见以下问题。
+
+| 问题 | 原因 | 解决方案 |
+|------|------|---------|
+| **⚠️ bash heredoc `<< 'EOF'` 在 Python 内容含单引号时必定失败** | 单引号定界的 heredoc 中不能有 `'`（单引号），而 Python 代码大量使用单引号字符串，导致 heredoc 被截断报 `unexpected EOF` | **必须用 `Write` 工具写脚本文件**，彻底避免 bash heredoc。流程：`Read` 目标文件（不存在也要 Read，拿到"不存在"错误即可）→ `Write` 写入完整内容。全程不经过 bash，无转义问题 |
+| **⚠️ `Write` 工具写新文件前必须先 `Read`** | Claude 工具系统要求"对任何文件写入前需先读取"，包括不存在的文件。直接调 `Write` 报 `File has not been read yet` | 先 `Read` 目标路径（即使文件不存在或为空），再 `Write` 覆盖写入 |
+| **⚠️ 通过 `py -c` / bash 生成的 Python 文件中，`b"\r\n"` 被写为实际 CR+LF 字节** | bash 中外层 Python 字符串的 `\\r\\n` 被解析为 `\r`（0x0D）+`\n`（0x0A）实际字节，写入目标文件后 Python 解释器遇到第一个 `\r` 就认为行结束，报 `SyntaxError: unterminated string literal` | 在 Python 脚本中**永远不要写 `b"\r\n"`**，改用 `bytes([13, 10])`。例如 multipart 编码器的分隔符：`CRLF = bytes([13, 10]); return CRLF.join(parts)` |
+| **⚠️ `py -` stdin 方式导致 `import bi_utils` 失败** | `py -` 从 stdin 读取时，`sys.path.insert(0, '.')` 的 `.` 指向进程启动目录而非当前 shell pwd | 改用 `sys.path.insert(0, 'C:/Users/25067')` 绝对路径，或先 Write 脚本文件再 `py script.py` |
+
+**最优写脚本流程（无任何 bash 转义问题）：**
+
+```
+轮次1：Read 目标脚本路径（获取读取权限，文件不存在时也需执行）
+轮次2：Write 工具直接写入完整 Python 内容（支持所有字符，无转义限制）
+轮次3：Bash: cp bi_utils.py + ls验证 + py 执行 + rm 清理（一条命令链）
+```
+
+**注意**：Write 工具写入文件时无需转义单引号、双引号、反斜杠、`\r\n` 等特殊字符，是写 Python 脚本的唯一可靠方式。
+
+**同样适用于**：任何使用 `bi_utils.save_page()` 后发现保存未生效的场景（组件编辑、位移等），都应改用此模式。

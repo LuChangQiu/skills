@@ -8,13 +8,13 @@
   # 列出数据集
   py dataset_ops.py list <API_BASE> <TOKEN> --page-size 20
 
-  # 创建 SQL 数据集
+  # 创建 SQL 数据集（--group 默认 "示例数据集"，自动查询/创建分组）
   py dataset_ops.py create-sql <API_BASE> <TOKEN> --name "销售数据" --code "sale_data" --db-source "707437208002265088" --sql "SELECT name, value FROM table" --fields "name:String,value:String"
 
   # 创建带 FreeMarker 查询参数的 SQL 数据集
   py dataset_ops.py create-sql <API_BASE> <TOKEN> --name "年龄统计" --sql-file sql.txt --fields "name:String,value:String" --params "sex:性别::sex"
 
-  # 创建 API 数据集
+  # 创建 API 数据集（--group 默认 "示例数据集"）
   py dataset_ops.py create-api <API_BASE> <TOKEN> --name "天气数据" --code "weather_data" --url "https://api.example.com/data" --method get --agent 0 --fields "name:String,value:String"
 
   # 修改数据集属性（重命名、改SQL、改编码等）
@@ -150,6 +150,29 @@ def _auto_code(name):
     return f'ds_{short_hash}'
 
 
+def _resolve_group_id(group_name):
+    """
+    根据分组名称查找 parentId，不存在则自动创建。
+    用于 create-sql / create-api 的 --group 参数。
+    """
+    resp = bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup')
+    result = resp.get('result')
+    if isinstance(result, list):
+        for item in result:
+            if item.get('name') == group_name and item.get('dataType') is None:
+                return item.get('id')
+    # 不存在则创建
+    import re, hashlib
+    code = re.sub(r'[^a-zA-Z0-9_]', '_', group_name).strip('_') or hashlib.md5(group_name.encode()).hexdigest()[:8]
+    add_resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup',
+                                  data={'name': group_name, 'code': code, 'parentId': '0'})
+    gid = add_resp.get('result')
+    if gid:
+        print(f'已自动创建数据集分组: {group_name} (id={gid})')
+        return gid
+    return '0'
+
+
 def _parse_sql_params(params_str):
     """
     解析 --params 参数字符串为 datasetParamList 格式。
@@ -206,13 +229,17 @@ def cmd_create_sql(args):
     if param_list:
         print(f'查询参数: {[p["paramName"] for p in param_list]}')
 
+    # 解析分组
+    group_name = getattr(args, 'group', '示例数据集') or '示例数据集'
+    parent_id = getattr(args, 'parent_id', None) or _resolve_group_id(group_name)
+
     payload = {
         'name': args.name,
         'code': args.code,
         'dataType': 'sql',
         'dbSource': args.db_source,
         'querySql': args.sql,
-        'parentId': '0',
+        'parentId': parent_id,
         'datasetItemList': field_list,
         'datasetParamList': param_list,
     }
@@ -226,6 +253,26 @@ def cmd_create_sql(args):
     ds_id = ds.get('id', '') if isinstance(ds, dict) else ds
     print(f'SQL 数据集创建成功: {args.name} (编码: {args.code})')
     print(f'数据集ID: {ds_id}')
+    print(f'分组: {group_name} (parentId={parent_id})')
+
+    # 调用 queryFieldBySql 进行查询解析（修复: 使用 args.db_source 而非 args.dbsource）
+    if args.db_source:
+        try:
+            parse_resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/queryFieldBySql', data={
+                'sql': args.sql or '',
+                'dbCode': args.db_source,
+                'paramArray': '[]'
+            })
+            if parse_resp.get('success') and parse_resp.get('result', {}).get('fieldList'):
+                parsed_fields = parse_resp['result']['fieldList']
+                print(f'查询解析成功: {len(parsed_fields)} 个字段')
+                # 回写字段到数据集
+                ds_detail = bi_utils._request('GET', '/drag/onlDragDatasetHead/queryById', params={'id': ds_id})
+                ds_record = ds_detail.get('result') or {}
+                ds_record['datasetItemList'] = parsed_fields
+                bi_utils._request('POST', '/drag/onlDragDatasetHead/edit', data=ds_record)
+        except Exception as e:
+            print(f'查询解析异常: {e}')
 
 
 def cmd_create_api(args):
@@ -235,6 +282,10 @@ def cmd_create_api(args):
         print('错误: 至少需要一个字段定义')
         return
 
+    # 解析分组
+    group_name = getattr(args, 'group', '示例数据集') or '示例数据集'
+    parent_id = getattr(args, 'parent_id', None) or _resolve_group_id(group_name)
+
     payload = {
         'name': args.name,
         'code': args.code,
@@ -243,7 +294,7 @@ def cmd_create_api(args):
         'querySql': args.url,
         'apiMethod': args.method,
         'izAgent': str(args.agent),
-        'parentId': '0',
+        'parentId': parent_id,
         'datasetItemList': field_list,
     }
 
@@ -256,6 +307,42 @@ def cmd_create_api(args):
     ds_id = ds.get('id', '') if isinstance(ds, dict) else ds
     print(f'API 数据集创建成功: {args.name} (编码: {args.code})')
     print(f'数据集ID: {ds_id}')
+
+    # 【2026-04-03 新增】调用 queryFieldByApi 进行查询解析
+    try:
+        parse_resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/queryFieldByApi', data={
+            'api': args.url,
+            'method': args.method,
+            'paramArray': '[]'
+        })
+        if parse_resp.get('success') and parse_resp.get('result'):
+            result_data = parse_resp['result']
+            # API 返回可能是数组或包含 data 的对象
+            if isinstance(result_data, list):
+                fields = result_data[0].keys() if result_data else []
+            elif isinstance(result_data, dict) and 'data' in result_data:
+                fields = result_data['data'][0].keys() if result_data.get('data') else []
+            else:
+                fields = result_data.keys() if result_data else []
+
+            if fields:
+                parsed_fields = []
+                for idx, fn in enumerate(fields):
+                    parsed_fields.append({
+                        'fieldName': fn,
+                        'fieldTxt': fn,
+                        'fieldType': 'String',
+                        'izShow': 'Y',
+                        'orderNum': idx
+                    })
+                print(f'查询解析成功: {len(parsed_fields)} 个字段')
+                # 回写字段到数据集
+                ds_detail = bi_utils._request('GET', '/drag/onlDragDatasetHead/queryById', params={'id': ds_id})
+                ds_record = ds_detail.get('result') or {}
+                ds_record['datasetItemList'] = parsed_fields
+                bi_utils._request('POST', '/drag/onlDragDatasetHead/edit', data=ds_record)
+    except Exception as e:
+        print(f'查询解析异常: {e}')
 
 
 def cmd_test(args):
@@ -433,6 +520,8 @@ def main():
     p_sql.add_argument('--fields', required=True, help='字段定义，格式: name:String,value:String')
     p_sql.add_argument('--params', default=None,
                         help='SQL 查询参数（FreeMarker），格式: paramName:paramTxt:defaultValue:dictCode（后三项可省略，多个逗号分隔，如 "sex:性别::sex,age:年龄"）')
+    p_sql.add_argument('--group', default='示例数据集', help='数据集分组名称（默认"示例数据集"，自动查询/创建）')
+    p_sql.add_argument('--parent-id', default=None, dest='parent_id', help='直接指定分组 parentId（优先于 --group）')
 
     # create-api
     p_api = subparsers.add_parser('create-api', help='创建 API 数据集')
@@ -443,6 +532,8 @@ def main():
     p_api.add_argument('--method', default='get', help='HTTP 方法（默认 get）')
     p_api.add_argument('--agent', type=int, default=0, help='是否使用代理（0=否，1=是，默认 0）')
     p_api.add_argument('--fields', required=True, help='字段定义，格式: name:String,value:String')
+    p_api.add_argument('--group', default='示例数据集', help='数据集分组名称（默认"示例数据集"，自动查询/创建）')
+    p_api.add_argument('--parent-id', default=None, dest='parent_id', help='直接指定分组 parentId（优先于 --group）')
 
     # test
     p_test = subparsers.add_parser('test', help='测试数据集')

@@ -538,6 +538,31 @@ def _create_or_reuse_sql_dataset(args):
     ds_id = ds.get('id', '') if isinstance(ds, dict) else ds
     print(f'数据集创建成功: {ds_display_name} (ID: {ds_id})')
 
+    # 【2026-04-03 新增】调用 queryFieldBySql 进行查询解析（与前端"查询解析"按钮逻辑一致）
+    try:
+        parse_resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/queryFieldBySql', data={
+            'sql': sql,
+            'dbCode': db_source,
+            'paramArray': '[]'
+        })
+        if parse_resp.get('success') and parse_resp.get('result', {}).get('fieldList'):
+            parsed_fields = parse_resp['result']['fieldList']
+            print(f'查询解析成功: {len(parsed_fields)} 个字段')
+            # 更新字段列表
+            for idx, f in enumerate(parsed_fields):
+                f['orderNum'] = idx
+                f['izShow'] = 'Y'
+            # 回写字段到数据集
+            ds_detail = bi_utils._request('GET', '/drag/onlDragDatasetHead/queryById', params={'id': ds_id})
+            ds_record = ds_detail.get('result') or {}
+            ds_record['datasetItemList'] = parsed_fields
+            bi_utils._request('POST', '/drag/onlDragDatasetHead/edit', data=ds_record)
+            print(f'字段已更新: {[f.get("fieldName") for f in parsed_fields]}')
+        else:
+            print(f'查询解析跳过: {parse_resp.get("message", "未知原因")}')
+    except Exception as e:
+        print(f'查询解析异常: {e}')
+
     # 测试数据集
     test = bi_utils._request('POST', '/drag/onlDragDatasetHead/getAllChartData', data={'id': ds_id})
     test_data = test.get('result', {})
@@ -567,6 +592,20 @@ def _create_or_reuse_sql_dataset(args):
     return record
 
 
+def _resolve_comp_type(comp_key):
+    """
+    将 default_configs.json 中的变体 key（如 JStatsSummary_1）解析为实际 Vue 组件名（JStatsSummary）。
+    变体后缀 _1/_2/_3 等仅用于选择不同默认配置，不是真实组件类型。
+    """
+    import re
+    # 匹配 CompName_后缀 格式（数字或中文），去掉后缀提取实际组件类型
+    # 如 JStatsSummary_1 -> JStatsSummary, JScrollList_滚动列表(多行+序号) -> JScrollList
+    m = re.match(r'^(J[A-Za-z]+)_(.+)$', comp_key)
+    if m:
+        return m.group(1)
+    return comp_key
+
+
 def cmd_add(args):
     """添加组件（支持静态数据 + 数据集绑定 + 一键创建SQL数据集）"""
     tmpl = load_template(args.page_id)
@@ -580,6 +619,9 @@ def cmd_add(args):
         print(f'已加载 {args.comp} 默认配置（含 chartData + option）')
     else:
         print(f'警告: 未找到 {args.comp} 的默认配置，使用最小配置')
+
+    # 解析实际组件类型（去掉变体后缀，如 JStatsSummary_1 -> JStatsSummary）
+    actual_comp_type = _resolve_comp_type(args.comp)
 
     # 2. 解析用户自定义 config（覆盖默认值）
     user_config = {}
@@ -664,7 +706,7 @@ def cmd_add(args):
         config['option']['card']['title'] = ''
 
     # 8. 设置图表标题（通过 option.title，非 card.title）
-    if args.comp not in ('JText', 'JDragBorder', 'JDragDecoration', 'JImg', 'JCurrentTime'):
+    if actual_comp_type not in ('JText', 'JDragBorder', 'JDragDecoration', 'JImg', 'JCurrentTime'):
         if 'title' not in config['option']:
             config['option']['title'] = {}
         if args.title:
@@ -675,7 +717,7 @@ def cmd_add(args):
         config['option']['title']['textStyle'].setdefault('fontSize', 14)
 
     from bi_utils import add_component
-    comp = add_component(args.page_id, args.comp, args.title or args.comp,
+    comp = add_component(args.page_id, actual_comp_type, args.title or args.comp,
                          args.x, args.y, args.w, args.h, config)
     save_page(args.page_id)
     ds_info = f' [数据集: {config.get("dataSetName","")}]' if dataset_bound else ' [静态数据]'

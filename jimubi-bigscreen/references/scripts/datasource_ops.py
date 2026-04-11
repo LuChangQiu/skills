@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-数据源管理工具 —— 列表、详情、新增、测试连接、删除、SQL解析
+数据源管理工具 —— 列表、详情、新增、编辑、测试连接、删除、SQL解析
 ================================================================
 
 使用方式（命令行）：
@@ -23,6 +23,15 @@
   # 新建 NoSQL 数据源（Elasticsearch）
   py datasource_ops.py create <API_BASE> <TOKEN> --name "ES数据源" --code "es_ds" --db-type es --host 192.168.1.188 --port 9200
 
+  # 编辑数据源 —— 按名称查找，追加 JDBC 参数（解决 SSL 证书校验问题等）
+  py datasource_ops.py edit <API_BASE> <TOKEN> --name "jeecgbootbpm" --add-jdbc-param "trustServerCertificate=true"
+
+  # 编辑数据源 —— 按 ID 查找，直接替换完整 dbUrl
+  py datasource_ops.py edit <API_BASE> <TOKEN> --id "1199284605753712640" --set-url "jdbc:sqlserver://192.168.1.188:1433;SelectMethod=cursor;DatabaseName=jeecgbootbpm;trustServerCertificate=true;"
+
+  # 编辑数据源 —— 修改用户名/密码
+  py datasource_ops.py edit <API_BASE> <TOKEN> --name "jeecgbootbpm" --user newuser --password newpass
+
   # 测试数据源连接（用已有ID）
   py datasource_ops.py test <API_BASE> <TOKEN> --id "707437208002265088"
 
@@ -34,6 +43,15 @@
 
   # 解析SQL字段
   py datasource_ops.py parse-sql <API_BASE> <TOKEN> --db-source "707437208002265088" --sql "SELECT name, value FROM table"
+
+接口说明（需要签名）：
+  GET  /drag/onlDragDataSource/getOptions            列出所有数据源（返回 [{value:id, label:name, text:name}]）
+  GET  /drag/onlDragDataSource/queryById?id=xxx      查询数据源完整信息
+  POST /drag/onlDragDataSource/add                   新增数据源
+  POST /drag/onlDragDataSource/edit                  编辑数据源（需传完整对象）
+  POST /drag/onlDragDataSource/testConnection        测试连接
+  DELETE /drag/onlDragDataSource/delete?id=xxx       删除数据源
+  POST /drag/onlDragDatasetHead/parseSQL             解析SQL字段列表
 """
 
 import sys, json, os, argparse, hashlib, time
@@ -180,7 +198,7 @@ JDBC_TEMPLATES = {
     'MYSQL5.7': 'jdbc:mysql://{host}:{port}/{db}?characterEncoding=UTF-8&useUnicode=true&useSSL=false&tinyInt1isBit=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai',
     'MYSQL5.5': 'jdbc:mysql://{host}:{port}/{db}?characterEncoding=UTF-8&useUnicode=true&useSSL=false',
     'ORACLE': 'jdbc:oracle:thin:@{host}:{port}:{db}',
-    'SQLSERVER': 'jdbc:sqlserver://{host}:{port};SelectMethod=cursor;DatabaseName={db}',
+    'SQLSERVER': 'jdbc:sqlserver://{host}:{port};SelectMethod=cursor;DatabaseName={db};trustServerCertificate=true;',
     'POSTGRESQL': 'jdbc:postgresql://{host}:{port}/{db}',
 }
 
@@ -282,13 +300,13 @@ def cmd_list(args):
         return
 
     print(f'共 {len(records)} 个数据源：\n')
-    print(f'{"序号":<4} {"ID":<24} {"名称":<20} {"编码":<20}')
-    print('-' * 72)
+    print(f'{"序号":<4} {"ID":<24} {"名称":<20}')
+    print('-' * 52)
     for i, ds in enumerate(records):
-        ds_id = ds.get('id', ds.get('value', '?'))
-        ds_name = ds.get('name', ds.get('text', ds.get('title', '?')))
-        ds_code = ds.get('code', ds.get('label', ''))
-        print(f'{i+1:<4} {ds_id:<24} {ds_name:<20} {ds_code:<20}')
+        # getOptions 返回 {value: id, label: name, text: name}
+        ds_id = ds.get('value', ds.get('id', '?'))
+        ds_name = ds.get('label', ds.get('text', ds.get('name', '?')))
+        print(f'{i+1:<4} {ds_id:<24} {ds_name:<20}')
 
 
 def cmd_detail(args):
@@ -341,7 +359,10 @@ def cmd_create(args):
 
 def cmd_test(args):
     """测试数据源连接"""
-    if args.id:
+    if getattr(args, 'name', None) and not args.id:
+        # 通过名称查找后测试
+        data = _find_ds_by_name(args.name)
+    elif args.id:
         # 先获取详情，再测试
         detail_resp = signed_request('GET', '/drag/onlDragDataSource/queryById', params={'id': args.id})
         if not detail_resp or not detail_resp.get('success'):
@@ -373,6 +394,87 @@ def cmd_test(args):
         print(f'  消息: {resp.get("message", "")}')
     else:
         print(f'连接测试失败: {resp.get("message", "未知错误")}')
+
+
+def _find_ds_by_name(name):
+    """通过名称从 getOptions 找到数据源 ID，再 queryById 返回完整对象"""
+    resp = simple_get('/drag/onlDragDataSource/getOptions')
+    if not resp or not resp.get('success'):
+        print(f'获取数据源列表失败: {resp.get("message", "") if resp else "无响应"}')
+        sys.exit(1)
+    items = resp.get('result', [])
+    ds = next((r for r in items if r.get('label') == name or r.get('text') == name), None)
+    if not ds:
+        print(f'未找到名称为 "{name}" 的数据源，已有数据源：')
+        for r in items:
+            print(f'  {r.get("value","?")}  {r.get("label","?")}')
+        sys.exit(1)
+    ds_id = ds['value']
+    detail = signed_request('GET', '/drag/onlDragDataSource/queryById', params={'id': ds_id})
+    if not detail or not detail.get('success'):
+        print(f'获取数据源详情失败: {detail.get("message", "") if detail else "无响应"}')
+        sys.exit(1)
+    return detail.get('result', {})
+
+
+def cmd_edit(args):
+    """编辑数据源（按名称或 ID 定位，支持追加 JDBC 参数 / 替换 URL / 改用户名密码）"""
+    if not args.id and not args.name:
+        print('请提供 --id 或 --name 参数')
+        return
+
+    # 获取完整数据源对象
+    if args.id:
+        detail = signed_request('GET', '/drag/onlDragDataSource/queryById', params={'id': args.id})
+        if not detail or not detail.get('success'):
+            print(f'获取数据源详情失败: {detail.get("message", "") if detail else "无响应"}')
+            return
+        full_ds = detail.get('result', {})
+    else:
+        full_ds = _find_ds_by_name(args.name)
+
+    changed = False
+
+    # --set-url：直接替换完整 dbUrl
+    if args.set_url:
+        print(f'旧 dbUrl: {full_ds.get("dbUrl", "")}')
+        full_ds['dbUrl'] = args.set_url
+        print(f'新 dbUrl: {full_ds["dbUrl"]}')
+        changed = True
+
+    # --add-jdbc-param：向 dbUrl 末尾追加 JDBC 参数（格式 key=value）
+    if args.add_jdbc_param:
+        old_url = full_ds.get('dbUrl', '')
+        param = args.add_jdbc_param.strip(';')
+        key = param.split('=')[0]
+        if key in old_url:
+            # 已存在则替换同名参数
+            import re
+            new_url = re.sub(rf'{re.escape(key)}=[^;]*', param, old_url)
+        else:
+            new_url = old_url.rstrip(';') + ';' + param + ';'
+        print(f'旧 dbUrl: {old_url}')
+        print(f'新 dbUrl: {new_url}')
+        full_ds['dbUrl'] = new_url
+        changed = True
+
+    # --user / --password
+    if args.user:
+        full_ds['dbUsername'] = args.user
+        changed = True
+    if args.password:
+        full_ds['dbPassword'] = args.password
+        changed = True
+
+    if not changed:
+        print('未指定任何修改项，可用参数：--set-url / --add-jdbc-param / --user / --password')
+        return
+
+    resp = signed_request('POST', '/drag/onlDragDataSource/edit', data=full_ds)
+    if not resp or not resp.get('success'):
+        print(f'编辑失败: {resp.get("message", "未知错误") if resp else "无响应"}')
+        return
+    print(f'编辑成功！数据源: {full_ds.get("name", full_ds.get("dbName", "?"))}')
 
 
 def cmd_delete(args):
@@ -459,10 +561,22 @@ def main():
     p_create.add_argument('--code', required=True, help='数据源编码')
     add_conn_params(p_create)
 
+    # edit
+    p_edit = subparsers.add_parser('edit', help='编辑数据源（修改URL/追加JDBC参数/改密码）')
+    add_common(p_edit)
+    p_edit.add_argument('--id', default=None, help='数据源 ID（与 --name 二选一）')
+    p_edit.add_argument('--name', default=None, help='数据源名称（与 --id 二选一）')
+    p_edit.add_argument('--set-url', default=None, dest='set_url', help='替换完整 dbUrl')
+    p_edit.add_argument('--add-jdbc-param', default=None, dest='add_jdbc_param',
+                        help='向 dbUrl 追加/替换 JDBC 参数，格式: key=value（如 trustServerCertificate=true）')
+    p_edit.add_argument('--user', default=None, help='修改数据库用户名')
+    p_edit.add_argument('--password', default=None, help='修改数据库密码')
+
     # test
     p_test = subparsers.add_parser('test', help='测试数据源连接')
     add_common(p_test)
     p_test.add_argument('--id', default=None, help='数据源 ID（使用已有数据源测试）')
+    p_test.add_argument('--name', default=None, help='数据源名称（自动查询 ID 后测试，与 --id 二选一）')
     add_conn_params(p_test)
 
     # delete
@@ -489,6 +603,8 @@ def main():
         cmd_detail(args)
     elif args.command == 'create':
         cmd_create(args)
+    elif args.command == 'edit':
+        cmd_edit(args)
     elif args.command == 'test':
         cmd_test(args)
     elif args.command == 'delete':

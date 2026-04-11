@@ -260,6 +260,8 @@ def query_page(page_id):
             info[field] = server_val
         elif field not in info:
             info[field] = ''
+    # 缓存 desJson（页面宽高等配置），save_page 时回传避免丢失
+    info['desJson'] = page.get('desJson', '') or ''
 
     # 解析 template
     template = page.get('template')
@@ -291,21 +293,38 @@ def save_page(page_id):
     1. 删除所有旧的 OnlDragPageComp 记录
     2. 从 template 中提取 config 创建新的 comp 记录
     3. 更新 template（移除 config，注入 pageCompId）
-    """
-    components = _page_components.get(page_id, [])
-    info = _page_info.get(page_id, {})
 
-    # 始终查询最新页面信息，确保 updateCount 正确
-    try:
-        page = query_page(page_id)
-        info = _page_info.get(page_id, {})
-        # 如果本地没有新增组件，使用已有的
-        if not components:
-            existing_template = page.get('template', [])
-            if isinstance(existing_template, list):
-                components = existing_template
-    except Exception as e:
-        print(f'[bi_utils] 查询页面警告: {e}，使用缓存信息')
+    优化说明（2026-04-08）：
+    - 不再在 save_page 内部调用 query_page，消除额外 API 往返和 updateCount 竞争
+    - 用 `page_id in _page_components` 区分"主动设置（含空列表）"vs"未设置"，
+      修复删除全部组件后 save_page 用旧模板覆盖的 bug
+    - 传 desJson 避免页面宽高配置丢失
+    """
+    info = _page_info.get(page_id)
+
+    # 若没有缓存的页面元数据（updateCount/name/style 等），先查询一次
+    if info is None:
+        try:
+            query_page(page_id)
+            info = _page_info.get(page_id, {})
+        except Exception as e:
+            print(f'[bi_utils] 查询页面警告: {e}，使用空元数据')
+            info = {}
+
+    # 取组件列表：
+    #   - page_id 在 _page_components 中（含 [] 空列表）→ 使用缓存值（含有意清空的情形）
+    #   - page_id 不在 _page_components 中 → 从服务端拉取，保留现有组件
+    if page_id in _page_components:
+        components = _page_components[page_id]
+    else:
+        try:
+            page = query_page(page_id)
+            info = _page_info.get(page_id, {})
+            existing = page.get('template', [])
+            components = existing if isinstance(existing, list) else []
+        except Exception as e:
+            print(f'[bi_utils] 查询页面警告: {e}，使用空组件列表')
+            components = []
 
     # 构建 template JSON
     template = json.dumps(components, ensure_ascii=False)
@@ -319,6 +338,7 @@ def save_page(page_id):
         'theme': info.get('theme', 'dark'),
         'backgroundImage': info.get('backgroundImage', ''),
         'designType': info.get('designType', 100),
+        'desJson': info.get('desJson', '') or '',
     }
 
     result = _request('POST', '/drag/page/edit', data=payload)
@@ -326,7 +346,7 @@ def save_page(page_id):
     if not result.get('success'):
         raise Exception(f"保存页面失败: {result.get('message')}")
 
-    # 更新 updateCount
+    # 更新 updateCount（下次保存时使用最新值，无需重新 query）
     new_count = result.get('result', {})
     if isinstance(new_count, dict):
         info['updateCount'] = new_count.get('updateCount', info.get('updateCount', 1) + 1)

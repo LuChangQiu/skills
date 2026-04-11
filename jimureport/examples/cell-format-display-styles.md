@@ -1,5 +1,10 @@
 # 单元格格式、类型与样式综合示例
 
+> **此文件已拆分为3个较小文件（建议直接读取拆分后的文件）：**
+> - `cell-format-concepts.md` — 数据集配置 + format/display/styles 核心概念
+> - `cell-format-rows.md` — 完整 rows/merges/cols 配置
+> - `cell-format-script.md` — 完整创建脚本（可直接运行）
+
 > 报表名：员工数据格式展示报表（ID: 1775125218946541259）
 > 用途：展示积木报表中所有常用的 `format`（数值/日期格式化）、`display`（单元格类型）、以及单元格样式（font/align/bgcolor/color）配置方式。
 > 数据集：JSON数据集（dbType="3"），无查询条件，不分组不合计。

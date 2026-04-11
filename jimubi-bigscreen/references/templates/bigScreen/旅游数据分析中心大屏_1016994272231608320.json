@@ -131,8 +131,8 @@
         "timeOut": 0,
         "chartData": "旅游数据分析中心大屏",
         "size": {
-          "width": 636,
-          "height": 88
+          "width": 803,
+          "height": 89
         },
         "actionConfig": {
           "operateType": "modal",
@@ -754,9 +754,9 @@
       "orderNum": 0,
       "compTextName": "",
       "component": "JCurrentTime",
-      "w": 270,
-      "x": 183,
-      "y": 238,
+      "w": 327,
+      "x": 154,
+      "y": 243,
       "pageCompId": "1021960592807219200",
       "componentName": "当前时间",
       "config": {

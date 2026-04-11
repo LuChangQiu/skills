@@ -244,3 +244,184 @@ py comp_ops.py add $API_BASE $TOKEN $PAGE_ID \
 | **getAllChartData 查询失败** | 同上驱动兼容性问题。需升级后端 `mongo-java-driver` 或 `mongodb-driver-sync` 依赖版本 |
 | **NoSQL 数据源不支持测试连接** | 前端 `isNoSql=true` 时隐藏「测试」按钮，API 层面 testConnection 也不适用于 NoSQL |
 | **dbUrl 不带协议前缀** | MongoDB 用 `host:port/db`（不是 `mongodb://host:port/db`），Redis 用 `host:port`（不是 `redis://host:port`） |
+
+---
+
+## 完整实战流程：MongoDB 数据源 → 数据集（含分组）→ 批量绑定大屏组件
+
+> 经 2026-04-02 实操验证。MongoDB 驱动兼容性问题导致数据暂无法加载，但数据集结构和图表绑定均正常。
+
+### 分步说明
+
+#### 步骤1：创建 MongoDB 数据源
+
+```bash
+py datasource_ops.py create $API_BASE $TOKEN \
+  --name "MongoDB-jeecg" --code "mongodb_jeecg" \
+  --db-type mongodb \
+  --host 192.168.1.188 --port 27017 --db jeecg \
+  --user jeecg --password 123456
+```
+
+- `--db-type` 必须小写 `mongodb`（datasource_ops.py 接受 `mongodb/redis/es`，不接受大写 `MONGODB`）
+- 返回成功后记录数据源 ID，后续创建数据集时传入 `--db-source`
+
+#### 步骤2：查询/创建数据集分组（必须，规范要求）
+
+**⚠️ 创建任何类型数据集前，必须先设置 `groupCode` 为 "示例数据集" 分组的 ID。**
+
+```python
+# 查询所有分组（实际返回数据集列表，分组也在其中）
+groups = bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup')
+group_list = groups.get('result', []) or []
+target = next((g for g in group_list if g.get('name') == '示例数据集'), None)
+
+if not target:
+    # 不存在则创建
+    cr = bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup', data={'name': '示例数据集'})
+    group_id = cr['result']['id']
+else:
+    group_id = target['id']
+# group_id 即为 groupCode
+```
+
+**分组 API 汇总：**
+
+| 操作 | 接口 | 方法 |
+|------|------|------|
+| 查询所有分组 | `/drag/onlDragDatasetHead/getAllGroup` | GET |
+| 新增分组 | `/drag/onlDragDatasetHead/addGroup` | POST，body: `{"name":"示例数据集"}` |
+| 编辑分组 | `/drag/onlDragDatasetHead/updateGroup` | POST |
+| 删除分组 | `/drag/onlDragDatasetHead/delDragDataSetHeadGroup?id=xxx` | DELETE |
+
+> **注意**：`getAllGroup` 返回的是全部数据集列表（分组也是一种数据集记录），遍历找 `name == "示例数据集"` 即可。
+
+#### 步骤3：创建 SQL 数据集（含 groupCode）
+
+```python
+items = [
+    {'fieldName': 'name', 'fieldTxt': '请假人', 'fieldType': 'String', 'izShow': 'Y', 'dictCode': ''},
+    {'fieldName': 'value', 'fieldTxt': '请假天数', 'fieldType': 'String', 'izShow': 'Y', 'dictCode': ''},
+]
+
+resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
+    'name': '请假人员请假天数统计',
+    'code': 'qj_person_days_stat',
+    'dbSource': MONGO_DS_ID,           # 步骤1 得到的数据源 ID
+    'querySql': 'select name, SUM(days) as value from mongo.ce_shi_qing_jia_dan group by name',
+    'dataType': 'sql',
+    'apiSelectSql': '',
+    'apiMethod': 'get',
+    'groupCode': group_id,             # ⚠️ 步骤2 得到的分组 ID，必填
+    'onlDragDatasetItemList': items
+})
+DS_ID = resp['result']['id']
+```
+
+**关键注意点：**
+- `groupCode` 必须在创建时传入，后期通过 edit 也可补设（`queryById` 取完整对象，修改 `groupCode` 字段，再 `POST /drag/onlDragDatasetHead/edit`）
+- MongoDB SQL 语法：表名加 `mongo.` 前缀，如 `select * from mongo.ce_shi_qing_jia_dan`
+- **字段必须手动指定**（`onlDragDatasetItemList`），不能通过 `queryFieldBySql` 自动解析（MongoDB 驱动问题）
+
+#### 步骤4：批量绑定大屏组件（以柱形图类为例）
+
+```python
+# 加载已有页面模板（关键：预设 _page_components 避免覆盖现有组件）
+page = bi_utils.query_page(PAGE_ID)
+bi_utils._page_components[PAGE_ID] = page.get('template', [])
+
+# 构建数据集配置（dataMapping 槽位标签 + fieldOption）
+def make_ds_config(slots):
+    fn = ['name', 'value']
+    return {
+        'dataType': 2,
+        'dataSetId': DS_ID,
+        'dataSetName': '请假人员请假天数统计',
+        'dataSetType': 'sql',
+        'dataSetApi': 'select name, SUM(days) as value from mongo.ce_shi_qing_jia_dan group by name',
+        'dataSetMethod': 'get',
+        'dataSetIzAgent': '1',
+        'chartData': '[]',
+        'viewLoading': True,
+        'paramOption': [],
+        'dataMapping': [
+            {'filed': s, 'mapping': fn[i] if i < len(fn) else fn[-1]}
+            for i, s in enumerate(slots)
+        ],
+        'fieldOption': [
+            {'label': it['fieldName'], 'text': it['fieldTxt'],
+             'type': it['fieldType'], 'value': it['fieldName'], 'show': it['izShow']}
+            for it in items
+        ],
+    }
+
+# 柱形图类10种（slots: 单系列用['维度','数值']，多系列用['维度','数值','分组']）
+bar_charts = [
+    ('JBar',           '基础柱形图',   ['维度', '数值']),
+    ('JStackBar',      '堆叠柱形图',   ['维度', '数值', '分组']),
+    ('JDynamicBar',    '动态柱形图',   ['维度', '数值']),
+    ('JCapsuleChart',  '胶囊图',       ['维度', '数值']),
+    ('JHorizontalBar', '基础条形图',   ['维度', '数值']),
+    ('JBackgroundBar', '背景柱形图',   ['维度', '数值']),
+    ('JMultipleBar',   '对比柱形图',   ['维度', '数值', '分组']),
+    ('JNegativeBar',   '正负条形图',   ['维度', '数值']),
+    ('JPercentBar',    '百分比条形图', ['维度', '数值', '分组']),
+    ('JMixLineBar',    '折柱图',       ['维度', '数值', '分组']),
+]
+
+defaults = json.load(open('default_configs.json', 'r', encoding='utf-8'))
+COLS, COMP_W, COMP_H, MARGIN = 3, 580, 380, 20
+
+for idx, (comp_type, name, slots) in enumerate(bar_charts):
+    key = comp_type
+    if key not in defaults:
+        key = next((k for k in defaults if k.startswith(comp_type)), None)
+    if not key:
+        continue
+    cfg = json.loads(json.dumps(defaults[key]))
+    w, h = cfg.pop('w', COMP_W), cfg.pop('h', COMP_H)
+    cfg['background'] = '#FFFFFF00'
+    cfg['borderColor'] = '#FFFFFF00'
+    opt = cfg.get('option', {})
+    if isinstance(opt, str):
+        opt = json.loads(opt) if opt else {}
+        cfg['option'] = opt
+    opt_title = opt.get('title')
+    if isinstance(opt_title, str):
+        opt['title'] = {'text': name, 'show': True}
+    elif isinstance(opt_title, dict):
+        opt_title['text'] = name
+    else:
+        opt['title'] = {'text': name, 'show': True}
+    cfg.update(copy.deepcopy(make_ds_config(slots)))
+    if not isinstance(cfg.get('chartData'), str):
+        cfg['chartData'] = json.dumps(cfg.get('chartData', []), ensure_ascii=False)
+    col, row = idx % COLS, idx // COLS
+    x = 20 + col * (COMP_W + MARGIN)
+    y = 20 + row * (COMP_H + MARGIN)
+    bi_utils.add_component(PAGE_ID, comp_type, name, x, y, w, h, cfg)
+
+bi_utils.save_page(PAGE_ID)  # 一次保存全部
+
+# 更新页面高度（组件超出默认1080px时必须）
+rows_count = (len(bar_charts) + COLS - 1) // COLS
+new_height = 20 + rows_count * (COMP_H + MARGIN) + 100
+raw = bi_utils._request('GET', '/drag/page/queryById', params={'id': PAGE_ID})
+p = raw['result']
+des_raw = p.get('desJson')
+des = json.loads(des_raw) if des_raw and isinstance(des_raw, str) else (des_raw or {})
+des['height'] = max(des.get('height', 1080), new_height)
+des.setdefault('width', 1920)
+p['desJson'] = json.dumps(des, ensure_ascii=False)
+bi_utils._request('POST', '/drag/page/edit', data=p)
+```
+
+### 踩坑记录（2026-04-02）
+
+| 问题 | 原因 | 解决方案 |
+|------|------|---------|
+| `getAllChartData` 返回 `result: null` | MongoDB Java Driver 版本不兼容，`listCollectionNames()` 方法签名变更 | 手动指定 `onlDragDatasetItemList` 字段，跳过字段自动推断 |
+| `datasource_ops.py --db-type MONGODB` 报错 | 该脚本 MongoDB 类型只接受小写 `mongodb` | 改为 `--db-type mongodb` |
+| `add_component` 覆盖已有组件 | 未预先设置 `_page_components[page_id]` | 调用前先 `bi_utils._page_components[PAGE_ID] = page.get('template', [])` |
+| `DELETE /drag/onlDragDatasetHead/delete` 返回"没有权限" | 服务端 drag 模块 DELETE 权限未开放 | 手动在 UI 删除，或联系管理员开放该接口权限码 |
+| 数据集创建后 `groupCode` 为 null | 创建时漏传 `groupCode` | 补救：`queryById` 取完整对象 → 修改 `groupCode` → `POST edit` |

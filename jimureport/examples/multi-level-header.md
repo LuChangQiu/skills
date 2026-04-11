@@ -1,5 +1,10 @@
 # 多级循环表头示例（横向纵向组合分组）
 
+> **此文件已拆分为3个较小文件（建议直接读取拆分后的文件）：**
+> - `multi-level-header-basic.md` — 示例1-3（基础多级表头）
+> - `multi-level-header-advanced.md` — 示例4-5（交叉报表+区域销售统计）
+> - `multi-level-header-api.md` — 特殊规则 + 示例6（API数据集）+ 踩坑记录
+
 **类型：** 多级循环表头（交叉表）
 **特征：** `groupRight()` 横向展开表头 + `dynamic()` 填充数据 + `group()` 纵向分组
 **参考文档：** https://help.jimureport.com/group/directionDynamic
@@ -453,6 +458,61 @@ year（年份）和 mouth（月份）作为二级横向表头动态展开，diqu
 7. **所有边框颜色保持一致** — 统一用 `#d8d8d8` 浅灰，不要混用 `#000`
 8. **groupRight merge 合并列数** — `merge: [0, N-1]`，N = 下方 dynamic/compute 字段数
 9. **中文文本 UTF-8** — Python 调用 API 时必须 `json.dumps(data, ensure_ascii=False).encode('utf-8')`，避免斜线表头等中文文本变成乱码
+
+### 交叉报表常见踩坑（2026-04-02 补充）
+
+> 以下是创建交叉报表时容易出错的点，务必注意：
+
+**A. rows 索引从 "0" 开始**
+- rows 的 key 必须从 `"0"` 开始（不是 `"1"`）
+- `rows["0"]` = 第1行（标题），`rows["1"]` = 第2行（表头），以此类推
+- merges 中 UI 行号 = code_row + 1
+
+**B. API 数据集字段必须手动定义**
+- API 数据集（dbType="1"）不支持 `queryFieldBySql` 解析
+- 必须手动构建 fieldList，不能依赖解析接口返回
+- 示例：`[{"fieldName": "diqu", "fieldText": "地区", "widgetType": "String", ...}, ...]`
+
+**C. groupField 格式是 "数据集编码.字段名"**
+- 不是 `db.字段名`，而是 `groupsub.diqu`（假设数据集编码为 groupsub）
+- 如果格式错误，分组不会生效
+
+**D. cols 必须包含 "0" 作为左边距空列**
+- `cols = {"0": {"width": 20}, "1": {"width": 80}, ...}`
+- A 列（col "0"）是左边距空列，内容从 B 列（col "1"）开始
+- 缺少 col "0" 会导致列对齐问题
+
+**E. 纵向分组字段必须设置 aggregate:"group"**
+```json
+"cells": {
+    "1": {"text": "#{groupsub.group(diqu)}", "style": 2, "aggregate": "group"},
+    "2": {"text": "#{groupsub.group(class)}", "style": 2, "aggregate": "group"}
+}
+```
+
+**F. 横向分组字段必须设置 aggregate:"group" 和 direction:"right"**
+```json
+"cells": {
+    "3": {"text": "#{groupsub.groupRight(mouth)}", "style": 3,
+          "aggregate": "group", "direction": "right"}
+}
+```
+
+**G. 动态值字段必须设置 aggregate:"dynamic"**
+```json
+"cells": {
+    "3": {"text": "#{groupsub.dynamic(sales)}", "style": 2, "aggregate": "dynamic"}
+}
+```
+
+**H. merges 使用 UI 行号格式**
+- `merges = ["B1:D1", "B4:C4"]` — 不是 code_row，是 UI 行号
+- code_row "0" → UI 行号 1，所以 "B1:D1" 是第1行
+- code_row "3" → UI 行号 4，所以 "B4:C4" 是第4行
+
+**I. 总计行 sum 公式的单元格引用**
+- `=SUM(D3)` 中 D3 是 UI 单元格引用
+- 数据绑定行在 code_row "2"（UI 第3行），所以 sum 引用 D3
 
 ---
 

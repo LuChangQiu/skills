@@ -22,6 +22,9 @@
 
   # 重命名页面
   py page_ops.py rename <API_BASE> <TOKEN> <PAGE_ID> --name "新名称"
+
+  # 删除页面
+  py page_ops.py delete <API_BASE> <TOKEN> <PAGE_ID>
 """
 
 import sys, json, os, argparse
@@ -255,6 +258,15 @@ def cmd_rename(args):
     print(f'页面重命名: "{old_name}" → "{args.name}"')
 
 
+def cmd_delete(args):
+    """删除页面"""
+    result = bi_utils._request('DELETE', '/drag/page/delete', params={'id': args.page_id})
+    if result.get('success'):
+        print(f'页面已删除: {args.page_id}')
+    else:
+        print(f'删除失败: {result.get("message", "未知错误")}')
+
+
 # ============================================================
 # CLI 入口
 # ============================================================
@@ -303,6 +315,10 @@ def main():
     add_common(p_rename)
     p_rename.add_argument('--name', required=True, help='新页面名称')
 
+    # delete
+    p_delete = subparsers.add_parser('delete', help='删除页面')
+    add_common(p_delete)
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -322,6 +338,8 @@ def main():
         cmd_watermark(args)
     elif args.command == 'rename':
         cmd_rename(args)
+    elif args.command == 'delete':
+        cmd_delete(args)
 
 
 if __name__ == '__main__':

@@ -2361,187 +2361,236 @@
     "linkageConfig": [],
     "chartData": [
       {
-        "title": "通知标题1",
-        "content": "这是一条通知内容",
-        "time": "2025-01-01"
+        "rank": 1,
+        "customerName": "北京华信科技有限公司",
+        "contractAmount": 8000
       },
       {
-        "title": "通知标题2",
-        "content": "这是第二条通知内容",
-        "time": "2025-01-02"
+        "rank": 2,
+        "customerName": "上海(中国)智远信息技术股份有限公司",
+        "contractAmount": 7800
       },
       {
-        "title": "通知标题3",
-        "content": "这是第三条通知内容",
-        "time": "2025-01-03"
+        "rank": 3,
+        "customerName": "深圳市鼎盛软件有限公司",
+        "contractAmount": 6880
+      },
+      {
+        "rank": 4,
+        "customerName": "广州恒信数据服务有限公司",
+        "contractAmount": 5600
+      },
+      {
+        "rank": 5,
+        "customerName": "杭州云帆科技发展有限公司",
+        "contractAmount": 4900
+      },
+      {
+        "rank": 6,
+        "customerName": "成都睿智科技有限公司",
+        "contractAmount": 4700
+      },
+      {
+        "rank": 7,
+        "customerName": "南京博思信息技术有限公司",
+        "contractAmount": 4500
+      },
+      {
+        "rank": 8,
+        "customerName": "苏州新创软件有限公司",
+        "contractAmount": 4200
+      },
+      {
+        "rank": 9,
+        "customerName": "重庆智联科技有限公司",
+        "contractAmount": 3900
+      },
+      {
+        "rank": 10,
+        "customerName": "武汉华腾信息技术有限公司",
+        "contractAmount": 3600
       }
     ],
     "option": {
-      "fieldMapping": [
+      "showIndex": false,
+      "autoScrollEnabled": true,
+      "columnGap": 16,
+      "rowGap": 16,
+      "indexFieldStyle": {},
+      "contentFieldMapping": [
         {
-          "name": "标题",
-          "key": "title",
-          "textStyle": {
-            "fontSize": 16,
-            "fontWeight": "bold",
-            "fontColor": "#FFFFFF"
-          }
+          "itemConfig": {
+            "marginRight": 0,
+            "alignItems": "flex-start",
+            "width": 0,
+            "marginBottom": 4,
+            "layoutDirection": "row",
+            "justifyContent": "center",
+            "marginTop": 0,
+            "height": 73,
+            "marginLeft": 0
+          },
+          "valueStyle": {
+            "fontSize": 14,
+            "marginBottom": 4,
+            "fontColor": "#A6D8FF",
+            "fontWeight": "normal",
+            "height": 0
+          },
+          "showValue": true,
+          "valueCompose": {
+            "contentStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "enabled": false
+          },
+          "nameStyle": {
+            "fontSize": 14,
+            "fontColor": "#CCCCCC",
+            "fontWeight": "normal"
+          },
+          "omitConfig": {
+            "show": true,
+            "lines": 3
+          },
+          "nameCompose": {
+            "enabled": false
+          },
+          "valueType": "non-array",
+          "name": "客户名称",
+          "thousandSeparatorConfig": {
+            "show": false
+          },
+          "key": "customerName",
+          "showLabel": false
         },
         {
-          "name": "内容",
-          "key": "content",
-          "textStyle": {
+          "itemConfig": {
+            "marginRight": 0,
+            "alignItems": "center",
+            "width": 0,
+            "marginBottom": 3,
+            "layoutDirection": "row",
+            "justifyContent": "center",
+            "marginTop": 0,
+            "height": 68,
+            "marginLeft": 0
+          },
+          "valueStyle": {
+            "fontSize": 24,
+            "marginBottom": 0,
+            "fontColor": "#FEAF26",
+            "fontWeight": "bold",
+            "height": 0,
+            "marginLeft": 0
+          },
+          "showValue": true,
+          "valueCompose": {
+            "enabled": false
+          },
+          "nameStyle": {
+            "marginRight": 0,
+            "width": 225,
             "fontSize": 14,
-            "fontColor": "#CCCCCC"
-          }
+            "fontColor": "#CCCCCC",
+            "fontWeight": "normal",
+            "marginLeft": 0
+          },
+          "omitConfig": {
+            "show": false,
+            "lines": 1
+          },
+          "nameCompose": {
+            "enabled": false
+          },
+          "valueType": "non-array",
+          "name": "排名",
+          "thousandSeparatorConfig": {
+            "show": false
+          },
+          "key": "rank",
+          "showLabel": false
+        },
+        {
+          "itemConfig": {
+            "marginRight": 0,
+            "alignItems": "center",
+            "width": 0,
+            "marginBottom": 0,
+            "layoutDirection": "column-reverse",
+            "justifyContent": "center",
+            "marginTop": 0,
+            "height": 100,
+            "marginLeft": 0
+          },
+          "valueStyle": {
+            "fontSize": 18,
+            "marginBottom": 2,
+            "fontGradient": {
+              "endColor": "#49ABFF",
+              "type": "linear",
+              "enabled": true,
+              "startColor": "#96F5F8",
+              "direction": "to bottom"
+            },
+            "fontColor": "#40A9FF",
+            "fontWeight": "bold"
+          },
+          "showValue": true,
+          "valueCompose": {
+            "contentStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "suffixStyle": {
+              "fontSize": 14,
+              "fontColor": "#40A9FF"
+            },
+            "suffix": "万元",
+            "enabled": false
+          },
+          "nameStyle": {
+            "fontSize": 12,
+            "fontColor": "#B0B0B0",
+            "fontWeight": "normal",
+            "height": 0
+          },
+          "omitConfig": {
+            "show": false,
+            "lines": 1
+          },
+          "nameCompose": {
+            "enabled": false
+          },
+          "valueType": "non-array",
+          "name": "合同额(万元)",
+          "thousandSeparatorConfig": {
+            "show": true
+          },
+          "key": "contractAmount",
+          "showLabel": true
         }
       ],
-      "autoScrollEnabled": true,
-      "autoScrollSpeed": 50,
-      "autoScrollDirection": "to-top",
+      "contentCurrent": 2,
+      "autoScrollSpeed": 100,
+      "scrollDirection": "left",
       "cardStyle": {
         "backgroundColor": "#1890FF1A",
         "borderColor": "#1890FF",
+        "backgroundImage": "/img/cardScroll/cardScroll-bg-01.png",
+        "paddingRight": 5,
         "borderEnabled": true,
+        "paddingBottom": 5,
         "borderRadius": 8,
-        "borderWidth": 1,
-        "paddingTop": 12,
-        "paddingBottom": 12,
-        "paddingLeft": 16,
-        "paddingRight": 16,
-        "marginBottom": 10
+        "borderWidth": 0,
+        "width": 98,
+        "bgHighlightImage": "",
+        "paddingTop": 5,
+        "borderStyle": "dashed",
+        "paddingLeft": 5,
+        "height": 250
       },
-      "row": {
-        "height": 80
-      }
-    }
-  },
-  "JCardScroll_卡片滚动(竖向+序号)": {
-    "w": 430,
-    "h": 530,
-    "dataType": 1,
-    "timeOut": 0,
-    "linkageConfig": [],
-    "chartData": [
-      {
-        "title": "通知标题1",
-        "content": "这是一条通知内容",
-        "time": "2025-01-01"
-      },
-      {
-        "title": "通知标题2",
-        "content": "这是第二条通知内容",
-        "time": "2025-01-02"
-      },
-      {
-        "title": "通知标题3",
-        "content": "这是第三条通知内容",
-        "time": "2025-01-03"
-      }
-    ],
-    "option": {
-      "fieldMapping": [
-        {
-          "name": "标题",
-          "key": "title",
-          "textStyle": {
-            "fontSize": 16,
-            "fontWeight": "bold",
-            "fontColor": "#FFFFFF"
-          }
-        },
-        {
-          "name": "内容",
-          "key": "content",
-          "textStyle": {
-            "fontSize": 14,
-            "fontColor": "#CCCCCC"
-          }
-        }
-      ],
-      "autoScrollEnabled": true,
-      "autoScrollSpeed": 50,
-      "autoScrollDirection": "to-top",
-      "cardStyle": {
-        "backgroundColor": "#1890FF1A",
-        "borderColor": "#1890FF",
-        "borderEnabled": true,
-        "borderRadius": 8,
-        "borderWidth": 1,
-        "paddingTop": 12,
-        "paddingBottom": 12,
-        "paddingLeft": 16,
-        "paddingRight": 16,
-        "marginBottom": 10
-      },
-      "row": {
-        "height": 80
-      },
-      "showIndex": true
-    }
-  },
-  "JCardScroll_卡片滚动(高亮)": {
-    "w": 538,
-    "h": 302,
-    "dataType": 1,
-    "timeOut": 0,
-    "linkageConfig": [],
-    "chartData": [
-      {
-        "title": "通知标题1",
-        "content": "这是一条通知内容",
-        "time": "2025-01-01"
-      },
-      {
-        "title": "通知标题2",
-        "content": "这是第二条通知内容",
-        "time": "2025-01-02"
-      },
-      {
-        "title": "通知标题3",
-        "content": "这是第三条通知内容",
-        "time": "2025-01-03"
-      }
-    ],
-    "option": {
-      "fieldMapping": [
-        {
-          "name": "标题",
-          "key": "title",
-          "textStyle": {
-            "fontSize": 16,
-            "fontWeight": "bold",
-            "fontColor": "#FFFFFF"
-          }
-        },
-        {
-          "name": "内容",
-          "key": "content",
-          "textStyle": {
-            "fontSize": 14,
-            "fontColor": "#CCCCCC"
-          }
-        }
-      ],
-      "autoScrollEnabled": true,
-      "autoScrollSpeed": 50,
-      "autoScrollDirection": "to-top",
-      "cardStyle": {
-        "backgroundColor": "#1890FF1A",
-        "borderColor": "#1890FF",
-        "borderEnabled": true,
-        "borderRadius": 8,
-        "borderWidth": 1,
-        "paddingTop": 12,
-        "paddingBottom": 12,
-        "paddingLeft": 16,
-        "paddingRight": 16,
-        "marginBottom": 10
-      },
-      "row": {
-        "height": 80
-      },
-      "highlightFirst": true
+      "currentValue": 0,
+      "direction": "horizontal"
     }
   },
   "JCarousel": {
@@ -10409,455 +10458,6 @@
       }
     }
   },
-  "JScrollList_滚动列表(多行+序号)": {
-    "w": 515,
-    "h": 220,
-    "dataType": 1,
-    "timeOut": 0,
-    "chartData": [
-      {
-        "id": 1,
-        "plateNumber": "粤B12345",
-        "violationCount": 3,
-        "brand": "丰田"
-      },
-      {
-        "id": 2,
-        "plateNumber": "粤A67890",
-        "violationCount": 1,
-        "brand": "本田"
-      },
-      {
-        "id": 3,
-        "plateNumber": "粤C54321",
-        "violationCount": 2,
-        "brand": "大众"
-      },
-      {
-        "id": 4,
-        "plateNumber": "粤D98765",
-        "violationCount": 0,
-        "brand": "比亚迪"
-      },
-      {
-        "id": 5,
-        "plateNumber": "粤E11223",
-        "violationCount": 5,
-        "brand": "特斯拉"
-      },
-      {
-        "id": 6,
-        "plateNumber": "粤F33445",
-        "violationCount": 4,
-        "brand": "福特"
-      },
-      {
-        "id": 7,
-        "plateNumber": "粤G55667",
-        "violationCount": 2,
-        "brand": "雪佛兰"
-      },
-      {
-        "id": 8,
-        "plateNumber": "粤H77889",
-        "violationCount": 6,
-        "brand": "宝马"
-      },
-      {
-        "id": 9,
-        "plateNumber": "粤J99001",
-        "violationCount": 1,
-        "brand": "奔驰"
-      },
-      {
-        "id": 10,
-        "plateNumber": "粤K11223",
-        "violationCount": 0,
-        "brand": "奥迪"
-      },
-      {
-        "id": 11,
-        "plateNumber": "粤L44556",
-        "violationCount": 3,
-        "brand": "起亚"
-      },
-      {
-        "id": 12,
-        "plateNumber": "粤M77889",
-        "violationCount": 2,
-        "brand": "现代"
-      },
-      {
-        "id": 13,
-        "plateNumber": "粤N99002",
-        "violationCount": 5,
-        "brand": "路虎"
-      },
-      {
-        "id": 14,
-        "plateNumber": "粤P22334",
-        "violationCount": 1,
-        "brand": "沃尔沃"
-      },
-      {
-        "id": 15,
-        "plateNumber": "粤Q55667",
-        "violationCount": 4,
-        "brand": "马自达"
-      }
-    ],
-    "option": {
-      "showIndex": true,
-      "backgroundColor": "#FFFFFF00",
-      "fieldMapping": [
-        {
-          "__system": true,
-          "textAlign": "center",
-          "name": "序号",
-          "width": 60,
-          "textStyle": {
-            "fontSize": 20,
-            "fontGradient": {
-              "endColor": "#FF4500",
-              "type": "linear",
-              "enabled": true,
-              "startColor": "#FFD700",
-              "direction": "to bottom"
-            },
-            "fontStyle": "italic",
-            "fontColor": "#FFFFFF",
-            "fontWeight": "bold"
-          },
-          "key": "__index__"
-        },
-        {
-          "marginRight": 18,
-          "compose": {
-            "contentStyle": {
-              "fontSize": 18,
-              "fontGradient": {
-                "endColor": "#FFFFFF",
-                "enabled": false,
-                "startColor": "#000000"
-              },
-              "fontStyle": "italic",
-              "fontColor": "#D1D1D1"
-            },
-            "prefix": "",
-            "prefixStyle": {
-              "fontColor": "#FFFFFF"
-            },
-            "enabled": true
-          },
-          "name": "车牌号",
-          "width": 90,
-          "textStyle": {
-            "fontSize": 16,
-            "fontWeight": "bold",
-            "fontColor": "#FFFFFF"
-          },
-          "key": "plateNumber",
-          "marginLeft": 0
-        },
-        {
-          "compose": {
-            "contentStyle": {
-              "marginRight": 3,
-              "fontSize": 23,
-              "fontGradient": {
-                "endColor": "#0066CC",
-                "type": "linear",
-                "enabled": true,
-                "startColor": "#00D4FF",
-                "direction": "to bottom"
-              },
-              "fontStyle": "italic",
-              "fontColor": "#FFFFFF",
-              "fontWeight": "bold",
-              "marginLeft": 4
-            },
-            "suffixStyle": {
-              "fontSize": 18,
-              "fontColor": "#FFFFFF"
-            },
-            "prefix": "本月",
-            "prefixStyle": {
-              "fontSize": 18,
-              "fontColor": "#FFFFFF"
-            },
-            "suffix": "次",
-            "enabled": true
-          },
-          "name": "违规次数",
-          "width": 100,
-          "textStyle": {
-            "fontColor": "#FFFFFF"
-          },
-          "key": "violationCount"
-        }
-      ],
-      "itemsPerRow": 2,
-      "borderRadius": 8,
-      "autoScrollEnabled": true,
-      "showHeader": false,
-      "indexFieldStyle": {
-        "width": 28,
-        "textStyle": {
-          "fontSize": 21,
-          "fontGradient": {
-            "endColor": "#F54100",
-            "type": "linear",
-            "enabled": true,
-            "startColor": "#D4BA28",
-            "direction": "to bottom"
-          },
-          "fontStyle": "italic",
-          "fontColor": "#FFFFFF"
-        },
-        "marginLeft": 15
-      },
-      "header": {
-        "padding": "8px 0",
-        "backgroundColor": "#1890FF",
-        "textAlign": "center",
-        "fontSize": 16,
-        "fontColor": "#FFFFFF",
-        "fontWeight": "bold"
-      },
-      "row": {
-        "backgroundColor": "#FFFFFF",
-        "backgroundImg": "",
-        "alternateBackgroundColor": "#F8F9FA",
-        "backgroundSize": "100% 100%",
-        "marginBottom": 10,
-        "backgroundRepeat": "no-repeat",
-        "backgroundType": "image",
-        "height": 44
-      }
-    }
-  },
-  "JScrollList_滚动列表(带表头)": {
-    "w": 515,
-    "h": 310,
-    "dataType": 1,
-    "timeOut": 0,
-    "chartData": [
-      {
-        "id": 1,
-        "plateNumber": "粤B12345",
-        "violationCount": 3,
-        "brand": "丰田"
-      },
-      {
-        "id": 2,
-        "plateNumber": "粤A67890",
-        "violationCount": 1,
-        "brand": "本田"
-      },
-      {
-        "id": 3,
-        "plateNumber": "粤C54321",
-        "violationCount": 2,
-        "brand": "大众"
-      },
-      {
-        "id": 4,
-        "plateNumber": "粤D98765",
-        "violationCount": 0,
-        "brand": "比亚迪"
-      },
-      {
-        "id": 5,
-        "plateNumber": "粤E11223",
-        "violationCount": 5,
-        "brand": "特斯拉"
-      },
-      {
-        "id": 6,
-        "plateNumber": "粤F33445",
-        "violationCount": 4,
-        "brand": "福特"
-      },
-      {
-        "id": 7,
-        "plateNumber": "粤G55667",
-        "violationCount": 2,
-        "brand": "雪佛兰"
-      },
-      {
-        "id": 8,
-        "plateNumber": "粤H77889",
-        "violationCount": 6,
-        "brand": "宝马"
-      },
-      {
-        "id": 9,
-        "plateNumber": "粤J99001",
-        "violationCount": 1,
-        "brand": "奔驰"
-      },
-      {
-        "id": 10,
-        "plateNumber": "粤K11223",
-        "violationCount": 0,
-        "brand": "奥迪"
-      },
-      {
-        "id": 11,
-        "plateNumber": "粤L44556",
-        "violationCount": 3,
-        "brand": "起亚"
-      },
-      {
-        "id": 12,
-        "plateNumber": "粤M77889",
-        "violationCount": 2,
-        "brand": "现代"
-      },
-      {
-        "id": 13,
-        "plateNumber": "粤N99002",
-        "violationCount": 5,
-        "brand": "路虎"
-      },
-      {
-        "id": 14,
-        "plateNumber": "粤P22334",
-        "violationCount": 1,
-        "brand": "沃尔沃"
-      },
-      {
-        "id": 15,
-        "plateNumber": "粤Q55667",
-        "violationCount": 4,
-        "brand": "马自达"
-      },
-      {
-        "id": 16,
-        "plateNumber": "粤R00000",
-        "violationCount": 0,
-        "brand": "丰田"
-      }
-    ],
-    "option": {
-      "showIndex": true,
-      "backgroundColor": "#FFFFFF00",
-      "fieldMapping": [
-        {
-          "marginRight": 0,
-          "compose": {
-            "contentStyle": {
-              "fontSize": 18,
-              "fontGradient": {
-                "endColor": "#FFFFFF",
-                "enabled": false,
-                "startColor": "#000000"
-              },
-              "fontStyle": "italic",
-              "fontColor": "#D1D1D1"
-            },
-            "prefix": "",
-            "prefixStyle": {
-              "fontColor": "#FFFFFF"
-            },
-            "enabled": true
-          },
-          "textAlign": "center",
-          "name": "车牌号",
-          "width": 0,
-          "textStyle": {
-            "fontSize": 16,
-            "fontWeight": "bold",
-            "fontColor": "#FFFFFF"
-          },
-          "key": "plateNumber",
-          "marginLeft": 0
-        },
-        {
-          "compose": {
-            "contentStyle": {
-              "marginRight": 3,
-              "fontSize": 23,
-              "fontGradient": {
-                "endColor": "#0066CC",
-                "type": "linear",
-                "enabled": true,
-                "startColor": "#00D4FF",
-                "direction": "to bottom"
-              },
-              "fontStyle": "italic",
-              "fontColor": "#FFFFFF",
-              "fontWeight": "bold",
-              "marginLeft": 4
-            },
-            "suffixStyle": {
-              "fontSize": 18,
-              "fontColor": "#FFFFFF"
-            },
-            "prefix": "本月",
-            "prefixStyle": {
-              "fontSize": 18,
-              "fontColor": "#FFFFFF"
-            },
-            "suffix": "次",
-            "enabled": true
-          },
-          "textAlign": "center",
-          "name": "违规次数",
-          "width": 0,
-          "textStyle": {
-            "fontColor": "#FFFFFF"
-          },
-          "key": "violationCount"
-        }
-      ],
-      "itemsPerRow": 1,
-      "borderRadius": 8,
-      "autoScrollEnabled": true,
-      "showHeader": true,
-      "indexFieldStyle": {
-        "textAlign": "center",
-        "width": 38,
-        "textStyle": {
-          "fontSize": 21,
-          "fontGradient": {
-            "endColor": "#F54100",
-            "type": "linear",
-            "enabled": true,
-            "startColor": "#D4BA28",
-            "direction": "to bottom"
-          },
-          "fontStyle": "italic",
-          "fontColor": "#FFFFFF"
-        },
-        "marginLeft": 3
-      },
-      "header": {
-        "padding": "8px 0",
-        "backgroundColor": "#003B6F",
-        "textAlign": "center",
-        "fontSize": 16,
-        "fontGradient": {
-          "endColor": "#FFFFFF",
-          "enabled": false,
-          "startColor": "#000000"
-        },
-        "fontColor": "#FFFFFF",
-        "fontWeight": "bold",
-        "height": 43
-      },
-      "row": {
-        "backgroundColor": "#001E3C",
-        "backgroundImg": "/img/scrollList-bg-02.png",
-        "alternateBackgroundColor": "#00284E",
-        "backgroundSize": "100% 100%",
-        "marginBottom": 1,
-        "backgroundRepeat": "no-repeat",
-        "backgroundType": "color",
-        "height": 44
-      }
-    }
-  },
   "JScrollRankingBoard": {
     "w": 450,
     "h": 300,
@@ -14034,6 +13634,1360 @@
           "fontWeight": "normal"
         }
       }
+    }
+  },
+  "JScrollList_2": {
+    "w": 515,
+    "h": 220,
+    "dataType": 1,
+    "timeOut": 0,
+    "chartData": [
+      {
+        "id": 1,
+        "plateNumber": "粤B12345",
+        "violationCount": 3,
+        "brand": "丰田"
+      },
+      {
+        "id": 2,
+        "plateNumber": "粤A67890",
+        "violationCount": 1,
+        "brand": "本田"
+      },
+      {
+        "id": 3,
+        "plateNumber": "粤C54321",
+        "violationCount": 2,
+        "brand": "大众"
+      },
+      {
+        "id": 4,
+        "plateNumber": "粤D98765",
+        "violationCount": 0,
+        "brand": "比亚迪"
+      },
+      {
+        "id": 5,
+        "plateNumber": "粤E11223",
+        "violationCount": 5,
+        "brand": "特斯拉"
+      },
+      {
+        "id": 6,
+        "plateNumber": "粤F33445",
+        "violationCount": 4,
+        "brand": "福特"
+      },
+      {
+        "id": 7,
+        "plateNumber": "粤G55667",
+        "violationCount": 2,
+        "brand": "雪佛兰"
+      },
+      {
+        "id": 8,
+        "plateNumber": "粤H77889",
+        "violationCount": 6,
+        "brand": "宝马"
+      },
+      {
+        "id": 9,
+        "plateNumber": "粤J99001",
+        "violationCount": 1,
+        "brand": "奔驰"
+      },
+      {
+        "id": 10,
+        "plateNumber": "粤K11223",
+        "violationCount": 0,
+        "brand": "奥迪"
+      },
+      {
+        "id": 11,
+        "plateNumber": "粤L44556",
+        "violationCount": 3,
+        "brand": "起亚"
+      },
+      {
+        "id": 12,
+        "plateNumber": "粤M77889",
+        "violationCount": 2,
+        "brand": "现代"
+      },
+      {
+        "id": 13,
+        "plateNumber": "粤N99002",
+        "violationCount": 5,
+        "brand": "路虎"
+      },
+      {
+        "id": 14,
+        "plateNumber": "粤P22334",
+        "violationCount": 1,
+        "brand": "沃尔沃"
+      },
+      {
+        "id": 15,
+        "plateNumber": "粤Q55667",
+        "violationCount": 4,
+        "brand": "马自达"
+      }
+    ],
+    "option": {
+      "showIndex": true,
+      "backgroundColor": "#FFFFFF00",
+      "fieldMapping": [
+        {
+          "__system": true,
+          "textAlign": "center",
+          "name": "序号",
+          "width": 60,
+          "textStyle": {
+            "fontSize": 20,
+            "fontGradient": {
+              "endColor": "#FF4500",
+              "type": "linear",
+              "enabled": true,
+              "startColor": "#FFD700",
+              "direction": "to bottom"
+            },
+            "fontStyle": "italic",
+            "fontColor": "#FFFFFF",
+            "fontWeight": "bold"
+          },
+          "key": "__index__"
+        },
+        {
+          "marginRight": 18,
+          "compose": {
+            "contentStyle": {
+              "fontSize": 18,
+              "fontGradient": {
+                "endColor": "#FFFFFF",
+                "enabled": false,
+                "startColor": "#000000"
+              },
+              "fontStyle": "italic",
+              "fontColor": "#D1D1D1"
+            },
+            "prefix": "",
+            "prefixStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "enabled": true
+          },
+          "name": "车牌号",
+          "width": 90,
+          "textStyle": {
+            "fontSize": 16,
+            "fontWeight": "bold",
+            "fontColor": "#FFFFFF"
+          },
+          "key": "plateNumber",
+          "marginLeft": 0
+        },
+        {
+          "compose": {
+            "contentStyle": {
+              "marginRight": 3,
+              "fontSize": 23,
+              "fontGradient": {
+                "endColor": "#0066CC",
+                "type": "linear",
+                "enabled": true,
+                "startColor": "#00D4FF",
+                "direction": "to bottom"
+              },
+              "fontStyle": "italic",
+              "fontColor": "#FFFFFF",
+              "fontWeight": "bold",
+              "marginLeft": 4
+            },
+            "suffixStyle": {
+              "fontSize": 18,
+              "fontColor": "#FFFFFF"
+            },
+            "prefix": "本月",
+            "prefixStyle": {
+              "fontSize": 18,
+              "fontColor": "#FFFFFF"
+            },
+            "suffix": "次",
+            "enabled": true
+          },
+          "name": "违规次数",
+          "width": 100,
+          "textStyle": {
+            "fontColor": "#FFFFFF"
+          },
+          "key": "violationCount"
+        }
+      ],
+      "itemsPerRow": 2,
+      "borderRadius": 8,
+      "autoScrollEnabled": true,
+      "showHeader": false,
+      "indexFieldStyle": {
+        "width": 28,
+        "textStyle": {
+          "fontSize": 21,
+          "fontGradient": {
+            "endColor": "#F54100",
+            "type": "linear",
+            "enabled": true,
+            "startColor": "#D4BA28",
+            "direction": "to bottom"
+          },
+          "fontStyle": "italic",
+          "fontColor": "#FFFFFF"
+        },
+        "marginLeft": 15
+      },
+      "header": {
+        "padding": "8px 0",
+        "backgroundColor": "#1890FF",
+        "textAlign": "center",
+        "fontSize": 16,
+        "fontColor": "#FFFFFF",
+        "fontWeight": "bold"
+      },
+      "row": {
+        "backgroundColor": "#FFFFFF",
+        "backgroundImg": "",
+        "alternateBackgroundColor": "#F8F9FA",
+        "backgroundSize": "100% 100%",
+        "marginBottom": 10,
+        "backgroundRepeat": "no-repeat",
+        "backgroundType": "image",
+        "height": 44
+      }
+    }
+  },
+  "JScrollList_3": {
+    "w": 515,
+    "h": 310,
+    "dataType": 1,
+    "timeOut": 0,
+    "chartData": [
+      {
+        "id": 1,
+        "plateNumber": "粤B12345",
+        "violationCount": 3,
+        "brand": "丰田"
+      },
+      {
+        "id": 2,
+        "plateNumber": "粤A67890",
+        "violationCount": 1,
+        "brand": "本田"
+      },
+      {
+        "id": 3,
+        "plateNumber": "粤C54321",
+        "violationCount": 2,
+        "brand": "大众"
+      },
+      {
+        "id": 4,
+        "plateNumber": "粤D98765",
+        "violationCount": 0,
+        "brand": "比亚迪"
+      },
+      {
+        "id": 5,
+        "plateNumber": "粤E11223",
+        "violationCount": 5,
+        "brand": "特斯拉"
+      },
+      {
+        "id": 6,
+        "plateNumber": "粤F33445",
+        "violationCount": 4,
+        "brand": "福特"
+      },
+      {
+        "id": 7,
+        "plateNumber": "粤G55667",
+        "violationCount": 2,
+        "brand": "雪佛兰"
+      },
+      {
+        "id": 8,
+        "plateNumber": "粤H77889",
+        "violationCount": 6,
+        "brand": "宝马"
+      },
+      {
+        "id": 9,
+        "plateNumber": "粤J99001",
+        "violationCount": 1,
+        "brand": "奔驰"
+      },
+      {
+        "id": 10,
+        "plateNumber": "粤K11223",
+        "violationCount": 0,
+        "brand": "奥迪"
+      },
+      {
+        "id": 11,
+        "plateNumber": "粤L44556",
+        "violationCount": 3,
+        "brand": "起亚"
+      },
+      {
+        "id": 12,
+        "plateNumber": "粤M77889",
+        "violationCount": 2,
+        "brand": "现代"
+      },
+      {
+        "id": 13,
+        "plateNumber": "粤N99002",
+        "violationCount": 5,
+        "brand": "路虎"
+      },
+      {
+        "id": 14,
+        "plateNumber": "粤P22334",
+        "violationCount": 1,
+        "brand": "沃尔沃"
+      },
+      {
+        "id": 15,
+        "plateNumber": "粤Q55667",
+        "violationCount": 4,
+        "brand": "马自达"
+      },
+      {
+        "id": 16,
+        "plateNumber": "粤R00000",
+        "violationCount": 0,
+        "brand": "丰田"
+      }
+    ],
+    "option": {
+      "showIndex": true,
+      "backgroundColor": "#FFFFFF00",
+      "fieldMapping": [
+        {
+          "marginRight": 0,
+          "compose": {
+            "contentStyle": {
+              "fontSize": 18,
+              "fontGradient": {
+                "endColor": "#FFFFFF",
+                "enabled": false,
+                "startColor": "#000000"
+              },
+              "fontStyle": "italic",
+              "fontColor": "#D1D1D1"
+            },
+            "prefix": "",
+            "prefixStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "enabled": true
+          },
+          "textAlign": "center",
+          "name": "车牌号",
+          "width": 0,
+          "textStyle": {
+            "fontSize": 16,
+            "fontWeight": "bold",
+            "fontColor": "#FFFFFF"
+          },
+          "key": "plateNumber",
+          "marginLeft": 0
+        },
+        {
+          "compose": {
+            "contentStyle": {
+              "marginRight": 3,
+              "fontSize": 23,
+              "fontGradient": {
+                "endColor": "#0066CC",
+                "type": "linear",
+                "enabled": true,
+                "startColor": "#00D4FF",
+                "direction": "to bottom"
+              },
+              "fontStyle": "italic",
+              "fontColor": "#FFFFFF",
+              "fontWeight": "bold",
+              "marginLeft": 4
+            },
+            "suffixStyle": {
+              "fontSize": 18,
+              "fontColor": "#FFFFFF"
+            },
+            "prefix": "本月",
+            "prefixStyle": {
+              "fontSize": 18,
+              "fontColor": "#FFFFFF"
+            },
+            "suffix": "次",
+            "enabled": true
+          },
+          "textAlign": "center",
+          "name": "违规次数",
+          "width": 0,
+          "textStyle": {
+            "fontColor": "#FFFFFF"
+          },
+          "key": "violationCount"
+        }
+      ],
+      "itemsPerRow": 1,
+      "borderRadius": 8,
+      "autoScrollEnabled": true,
+      "showHeader": true,
+      "indexFieldStyle": {
+        "textAlign": "center",
+        "width": 38,
+        "textStyle": {
+          "fontSize": 21,
+          "fontGradient": {
+            "endColor": "#F54100",
+            "type": "linear",
+            "enabled": true,
+            "startColor": "#D4BA28",
+            "direction": "to bottom"
+          },
+          "fontStyle": "italic",
+          "fontColor": "#FFFFFF"
+        },
+        "marginLeft": 3
+      },
+      "header": {
+        "padding": "8px 0",
+        "backgroundColor": "#003B6F",
+        "textAlign": "center",
+        "fontSize": 16,
+        "fontGradient": {
+          "endColor": "#FFFFFF",
+          "enabled": false,
+          "startColor": "#000000"
+        },
+        "fontColor": "#FFFFFF",
+        "fontWeight": "bold",
+        "height": 43
+      },
+      "row": {
+        "backgroundColor": "#001E3C",
+        "backgroundImg": "/img/scrollList-bg-02.png",
+        "alternateBackgroundColor": "#00284E",
+        "backgroundSize": "100% 100%",
+        "marginBottom": 1,
+        "backgroundRepeat": "no-repeat",
+        "backgroundType": "color",
+        "height": 44
+      }
+    }
+  },
+  "JScrollList_1": {
+    "w": 515,
+    "h": 220,
+    "dataType": 1,
+    "timeOut": 0,
+    "chartData": [
+      {
+        "id": 1,
+        "projectName": "项目A",
+        "officeFee": 1200,
+        "travelFee": 5600,
+        "arrearsAmount": 3000
+      },
+      {
+        "id": 2,
+        "projectName": "项目B",
+        "officeFee": 800,
+        "travelFee": 4200,
+        "arrearsAmount": 0
+      },
+      {
+        "id": 3,
+        "projectName": "项目C",
+        "officeFee": 1500,
+        "travelFee": 1800,
+        "arrearsAmount": 1200
+      },
+      {
+        "id": 4,
+        "projectName": "项目D",
+        "officeFee": 600,
+        "travelFee": 2300,
+        "arrearsAmount": 900
+      },
+      {
+        "id": 5,
+        "projectName": "项目E",
+        "officeFee": 950,
+        "travelFee": 3000,
+        "arrearsAmount": 150
+      }
+    ],
+    "option": {
+      "backgroundColor": "#FFFFFF00",
+      "fieldMapping": [
+        {
+          "marginRight": 15,
+          "name": "项目名称",
+          "width": 116,
+          "textStyle": {
+            "fontSize": 16,
+            "fontWeight": "bold",
+            "fontColor": "#FFFFFF"
+          },
+          "key": "projectName",
+          "marginLeft": 10
+        },
+        {
+          "marginRight": 1,
+          "textAlign": "left",
+          "compose": {
+            "contentStyle": {
+              "marginRight": 4,
+              "fontSize": 15,
+              "fontGradient": {
+                "endColor": "#038F8A",
+                "type": "linear",
+                "enabled": true,
+                "startColor": "#06CFC8",
+                "direction": "to bottom"
+              },
+              "fontStyle": "italic",
+              "fontColor": "#FFFFFF",
+              "marginLeft": 3
+            },
+            "suffixStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "prefix": "办公费",
+            "prefixStyle": {
+              "fontColor": "#DEDEDE"
+            },
+            "suffix": "元",
+            "enabled": true
+          },
+          "name": "办公费",
+          "width": 108,
+          "textStyle": {
+            "fontColor": "#FFFFFF"
+          },
+          "key": "officeFee"
+        },
+        {
+          "marginRight": 13,
+          "textAlign": "left",
+          "compose": {
+            "contentStyle": {
+              "marginRight": 1,
+              "fontGradient": {
+                "endColor": "#038F8A",
+                "enabled": true,
+                "startColor": "#06CFC8",
+                "direction": "to bottom"
+              },
+              "fontStyle": "italic",
+              "fontColor": "#FFFFFF",
+              "marginLeft": 1
+            },
+            "suffixStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "prefix": "差旅费",
+            "prefixStyle": {
+              "fontColor": "#DEDEDE"
+            },
+            "suffix": "元",
+            "enabled": true
+          },
+          "name": "差旅费",
+          "width": 111,
+          "textStyle": {
+            "fontColor": "#FFFFFF"
+          },
+          "key": "travelFee"
+        },
+        {
+          "textAlign": "left",
+          "compose": {
+            "contentStyle": {
+              "marginRight": 2,
+              "fontSize": 16,
+              "fontGradient": {
+                "endColor": "#0DA183",
+                "type": "linear",
+                "enabled": true,
+                "startColor": "#12E3B9",
+                "direction": "to bottom"
+              },
+              "fontStyle": "italic",
+              "fontColor": "#FFFFFF",
+              "fontWeight": "bold",
+              "marginLeft": 3
+            },
+            "suffixStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "prefix": "欠款金额",
+            "prefixStyle": {
+              "fontColor": "#FFFFFF",
+              "fontWeight": "bold"
+            },
+            "suffix": "元",
+            "enabled": true
+          },
+          "name": "欠款金额",
+          "width": 122,
+          "textStyle": {
+            "fontColor": "#DC3545"
+          },
+          "key": "arrearsAmount"
+        }
+      ],
+      "itemsPerRow": 1,
+      "borderRadius": 8,
+      "autoScrollEnabled": true,
+      "showHeader": false,
+      "header": {
+        "padding": "8px 0",
+        "backgroundColor": "#1890FF",
+        "textAlign": "center",
+        "fontSize": 16,
+        "fontColor": "#FFFFFF",
+        "fontWeight": "bold"
+      },
+      "row": {
+        "backgroundColor": "#FFFFFF",
+        "backgroundImg": "",
+        "alternateBackgroundColor": "#F8F9FA",
+        "backgroundSize": "100% 100%",
+        "marginBottom": 10,
+        "backgroundRepeat": "no-repeat",
+        "backgroundType": "image",
+        "height": 44
+      }
+    }
+  },
+  "JCardScroll_2": {
+    "w": 430,
+    "h": 530,
+    "dataType": 1,
+    "timeOut": 0,
+    "linkageConfig": [],
+    "chartData": [
+      {
+        "rank": 1,
+        "customerName": "北京华信科技有限公司",
+        "contractAmount": 8000
+      },
+      {
+        "rank": 2,
+        "customerName": "上海(中国)智远信息技术股份有限公司",
+        "contractAmount": 7800
+      },
+      {
+        "rank": 3,
+        "customerName": "深圳市鼎盛软件有限公司",
+        "contractAmount": 6880
+      },
+      {
+        "rank": 4,
+        "customerName": "广州恒信数据服务有限公司",
+        "contractAmount": 5600
+      },
+      {
+        "rank": 5,
+        "customerName": "杭州云帆科技发展有限公司",
+        "contractAmount": 4900
+      },
+      {
+        "rank": 6,
+        "customerName": "成都睿智科技有限公司",
+        "contractAmount": 4700
+      },
+      {
+        "rank": 7,
+        "customerName": "南京博思信息技术有限公司",
+        "contractAmount": 4500
+      },
+      {
+        "rank": 8,
+        "customerName": "苏州新创软件有限公司",
+        "contractAmount": 4200
+      },
+      {
+        "rank": 9,
+        "customerName": "重庆智联科技有限公司",
+        "contractAmount": 3900
+      },
+      {
+        "rank": 10,
+        "customerName": "武汉华腾信息技术有限公司",
+        "contractAmount": 3600
+      }
+    ],
+    "option": {
+      "showIndex": true,
+      "autoScrollEnabled": true,
+      "columnGap": 16,
+      "rowGap": 16,
+      "indexFieldStyle": {},
+      "contentFieldMapping": [
+        {
+          "valueStyle": {
+            "fontColor": "#FFFFFF",
+            "marginBottom": -3
+          },
+          "__system": true,
+          "nameStyle": {
+            "fontColor": "#FFFFFF",
+            "marginLeft": -5,
+            "marginRight": 18,
+            "fontGradient": {
+              "enabled": false,
+              "startColor": "#000000",
+              "endColor": "#FFFFFF"
+            }
+          },
+          "name": "序号",
+          "key": "__index__",
+          "itemConfig": {
+            "justifyContent": "center",
+            "width": 0,
+            "marginLeft": 6,
+            "marginRight": 0,
+            "marginBottom": 17,
+            "marginTop": 19,
+            "height": 72
+          },
+          "showLabel": false,
+          "valueCompose": {
+            "enabled": true,
+            "contentStyle": {
+              "fontColor": "#FFFFFF",
+              "fontSize": 16,
+              "marginRight": 9
+            },
+            "prefix": "入场序号：",
+            "prefixStyle": {
+              "fontColor": "#FFFFFF",
+              "fontGradient": {
+                "enabled": false,
+                "startColor": "#000000",
+                "endColor": "#FFFFFF"
+              },
+              "fontSize": 16
+            },
+            "suffix": "号",
+            "suffixStyle": {
+              "fontColor": "#FFFFFF",
+              "fontSize": 16
+            }
+          }
+        },
+        {
+          "itemConfig": {
+            "marginRight": 0,
+            "alignItems": "flex-start",
+            "width": 0,
+            "marginBottom": 4,
+            "layoutDirection": "row",
+            "justifyContent": "center",
+            "marginTop": 0,
+            "height": 73,
+            "marginLeft": 0
+          },
+          "valueStyle": {
+            "fontSize": 16,
+            "marginBottom": 4,
+            "fontColor": "#FFFFFF",
+            "fontWeight": "normal",
+            "height": 0,
+            "fontGradient": {
+              "enabled": true,
+              "startColor": "#FF6B6B",
+              "endColor": "#4ECDC4",
+              "type": "linear",
+              "direction": "to bottom"
+            }
+          },
+          "showValue": true,
+          "valueCompose": {
+            "contentStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "enabled": false
+          },
+          "nameStyle": {
+            "fontSize": 14,
+            "fontColor": "#CCCCCC",
+            "fontWeight": "normal"
+          },
+          "omitConfig": {
+            "show": true,
+            "lines": 3
+          },
+          "nameCompose": {
+            "enabled": false
+          },
+          "name": "客户名称",
+          "thousandSeparatorConfig": {
+            "show": false
+          },
+          "key": "customerName",
+          "showLabel": false
+        },
+        {
+          "itemConfig": {
+            "marginRight": 0,
+            "alignItems": "center",
+            "width": 0,
+            "marginBottom": 0,
+            "layoutDirection": "column",
+            "justifyContent": "flex-start",
+            "marginTop": 0,
+            "height": 100,
+            "marginLeft": 0
+          },
+          "valueStyle": {
+            "fontSize": 20,
+            "marginBottom": 2,
+            "fontColor": "#40A9FF",
+            "fontWeight": "bold",
+            "fontGradient": {
+              "enabled": true,
+              "startColor": "#FFD700",
+              "endColor": "#FF4500",
+              "type": "linear",
+              "direction": "to bottom"
+            }
+          },
+          "showValue": true,
+          "valueCompose": {
+            "contentStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "suffixStyle": {
+              "fontSize": 14,
+              "fontColor": "#40A9FF"
+            },
+            "suffix": "万元",
+            "enabled": false
+          },
+          "nameStyle": {
+            "fontSize": 14,
+            "fontColor": "#CCCCCC",
+            "fontWeight": "normal",
+            "height": 0,
+            "marginBottom": 3
+          },
+          "omitConfig": {
+            "show": false,
+            "lines": 1
+          },
+          "nameCompose": {
+            "enabled": false
+          },
+          "name": "市值(万元)",
+          "thousandSeparatorConfig": {
+            "show": true
+          },
+          "key": "contractAmount",
+          "showLabel": true
+        }
+      ],
+      "contentCurrent": 1,
+      "autoScrollSpeed": 100,
+      "animationDuration": 800,
+      "scrollDirection": "up",
+      "cardStyle": {
+        "backgroundColor": "#0648786E",
+        "borderColor": "#1890FF",
+        "backgroundImage": "",
+        "bgHighlightImage": "",
+        "paddingRight": 5,
+        "borderEnabled": true,
+        "paddingBottom": 5,
+        "borderRadius": 8,
+        "borderWidth": 1,
+        "width": 98,
+        "paddingTop": 5,
+        "borderStyle": "dashed",
+        "paddingLeft": 5,
+        "height": 250
+      },
+      "currentValue": 0,
+      "direction": "vertical"
+    }
+  },
+  "JCardScroll_3": {
+    "w": 538,
+    "h": 302,
+    "dataType": 1,
+    "timeOut": 0,
+    "linkageConfig": [],
+    "chartData": [
+      {
+        "projectName": "苏州地铁5号线工程",
+        "status": "一期",
+        "paymentMethod": "分期",
+        "type": [
+          "建筑工程",
+          "市政工程"
+        ],
+        "id": "1966786720503390209"
+      },
+      {
+        "projectName": "南京软件园研发楼",
+        "status": "二期",
+        "paymentMethod": "一次性付款",
+        "type": [
+          "建筑工程",
+          "市政工程"
+        ],
+        "id": "1966786777713696769"
+      },
+      {
+        "projectName": "重庆智慧交通枢纽",
+        "status": "三期",
+        "paymentMethod": "分期",
+        "type": [
+          "建筑工程",
+          "市政工程"
+        ],
+        "id": "1966786804406247425"
+      },
+      {
+        "projectName": "武汉光谷科技园",
+        "status": "一期",
+        "paymentMethod": "分期",
+        "type": [
+          "建筑工程",
+          "市政工程"
+        ],
+        "id": "1966786837256036353"
+      },
+      {
+        "projectName": "上海浦东新区道路改造",
+        "status": "二期",
+        "paymentMethod": "一次性付款",
+        "type": [
+          "建筑工程",
+          "市政工程",
+          "道路工程"
+        ],
+        "id": "1966786864602898433"
+      },
+      {
+        "projectName": "深圳南山创新中心",
+        "status": "三期",
+        "paymentMethod": "分期",
+        "type": [
+          "建筑工程",
+          "市政工程",
+          "道路工程"
+        ],
+        "id": "1966786897117143041"
+      },
+      {
+        "projectName": "成都高新产业园",
+        "status": "一期",
+        "paymentMethod": "分期",
+        "type": [
+          "建筑工程",
+          "市政工程"
+        ],
+        "id": "1966786931179085826"
+      },
+      {
+        "projectName": "杭州滨江智慧社区",
+        "status": "二期",
+        "paymentMethod": "一次性付款",
+        "type": [
+          "建筑工程",
+          "市政工程"
+        ],
+        "id": "1966786962128855042"
+      },
+      {
+        "projectName": "广州南沙港区扩建",
+        "status": "三期",
+        "paymentMethod": "分期",
+        "type": [
+          "建筑工程",
+          "市政工程"
+        ],
+        "id": "1966787000406073346"
+      },
+      {
+        "projectName": "天津生态城住宅项目",
+        "status": "一期",
+        "paymentMethod": "分期",
+        "type": [
+          "建筑工程",
+          "市政工程"
+        ],
+        "id": "1966787029329993729"
+      }
+    ],
+    "option": {
+      "showIndex": true,
+      "autoScrollEnabled": true,
+      "rowGap": 16,
+      "indexFieldStyle": {},
+      "contentFieldMapping": [
+        {
+          "valueStyle": {
+            "fontSize": 14,
+            "fontColor": "#A6D8FF",
+            "fontWeight": "normal"
+          },
+          "itemConfig": {
+            "alignItems": "flex-start",
+            "marginBottom": 24,
+            "marginTop": 13,
+            "height": 40
+          },
+          "nameStyle": {
+            "fontColor": "#FFFFFF"
+          },
+          "omitConfig": {
+            "show": true,
+            "lines": 2
+          },
+          "name": "项目名称",
+          "width": 100,
+          "key": "projectName",
+          "showLabel": false
+        },
+        {
+          "valueStyle": {
+            "fontSize": 16,
+            "marginBottom": 10,
+            "fontColor": "#FFFFFF",
+            "marginTop": -5
+          },
+          "itemConfig": {
+            "alignItems": "flex-start",
+            "justifyContent": "center"
+          },
+          "nameStyle": {
+            "fontColor": "#FFFFFF"
+          },
+          "name": "进度",
+          "width": 100,
+          "key": "status",
+          "showLabel": false
+        },
+        {
+          "valueStyle": {
+            "fontSize": 12,
+            "marginBottom": 0,
+            "fontColor": "#BFBFBF",
+            "marginTop": -10
+          },
+          "itemConfig": {
+            "alignItems": "center",
+            "layoutDirection": "row",
+            "justifyContent": "center"
+          },
+          "nameStyle": {
+            "fontColor": "#FFFFFF"
+          },
+          "name": "付款方式",
+          "width": 100,
+          "key": "paymentMethod",
+          "showLabel": false
+        },
+        {
+          "valueStyle": {
+            "fontSize": 14,
+            "fontColor": "#FFFFFF"
+          },
+          "itemConfig": {
+            "alignItems": "center",
+            "layoutDirection": "column",
+            "justifyContent": "flex-start"
+          },
+          "nameStyle": {
+            "fontSize": 14,
+            "marginBottom": 10,
+            "fontColor": "#FFFFFF",
+            "marginTop": 26
+          },
+          "valueType": "array",
+          "name": "合同类型",
+          "width": 100,
+          "key": "type"
+        }
+      ],
+      "autoScrollSpeed": 100,
+      "scrollDirection": "left",
+      "animationDuration": 800,
+      "columnGap": 16,
+      "stayDuration": 5000,
+      "contentCurrent": 1,
+      "cardStyle": {
+        "backgroundColor": "#0648786E",
+        "borderColor": "#1890FF",
+        "backgroundImage": "https://static.jeecg.com/jimureport/images/组-1121_05_1757733370432.png",
+        "paddingRight": 5,
+        "borderEnabled": false,
+        "paddingBottom": 5,
+        "borderRadius": 0,
+        "borderWidth": 1,
+        "width": 122,
+        "paddingTop": 5,
+        "bgHighlightImage": "https://static.jeecg.com/jimureport/images/组-1121_03_1757735281389.png",
+        "borderStyle": "dashed",
+        "paddingLeft": 5,
+        "height": 300
+      },
+      "currentValue": 0,
+      "direction": "horizontal"
+    }
+  },
+  "JCardScroll_1": {
+    "w": 556,
+    "h": 255,
+    "dataType": 1,
+    "timeOut": 0,
+    "linkageConfig": [],
+    "chartData": [
+      {
+        "rank": 1,
+        "customerName": "北京华信科技有限公司",
+        "contractAmount": 8000
+      },
+      {
+        "rank": 2,
+        "customerName": "上海(中国)智远信息技术股份有限公司",
+        "contractAmount": 7800
+      },
+      {
+        "rank": 3,
+        "customerName": "深圳市鼎盛软件有限公司",
+        "contractAmount": 6880
+      },
+      {
+        "rank": 4,
+        "customerName": "广州恒信数据服务有限公司",
+        "contractAmount": 5600
+      },
+      {
+        "rank": 5,
+        "customerName": "杭州云帆科技发展有限公司",
+        "contractAmount": 4900
+      },
+      {
+        "rank": 6,
+        "customerName": "成都睿智科技有限公司",
+        "contractAmount": 4700
+      },
+      {
+        "rank": 7,
+        "customerName": "南京博思信息技术有限公司",
+        "contractAmount": 4500
+      },
+      {
+        "rank": 8,
+        "customerName": "苏州新创软件有限公司",
+        "contractAmount": 4200
+      },
+      {
+        "rank": 9,
+        "customerName": "重庆智联科技有限公司",
+        "contractAmount": 3900
+      },
+      {
+        "rank": 10,
+        "customerName": "武汉华腾信息技术有限公司",
+        "contractAmount": 3600
+      }
+    ],
+    "option": {
+      "showIndex": false,
+      "autoScrollEnabled": true,
+      "columnGap": 16,
+      "rowGap": 16,
+      "indexFieldStyle": {},
+      "contentFieldMapping": [
+        {
+          "itemConfig": {
+            "marginRight": 0,
+            "alignItems": "flex-start",
+            "width": 0,
+            "marginBottom": 4,
+            "layoutDirection": "row",
+            "justifyContent": "center",
+            "marginTop": 0,
+            "height": 73,
+            "marginLeft": 0
+          },
+          "valueStyle": {
+            "fontSize": 14,
+            "marginBottom": 4,
+            "fontColor": "#A6D8FF",
+            "fontWeight": "normal",
+            "height": 0
+          },
+          "showValue": true,
+          "valueCompose": {
+            "contentStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "enabled": false
+          },
+          "nameStyle": {
+            "fontSize": 14,
+            "fontColor": "#CCCCCC",
+            "fontWeight": "normal"
+          },
+          "omitConfig": {
+            "show": true,
+            "lines": 3
+          },
+          "nameCompose": {
+            "enabled": false
+          },
+          "valueType": "non-array",
+          "name": "客户名称",
+          "thousandSeparatorConfig": {
+            "show": false
+          },
+          "key": "customerName",
+          "showLabel": false
+        },
+        {
+          "itemConfig": {
+            "marginRight": 0,
+            "alignItems": "center",
+            "width": 0,
+            "marginBottom": 3,
+            "layoutDirection": "row",
+            "justifyContent": "center",
+            "marginTop": 0,
+            "height": 68,
+            "marginLeft": 0
+          },
+          "valueStyle": {
+            "fontSize": 24,
+            "marginBottom": 0,
+            "fontColor": "#FEAF26",
+            "fontWeight": "bold",
+            "height": 0,
+            "marginLeft": 0
+          },
+          "showValue": true,
+          "valueCompose": {
+            "enabled": false
+          },
+          "nameStyle": {
+            "marginRight": 0,
+            "width": 225,
+            "fontSize": 14,
+            "fontColor": "#CCCCCC",
+            "fontWeight": "normal",
+            "marginLeft": 0
+          },
+          "omitConfig": {
+            "show": false,
+            "lines": 1
+          },
+          "nameCompose": {
+            "enabled": false
+          },
+          "valueType": "non-array",
+          "name": "排名",
+          "thousandSeparatorConfig": {
+            "show": false
+          },
+          "key": "rank",
+          "showLabel": false
+        },
+        {
+          "itemConfig": {
+            "marginRight": 0,
+            "alignItems": "center",
+            "width": 0,
+            "marginBottom": 0,
+            "layoutDirection": "column-reverse",
+            "justifyContent": "center",
+            "marginTop": 0,
+            "height": 100,
+            "marginLeft": 0
+          },
+          "valueStyle": {
+            "fontSize": 18,
+            "marginBottom": 2,
+            "fontGradient": {
+              "endColor": "#49ABFF",
+              "type": "linear",
+              "enabled": true,
+              "startColor": "#96F5F8",
+              "direction": "to bottom"
+            },
+            "fontColor": "#40A9FF",
+            "fontWeight": "bold"
+          },
+          "showValue": true,
+          "valueCompose": {
+            "contentStyle": {
+              "fontColor": "#FFFFFF"
+            },
+            "suffixStyle": {
+              "fontSize": 14,
+              "fontColor": "#40A9FF"
+            },
+            "suffix": "万元",
+            "enabled": false
+          },
+          "nameStyle": {
+            "fontSize": 12,
+            "fontColor": "#B0B0B0",
+            "fontWeight": "normal",
+            "height": 0
+          },
+          "omitConfig": {
+            "show": false,
+            "lines": 1
+          },
+          "nameCompose": {
+            "enabled": false
+          },
+          "valueType": "non-array",
+          "name": "合同额(万元)",
+          "thousandSeparatorConfig": {
+            "show": true
+          },
+          "key": "contractAmount",
+          "showLabel": true
+        }
+      ],
+      "contentCurrent": 2,
+      "autoScrollSpeed": 100,
+      "scrollDirection": "left",
+      "cardStyle": {
+        "backgroundColor": "#1890FF1A",
+        "borderColor": "#1890FF",
+        "backgroundImage": "/img/cardScroll/cardScroll-bg-01.png",
+        "paddingRight": 5,
+        "borderEnabled": true,
+        "paddingBottom": 5,
+        "borderRadius": 8,
+        "borderWidth": 0,
+        "width": 98,
+        "bgHighlightImage": "",
+        "paddingTop": 5,
+        "borderStyle": "dashed",
+        "paddingLeft": 5,
+        "height": 250
+      },
+      "currentValue": 0,
+      "direction": "horizontal"
     }
   }
 }

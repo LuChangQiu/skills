@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-大屏/仪表盘组件外部链接跳转配置工具
-====================================
+大屏/仪表盘组件交互配置工具（外部链接跳转 + 自定义JS脚本）
+============================================================
 
 使用方式（命令行）：
 
-  # 查看页面所有外部链接配置
+  # 查看页面所有交互配置（外部链接 + 自定义JS脚本）
   py link_ops.py show <API_BASE> <TOKEN> <PAGE_ID>
+
+  # ==================== 外部链接跳转 ====================
 
   # 设置组件外部链接（按组件名称）
   py link_ops.py set <API_BASE> <TOKEN> <PAGE_ID> --name "饼图名" --url "https://www.baidu.com/s?wd=${name}&value=${value}"
@@ -22,6 +24,18 @@
   py link_ops.py remove <API_BASE> <TOKEN> <PAGE_ID> --name "饼图名"
   py link_ops.py remove <API_BASE> <TOKEN> <PAGE_ID> --type "JPie"
 
+  # ==================== 自定义JS脚本 ====================
+  # 参考文档：https://help.jimureport.com/biScreen/base/interactive/customJS
+
+  # 设置自定义JS脚本（内联代码）
+  py link_ops.py set-js <API_BASE> <TOKEN> <PAGE_ID> --name "基础柱形图" --js 'window.open("http://jeecg.com");return false;'
+
+  # 设置自定义JS脚本（从文件读取，适合多行复杂脚本）
+  py link_ops.py set-js <API_BASE> <TOKEN> <PAGE_ID> --type "JBar" --js-file script.js
+
+  # 删除自定义JS脚本
+  py link_ops.py remove-js <API_BASE> <TOKEN> <PAGE_ID> --name "基础柱形图"
+
 URL 参数占位符说明（来自 ECharts 点击事件 params）：
   ${name}   - 维度名称（饼图扇区名、柱子 x 轴标签等）
   ${value}  - 数值（饼图扇区值、柱子高度等）
@@ -30,6 +44,12 @@ URL 参数占位符说明（来自 ECharts 点击事件 params）：
 打开方式（--target）：
   _blank  - 新窗口打开（默认）
   _self   - 当前窗口打开
+
+自定义JS脚本说明：
+  存储字段：config.jsConfig
+  可用参数：params（点击事件数据对象）、option（ECharts图表配置，仅ECharts组件可用）
+  返回值：true=继续执行后续方法（联动/跳转/钻取），false=阻断后续方法
+  执行顺序：jsHandler → (return true?) → 外部链接 → 联动 → 钻取
 """
 
 import sys, json, os, argparse
@@ -118,7 +138,7 @@ def all_components(tmpl):
 # 命令实现
 # ============================================================
 def cmd_show(args):
-    """显示页面所有外部链接配置"""
+    """显示页面所有交互配置（外部链接 + 自定义JS脚本）"""
     tmpl = load_template(args.page_id)
 
     found_any = False
@@ -130,17 +150,28 @@ def cmd_show(args):
         link_type = cfg.get('linkType', '')
         turn_config = cfg.get('turnConfig', {})
         turn_url = turn_config.get('url', '') if isinstance(turn_config, dict) else ''
+        js_config = cfg.get('jsConfig', '')
 
-        if link_type == 'url' and turn_url:
+        has_link = link_type == 'url' and turn_url
+        has_js = bool(js_config)
+
+        if has_link or has_js:
             found_any = True
-            target = turn_config.get('type', '_blank')
             print(f'组件: {cname} ({ctype})')
-            print(f'  链接地址: {turn_url}')
-            print(f'  打开方式: {target}')
+            if has_link:
+                target = turn_config.get('type', '_blank')
+                print(f'  [外部链接] {turn_url}')
+                print(f'  打开方式: {target}')
+            if has_js:
+                # 截断过长的脚本显示
+                js_preview = js_config.replace('\n', '\\n')
+                if len(js_preview) > 120:
+                    js_preview = js_preview[:120] + '...'
+                print(f'  [自定义JS] {js_preview}')
             print()
 
     if not found_any:
-        print('页面中没有配置外部链接的组件。')
+        print('页面中没有配置外部链接或自定义JS脚本的组件。')
 
 
 def cmd_set(args):
@@ -193,6 +224,63 @@ def cmd_remove(args):
     print('保存成功')
 
 
+def cmd_set_js(args):
+    """设置组件自定义JS脚本"""
+    tmpl = load_template(args.page_id)
+
+    comp = find_comp(tmpl, name=args.name, comp_type=args.type, comp_id=args.id)
+    if not comp:
+        label = args.name or args.type or args.id
+        print(f'未找到组件: {label}')
+        return
+
+    # 获取JS代码：从文件或命令行参数
+    if args.js_file:
+        with open(args.js_file, 'r', encoding='utf-8') as f:
+            js_code = f.read()
+    elif args.js:
+        js_code = args.js
+    else:
+        print('错误：必须提供 --js 或 --js-file 参数')
+        return
+
+    cfg = comp.get('config', {})
+    cfg['jsConfig'] = js_code
+    comp['config'] = cfg
+
+    cname = comp.get('componentName', '') or comp.get('i', '?')
+    ctype = comp.get('component', '?')
+    js_preview = js_code.replace('\n', '\\n')
+    if len(js_preview) > 120:
+        js_preview = js_preview[:120] + '...'
+    print(f'设置自定义JS: {cname} ({ctype})')
+    print(f'  脚本内容: {js_preview}')
+
+    save_template(args.page_id, tmpl)
+    print('保存成功')
+
+
+def cmd_remove_js(args):
+    """删除组件自定义JS脚本"""
+    tmpl = load_template(args.page_id)
+
+    comp = find_comp(tmpl, name=args.name, comp_type=args.type, comp_id=args.id)
+    if not comp:
+        label = args.name or args.type or args.id
+        print(f'未找到组件: {label}')
+        return
+
+    cfg = comp.get('config', {})
+    cfg['jsConfig'] = ''
+    comp['config'] = cfg
+
+    cname = comp.get('componentName', '') or comp.get('i', '?')
+    print(f'已清除组件 {cname} 的自定义JS脚本')
+
+    save_template(args.page_id, tmpl)
+    print('保存成功')
+
+
 # ============================================================
 # CLI 入口
 # ============================================================
@@ -231,6 +319,19 @@ def main():
     add_common(p_remove)
     add_selector(p_remove)
 
+    # set-js
+    p_set_js = subparsers.add_parser('set-js', help='设置自定义JS脚本')
+    add_common(p_set_js)
+    add_selector(p_set_js)
+    js_group = p_set_js.add_mutually_exclusive_group(required=True)
+    js_group.add_argument('--js', help='JS脚本代码（内联）')
+    js_group.add_argument('--js-file', help='从文件读取JS脚本代码')
+
+    # remove-js
+    p_remove_js = subparsers.add_parser('remove-js', help='删除自定义JS脚本')
+    add_common(p_remove_js)
+    add_selector(p_remove_js)
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -244,6 +345,10 @@ def main():
         cmd_set(args)
     elif args.command == 'remove':
         cmd_remove(args)
+    elif args.command == 'set-js':
+        cmd_set_js(args)
+    elif args.command == 'remove-js':
+        cmd_remove_js(args)
 
 
 if __name__ == '__main__':

@@ -44,6 +44,12 @@ description: Use when user asks to create/design a dashboard (仪表盘/看板),
 1. **API 地址**：JeecgBoot 后端地址（如 `https://api3.boot.jeecg.com`）
 2. **X-Access-Token**：JWT 登录令牌（从浏览器 F12 获取）
 
+## 源码位置
+
+- 仪表盘前端 UI 源码：`E:\workspace-cc-jeecg\vue3-jeecg-drag-design-antd4`
+- 仪表盘后台源码：`E:\workspace-cc-jeecg\jeecg-boot-framework-2026\jeecg-boot-platform\jeecg-boot-module-drag`
+- 管理界面前端：`E:\workspace-cc-jeecg\jeecgboot-vue3-2026\src\views\super\drag\page`
+
 ## 交互流程
 
 ### Step 0: 解析用户需求
@@ -138,6 +144,8 @@ description: Use when user asks to create/design a dashboard (仪表盘/看板),
 
 ### 快捷操作：全部预置脚本一览
 
+脚本目录：`C:\Users\25067\.claude\skills\jimubi-dashboard\references\scripts\`
+
 | 脚本 | 功能 | 常用命令 |
 |------|------|---------|
 | `comp_ops.py` | 组件增删改查 | `list`, `delete`, `edit`, `add`, `move` |
@@ -163,11 +171,17 @@ cp "C:/Users/25067/.claude/skills/jimubi-dashboard/references/bi_utils.py" .
 
 ### Step 3: 调用 API 创建仪表盘
 
+**优先使用共通工具库 `bi_utils.py`**（两个位置均有副本）：
+- Skills 目录（权威副本）：`C:\Users\zhang\.claude\skills\jimubi-dashboard\references\bi_utils.py`
+- 后端项目根目录（运行副本）：`E:\workspace-cc-jeecg\jeecg-boot-framework-2026\bi_utils.py`
+
+> 如果后端项目根目录没有 `bi_utils.py`，先从 skills 目录复制过去再使用。
+
 **执行步骤：**
 ```
-1. 确认后端项目根目录有 bi_utils.py（没有则从 skills 目录复制）
+1. 确认后端项目根目录有 bi_utils.py（没有则从 skills 复制）
 2. Write 工具 → 写入业务脚本 create_xxx_dashboard.py（项目根目录）
-3. Bash 工具 → python create_xxx_dashboard.py（在后端项目根目录执行）
+3. Bash 工具 → cd E:/workspace-cc-jeecg/jeecg-boot-framework-2026 && python create_xxx_dashboard.py
 4. Bash 工具 → rm create_xxx_dashboard.py（清理临时脚本）
 ```
 
@@ -338,7 +352,7 @@ bi_utils._page_components[page_id].append(comp)
 仪表盘组件支持三种数据类型（`config.dataType`）：
 - `1` — 静态数据（直接写在 `chartData` 中）
 - `2` — 动态数据（从数据集获取，支持 SQL / API / JSON / WebSocket）
-- `4` — 表单数据（从表单关联字段查询）
+- `4` — 表单数据（Online表单 / 设计器表单，**无需创建数据集**，见下方「Online表单/设计器表单图表」章节）
 
 ### 数据集 API 端点
 
@@ -1125,6 +1139,159 @@ config = {'dataType': 2, 'dataSetType': 'FILES', 'dataSetApi': 'select ...', ...
 
 ---
 
+## Online表单 / 设计器表单 生成图表（dataType=4）
+
+> 仪表盘与大屏共用此机制，完整技术细节见 bigscreen skill 的
+> `references/online-design-form-chart-guide.md`
+
+### 概述
+
+`config.dataType = 4` 表示组件数据来源于 Online表单（cgform）或设计器表单（desform），
+而非普通数据集。与 dataType=2 的区别：
+- **不需要创建数据集**，直接绑定表单
+- 通过字段映射（nameFields/valueFields）配置图表维度和指标
+- 后端 API：`POST /drag/onlDragDatasetHead/getTotalDataByCompId`
+
+### 何时选 Online 表单 vs 设计器表单
+
+| 场景 | 类型 | formType |
+|------|------|---------|
+| 通过 cgform 创建的业务表 | Online表单 | `'online'` |
+| 通过拖拽设计器（desform）建的表单 | 设计器表单 | `'design'` |
+
+### 查询表单信息
+
+```python
+# Online 表单
+res = bi_utils._request('GET', '/online/cgform/head/list',
+    params={'keyword': '关键词', 'pageNo': 1, 'pageSize': 10, 'copyType': 0})
+form = res['result']['records'][0]
+form_id = form['id']          # formId
+table_name = form['tableName'] # 实际表名
+form_name = form['tableTxt']
+
+# 设计器表单
+res = bi_utils._request('GET', '/desform/api/list/options',
+    params={'keywords': '关键词', 'pageNo': 1, 'pageSize': 10})
+form = res['result'][0]
+form_id = table_name = form['value']  # code（同一个值）
+form_name = form['label']
+```
+
+### 查询字段
+
+```python
+# Online 表单字段（过滤非主键且已持久化）
+res = bi_utils._request('GET', '/online/cgform/field/listByHeadId',
+    params={'headId': form_id})
+fields = [f for f in res['result'] if f.get('dbIsKey') == 0 and f.get('dbIsPersist') != 0]
+# 关键属性：dbFieldName, dbFieldTxt, dbType('String'/'int'/'double'/'Date'), fieldShowType, dictField
+
+# 设计器表单字段
+res = bi_utils._request('GET', f'/desform/api/fields/{form_id}',
+    params={'subTable': 'true'})
+fields = res['result']['fields']
+# 关键属性：model(code), name(txt), type(widget), options
+```
+
+### 字段角色分配
+
+| 角色 | 字段 key | 放什么 |
+|------|---------|--------|
+| 维度（X轴/分类） | `nameFields` | 分类字段（部门/性别/状态），String 类型 |
+| 指标（Y轴/数值） | `valueFields` | 数值字段，或 `record_count`（记录数量） |
+| 分组 | `typeFields` | 仅分组图表使用，放分类字段 |
+
+**`record_count` 字段**（统计记录数，无需表内存在此字段）：
+```python
+record_count_field = {
+    'fieldName': 'record_count', 'fieldTxt': '记录数量',
+    'fieldType': 'count', 'widgetType': 'text',
+}
+```
+
+### 构建 config（通用模板）
+
+```python
+def make_form_chart_config(form_type, form_id, form_name, table_name,
+                            name_fields, value_fields, chart_type='JBar',
+                            type_fields=None, time_range='all'):
+    def field_obj(f, ftype):
+        if ftype == 'online':
+            return {'fieldName': f['dbFieldName'], 'fieldTxt': f['dbFieldTxt'],
+                    'fieldType': f['dbType'], 'widgetType': f.get('fieldShowType','text'),
+                    'dictCode': f.get('dictField','')}
+        else:  # design
+            t = 'number' if f['type'] in ['money','integer','number','rate','slider','formula','summary'] else 'string'
+            if f['type'] == 'date': t = 'date'
+            return {'fieldName': f['model'], 'fieldTxt': f['name'],
+                    'fieldType': t, 'widgetType': f['type'], 'options': f.get('options',{})}
+
+    return {
+        'dataType': 4,
+        'formType': form_type,                          # 'online' | 'design'
+        'formId': form_id,
+        'formName': form_name,
+        'tableName': table_name,
+        'type': 'design' if form_type == 'design' else None,
+        'appId': '', 'appType': 'current',
+        'nameFields': [field_obj(f, form_type) for f in name_fields],
+        'valueFields': [field_obj(f, form_type) if not f.get('fieldType') == 'count'
+                        else f for f in value_fields],
+        'typeFields': [field_obj(f, form_type) for f in (type_fields or [])],
+        'assistYFields': [], 'assistTypeFields': [], 'calcFields': [],
+        'sorts': {'name': ''},
+        'filter': {'queryField': 'create_time', 'queryRange': time_range},
+        'chart': {'category': 'Bar', 'subclass': chart_type, 'isGroup': False},
+        'compStyleConfig': {}, 'analysis': {}, 'filterField': [],
+        'option': {}, 'size': {'height': 385},  # 仪表盘用像素尺寸
+        'turnConfig': {'url': ''}, 'jsConfig': '', 'drillData': [],
+        'authFieldShowResult': [], 'timeOut': 0,
+    }
+```
+
+### 仪表盘组件 newItem 示例（dataType=4）
+
+```python
+import uuid
+new_item = {
+    'component': 'JPie',          # 最终图表类型（与 online/design compType 无关）
+    'componentName': '部门人员分布',
+    'config': make_form_chart_config(
+        form_type='online',
+        form_id=form_id,
+        form_name=form_name,
+        table_name=table_name,
+        name_fields=[dept_field],         # X轴：部门字段
+        value_fields=[record_count_field], # Y轴：记录数量
+        chart_type='JPie',
+    ),
+    'i': uuid.uuid4().hex,
+    'x': 12, 'y': 17,       # 栅格坐标
+    'w': 12, 'h': 30,        # 栅格尺寸
+    'orderNum': 50,
+}
+```
+
+**注意**：仪表盘 `config.size.height` 用像素（如 385），不用栅格单位。
+
+### 图表类型推荐
+
+| 字段组合 | 推荐图表 | component |
+|---------|---------|-----------|
+| 1个分类 nameField + record_count | 饼图 | `JPie` |
+| 1个分类 nameField + 数值 valueField | 柱形图 | `JBar` |
+| 仅1个 valueField（总量） | 数字指标 | `JNumber` |
+| 时间 nameField + 数值 valueField | 折线图 | `JLine` |
+| 多 valueField | 多系列柱形图 | `JMultipleBar` |
+
+### queryRange 时间范围值
+
+`all`（全部）/ `today` / `yesterday` / `last7days` / `last30days` /
+`week`（本周）/ `preWeek`（上周）/ `month`（本月）/ `preMonth`（上月）/ `year`（本年）
+
+---
+
 ## 编辑已有仪表盘
 
 ```python
@@ -1458,3 +1625,5 @@ save_page(page_id)
 - `references/bi-comp-option-config.md` — 组件样式配置路径
 - `references/bi_utils.py` — 工具库源码
 - `references/templates/default/` — 41 个仪表盘模板 JSON 参考
+- 仪表盘前端 UI 源码：`E:\workspace-cc-jeecg\vue3-jeecg-drag-design-antd4`
+- 仪表盘后台源码：`E:\workspace-cc-jeecg\jeecg-boot-framework-2026\jeecg-boot-platform\jeecg-boot-module-drag`
