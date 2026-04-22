@@ -16,8 +16,20 @@
   py map_ops.py upload <API_BASE> <TOKEN> --adcode 650000 --name "新疆维吾尔自治区"
   py map_ops.py upload <API_BASE> <TOKEN> --adcode 新疆 --name "新疆维吾尔自治区"
 
+  # 编辑已有地图数据（重新下载 GeoJSON 并覆盖）
+  py map_ops.py edit <API_BASE> <TOKEN> --id 1171600201652772864 --adcode 650000 --name "新疆维吾尔自治区"
+
+  # 删除地图数据
+  py map_ops.py delete <API_BASE> <TOKEN> --id 1171600201652772864
+
   # 添加 JAreaMap 组件到页面
   py map_ops.py add-map <API_BASE> <TOKEN> --page PAGE_ID --adcode 650000 --area-name "新疆维吾尔自治区" --title "区域地图" --x 50 --y 100 --w 700 --h 550 --data '[{"name":"乌鲁木齐市","value":405}]'
+
+API 接口说明：
+  列表：GET  /drag/jimuDragMap/list
+  新增：POST /jmreport/map/addMapData  （不传 id）
+  编辑：POST /jmreport/map/addMapData  （传 id，后端根据是否有 id 判断新增还是编辑）
+  删除：POST /jmreport/map/delMapSource（传 id）
 """
 
 import sys, json, os, argparse, ssl, urllib.request
@@ -116,11 +128,22 @@ def download_geojson(adcode):
     return geo_json
 
 
-def upload_map_data(adcode, geo_json):
-    """上传地图数据到后端"""
-    result = bi_utils._request('POST', '/jmreport/map/addMapData', data={
+def upload_map_data(adcode, geo_json, map_id=None):
+    """新增或编辑地图数据（传 map_id 时为编辑，否则为新增）"""
+    data = {
         'name': str(adcode),
         'mapData': geo_json,
+    }
+    if map_id:
+        data['id'] = str(map_id)
+    result = bi_utils._request('POST', '/jmreport/map/addMapData', data=data)
+    return result
+
+
+def delete_map_data(map_id):
+    """删除地图数据"""
+    result = bi_utils._request('POST', '/jmreport/map/delMapSource', data={
+        'id': str(map_id),
     })
     return result
 
@@ -176,6 +199,30 @@ def cmd_upload(args):
         print(f'上传成功: adcode {adcode} ({display_name})')
     else:
         print(f'上传失败: {result.get("message", json.dumps(result, ensure_ascii=False))}')
+
+
+def cmd_edit(args):
+    """编辑已有地图数据（重新下载 GeoJSON 并覆盖）"""
+    adcode = resolve_adcode(args.adcode)
+    display_name = args.name or str(adcode)
+
+    geo_json = download_geojson(adcode)
+
+    print(f'更新地图数据: id={args.id}, adcode={adcode}, name={display_name}')
+    result = upload_map_data(adcode, geo_json, map_id=args.id)
+    if result.get('success'):
+        print(f'编辑成功: id={args.id} adcode={adcode} ({display_name})')
+    else:
+        print(f'编辑失败: {result.get("message", "")}')
+
+
+def cmd_delete(args):
+    """删除地图数据"""
+    result = delete_map_data(args.id)
+    if result.get('success'):
+        print(f'删除成功: id={args.id}')
+    else:
+        print(f'删除失败: {result.get("message", "")}')
 
 
 def cmd_add_map(args):
@@ -309,6 +356,20 @@ def main():
     p_upload.add_argument('--adcode', required=True, help='adcode（数字或省份名如"新疆"）')
     p_upload.add_argument('--name', default=None, help='地图显示名称（如"新疆维吾尔自治区"）')
 
+    # edit
+    p_edit = subparsers.add_parser('edit', help='编辑已有地图数据（重新下载 GeoJSON 并覆盖）')
+    p_edit.add_argument('api_base', help='API 地址')
+    p_edit.add_argument('token', help='X-Access-Token')
+    p_edit.add_argument('--id', required=True, help='地图记录 ID')
+    p_edit.add_argument('--adcode', required=True, help='adcode（数字或省份名）')
+    p_edit.add_argument('--name', default=None, help='地图显示名称')
+
+    # delete
+    p_del = subparsers.add_parser('delete', help='删除地图数据')
+    p_del.add_argument('api_base', help='API 地址')
+    p_del.add_argument('token', help='X-Access-Token')
+    p_del.add_argument('--id', required=True, help='地图记录 ID')
+
     # add-map
     p_add = subparsers.add_parser('add-map', help='添加 JAreaMap 组件到页面')
     p_add.add_argument('api_base', help='API 地址')
@@ -336,6 +397,10 @@ def main():
         cmd_check(args)
     elif args.command == 'upload':
         cmd_upload(args)
+    elif args.command == 'edit':
+        cmd_edit(args)
+    elif args.command == 'delete':
+        cmd_delete(args)
     elif args.command == 'add-map':
         cmd_add_map(args)
 

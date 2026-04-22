@@ -98,21 +98,83 @@ py datasource_ops.py create "$API_BASE" "$TOKEN" \
   --user "postgres" --password "postgres"
 ```
 
-### --db-type 枚举值（必须大写，严格匹配）
+### 全部数据库类型配置表（dbType / dbDriver / dbUrl 模板）
 
-| 数据库 | --db-type 值 |
-|--------|-------------|
-| MySQL 8.x | `MYSQL8` |
-| MySQL 5.7+ | `MYSQL5.7` |
-| MySQL 5.5 | `MYSQL5.5` |
-| SQL Server | `SQLSERVER` |
-| Oracle | `ORACLE` |
-| PostgreSQL | `POSTGRESQL` |
-| MongoDB | `mongodb` |
-| Redis | `redis` |
-| Elasticsearch | `es` |
+> 将 `HOST`、`PORT`、`DB` 替换为实际值。MongoDB/Redis/ES 的 dbUrl 无协议前缀。
+
+| label | dbType（value） | dbDriver | dbUrl 模板 |
+|-------|----------------|----------|-----------|
+| MySQL5.5 | `MYSQL5.5` | `com.mysql.jdbc.Driver` | `jdbc:mysql://HOST:3306/DB?characterEncoding=UTF-8&useUnicode=true&useSSL=false` |
+| MySQL5.7+ | `MYSQL5.7` | `com.mysql.cj.jdbc.Driver` | `jdbc:mysql://HOST:3306/DB?characterEncoding=UTF-8&useUnicode=true&useSSL=false&tinyInt1isBit=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai` |
+| MySQL8 | `MYSQL8` | `com.mysql.cj.jdbc.Driver` | `jdbc:mysql://HOST:3306/DB?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai` |
+| TIDB | `TIDB` | `com.mysql.cj.jdbc.Driver` | `jdbc:mysql://HOST:4000/DB?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&tinyInt1isBit=false` |
+| Oracle | `ORACLE` | `oracle.jdbc.OracleDriver` | `jdbc:oracle:thin:@HOST:1521:ORCL` |
+| SQLServer | `SQLSERVER` | `com.microsoft.sqlserver.jdbc.SQLServerDriver` | `jdbc:sqlserver://HOST:1433;SelectMethod=cursor;DatabaseName=DB` |
+| MariaDB | `MARIADB` | `org.mariadb.jdbc.Driver` | `jdbc:mariadb://HOST:3306/DB?characterEncoding=UTF-8&useSSL=false` |
+| PostgreSQL | `POSTGRESQL` | `org.postgresql.Driver` | `jdbc:postgresql://HOST:5432/DB` |
+| 达梦 | `dm` | `dm.jdbc.driver.DmDriver` | `jdbc:dm://HOST:5236/?DB&zeroDateTimeBehavior=convertToNull&useUnicode=true&characterEncoding=utf-8` |
+| 人大金仓 | `kingbase8` | `com.kingbase8.Driver` | `jdbc:kingbase8://HOST:54321/DB` |
+| 神通 | `oscar` | `com.oscar.Driver` | `jdbc:oscar://HOST:2003/DB` |
+| DB2 | `DB2` | `com.ibm.db2.jcc.DB2Driver` | `jdbc:db2://HOST:50000/DB` |
+| Hsqldb | `Hsqldb` | `org.hsqldb.jdbc.JDBCDriver` | `jdbc:hsqldb:hsql://HOST/DB` |
+| Derby | `Derby` | `org.apache.derby.jdbc.ClientDriver` | `jdbc:derby://HOST:1527/DB` |
+| Doris | `Doris` | `com.mysql.cj.jdbc.Driver` | `jdbc:mysql://HOST:9030/DB?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&tinyInt1isBit=false` |
+| SQLite | `SQLite` | `org.sqlite.JDBC` | `jdbc:sqlite://opt/DB.db` |
+| MongoDB | `mongodb` | `（空）` | `HOST:27017/DB` |
+| Redis | `redis` | `（空）` | `HOST:6379` |
+| Elasticsearch | `es` | `/` | `HOST:9200` |
 
 > **严禁小写**：`sqlserver` 会报 `invalid choice` 错误，必须写 `SQLSERVER`
+
+### ⚠️ datasource_ops.py 不支持的类型（必须直接调 API）
+
+`datasource_ops.py create` 的 `--db-type` 只接受：`MYSQL5.7 / MYSQL5.5 / ORACLE / SQLSERVER / POSTGRESQL / mongodb / es / redis`
+
+**以下类型必须直接调用 `/drag/onlDragDataSource/add` API**：`MYSQL8 / TIDB / MARIADB / dm / kingbase8 / oscar / DB2 / Hsqldb / Derby / Doris / SQLite`
+
+**直接调 API 创建的完整流程（三步）：**
+
+```python
+import sys
+sys.path.insert(0, '/c/Users/25067')
+import bi_utils
+bi_utils.API_BASE = 'http://192.168.1.66:8080/jeecg-boot'
+bi_utils.TOKEN = 'TOKEN'
+
+# 第1步：创建（result 直接是字符串 ID，不是对象）
+add_r = bi_utils._request('POST', '/drag/onlDragDataSource/add', data={
+    'dbName': '数据源名称',   # ⚠️ add 接口用 dbName，但不会保存到 name 字段
+    'dbType': 'MYSQL8',
+    'dbDriver': 'com.mysql.cj.jdbc.Driver',
+    'dbUrl': 'jdbc:mysql://127.0.0.1:3306/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai',
+    'dbUsername': 'root',
+    'dbPassword': 'root',
+})
+ds_id = add_r.get('result')  # 直接是 ID 字符串
+
+# 第2步：edit 修复 name 字段（add 后 name=null，必须 edit）
+bi_utils._request('POST', '/drag/onlDragDataSource/edit', data={
+    'id': ds_id,
+    'name': '数据源名称',
+    'dbType': 'MYSQL8',
+    'dbDriver': 'com.mysql.cj.jdbc.Driver',
+    'dbUrl': 'jdbc:mysql://127.0.0.1:3306/mydb?...',
+    'dbUsername': 'root',
+    'dbPassword': 'root',
+    'type': 'drag',
+})
+
+# 第3步：测试连接（⚠️ 必须传完整对象，仅传 id 报"URL为空"）
+t = bi_utils._request('POST', '/drag/onlDragDataSource/testConnection', data={
+    'id': ds_id,
+    'dbType': 'MYSQL8',
+    'dbDriver': 'com.mysql.cj.jdbc.Driver',
+    'dbUrl': 'jdbc:mysql://127.0.0.1:3306/mydb?...',
+    'dbUsername': 'root',
+    'dbPassword': 'root',
+})
+print('连接测试:', t.get('message'))  # 数据库连接成功
+```
 
 ### 返回结果
 

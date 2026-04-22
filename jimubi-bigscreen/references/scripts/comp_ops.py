@@ -73,9 +73,9 @@ from bi_utils import init_api, query_page, save_page
 def load_template(page_id):
     """加载页面模板，返回组件列表"""
     page = query_page(page_id)
-    tmpl = page.get('template', [])
+    tmpl = page.get('template') or []
     if isinstance(tmpl, str):
-        tmpl = json.loads(tmpl)
+        tmpl = json.loads(tmpl) or []
     # 确保每个组件的 config 是 dict
     for comp in tmpl:
         cfg = comp.get('config', {})
@@ -160,9 +160,8 @@ def set_nested(obj, path, value):
 
     last_kind, last_val = parts[-1]
     if last_kind == 'key':
-        # 自动类型转换
         if isinstance(current, dict):
-            current[last_val] = _auto_type(value)
+            current[last_val] = _auto_type(value, last_val)
     elif last_kind == 'idx':
         if isinstance(current, list):
             while len(current) <= last_val:
@@ -170,8 +169,17 @@ def set_nested(obj, path, value):
             current[last_val] = _auto_type(value)
 
 
-def _auto_type(val):
-    """字符串自动转换为合适类型"""
+# 末尾 key 含这些词时强制保留字符串，不做数字转换
+_STRING_KEY_SUFFIXES = (
+    'title', 'text', 'name', 'label', 'color', 'unit',
+    'url', 'href', 'image', 'prefix', 'suffix',
+    'placeholder', 'content', 'subtitle', 'extra',
+    'datatitle', 'maptitle', 'componentname',
+)
+
+
+def _auto_type(val, key=None):
+    """字符串自动转换为合适类型；标题/文本类 key 强制保留字符串"""
     if isinstance(val, str):
         if val.lower() == 'true':
             return True
@@ -179,6 +187,9 @@ def _auto_type(val):
             return False
         if val.lower() == 'null' or val.lower() == 'none':
             return None
+        # 标题/文本/颜色类字段强制字符串，不尝试数字转换
+        if key and key.lower() in _STRING_KEY_SUFFIXES:
+            return val
         try:
             if '.' in val:
                 return float(val)
@@ -280,13 +291,19 @@ def cmd_edit(args):
                     cfg = {}
                 target['config'] = cfg
 
+            # 顶层字段列表（直接写组件顶层，不进 config）
+            TOP_LEVEL_FIELDS = {'componentName', 'disabled', 'selected', 'x', 'y', 'w', 'h'}
             for s in args.set:
                 if '=' not in s:
                     print(f'无效的 --set 参数（需要 key=value 格式）: {s}')
                     continue
                 path, value = s.split('=', 1)
-                set_nested(cfg, path, value)
-                print(f'  设置 {target.get("componentName","")}: config.{path} = {value}')
+                if path in TOP_LEVEL_FIELDS:
+                    target[path] = value
+                    print(f'  设置 {target.get("componentName","")}: {path} = {value}')
+                else:
+                    set_nested(cfg, path, value)
+                    print(f'  设置 {target.get("componentName","")}: config.{path} = {value}')
             edited += 1
 
     if edited == 0:
@@ -517,6 +534,25 @@ def _create_or_reuse_sql_dataset(args):
     if param_list:
         print(f'查询参数: {[p["paramName"] for p in param_list]}')
 
+    # 查询或创建 "示例数据集" 分组
+    parent_id = '0'
+    try:
+        grp_resp = bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup')
+        grp_list = grp_resp.get('result') or []
+        if isinstance(grp_list, list):
+            for g in grp_list:
+                if g.get('name') == '示例数据集' and g.get('dataType') is None:
+                    parent_id = g.get('id', '0')
+                    break
+        if parent_id == '0':
+            import re as _re
+            add_g = bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup',
+                                      data={'name': '示例数据集', 'code': 'example_dataset', 'parentId': '0'})
+            parent_id = add_g.get('result') or '0'
+            print(f'已创建数据集分组: 示例数据集 (id={parent_id})')
+    except Exception as e:
+        print(f'分组查询异常，使用根目录: {e}')
+
     # 创建数据集
     payload = {
         'name': ds_display_name,
@@ -525,7 +561,7 @@ def _create_or_reuse_sql_dataset(args):
         'dbSource': db_source,
         'querySql': sql,
         'apiMethod': 'GET',
-        'parentId': '0',
+        'parentId': parent_id,
         'datasetItemList': field_list,
         'datasetParamList': param_list,
     }

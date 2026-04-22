@@ -149,6 +149,8 @@ def cmd_create_mock(args):
     # 生成唯一 path（加时间戳避免冲突）
     ts = int(time.time())
     iface_path = args.path if args.path else f'/{args.title.replace(" ","_")}_{ts}'
+    if iface_path.startswith(BASEPATH + '/'):
+        iface_path = iface_path[len(BASEPATH):]
 
     payload = {
         'project_id': PROJ_ID,

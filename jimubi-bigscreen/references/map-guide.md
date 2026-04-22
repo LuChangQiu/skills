@@ -183,14 +183,242 @@ JAreaMap 初始化
 | `packages/hooks/charts/useEChartsMap.ts` | 地图核心 hook |
 | `packages/dragEngine/api.ts` → `getMapDataByCode()` | 获取地图 GeoJSON |
 
+## 🚨 地图组件 config 必须从 default_configs.json 深拷贝（2026-04-10 严重事故）
+
+> **禁止手工构造地图组件的 option / commonOption / dataMapping！**  
+> 手写导致 8 个组件全部报错不渲染（2026-04-10 已观测）。
+
+**强制写法（仅替换 chartData 和标题）：**
+```python
+import copy, json
+defaults = json.load(open('default_configs.json', encoding='utf-8'))
+
+cfg = copy.deepcopy(defaults['JAreaMap'])   # 按需换组件名
+cfg.pop('w', None); cfg.pop('h', None)
+cfg['background'] = '#FFFFFF00'
+cfg['borderColor'] = '#FFFFFF00'
+cfg['chartData'] = json.dumps(data, ensure_ascii=False)  # 替换数据
+if isinstance(cfg.get('option', {}).get('title'), dict):
+    cfg['option']['title']['text'] = '新标题'  # 可选：替换标题
+# 其余 option / commonOption / dataMapping 全部保持默认，不要动！
+```
+
+## 🚨 各地图组件 chartData 格式严格对应（禁止跨组件套用）
+
+| 组件 | 正确 chartData 格式 | 常见错误 |
+|------|-------------------|---------|
+| JAreaMap / JBubbleMap / JBarMap / JHeatMap | `[{"name":"省名/城市名","value":数字}]` | ❌ 用 `[lng,lat,val]` 坐标数组 |
+| JFlyLineMap | `[{"fromName":"城市","toName":"城市","fromLng":数字,"fromLat":数字,"toLng":数字,"toLat":数字,"value":数字}]` | ❌ 用 `coords:[[lng,lat],[lng,lat]]` |
+| JTotalFlyLineMap | 同 JFlyLineMap + `"group":"分组名"` | ❌ 用 `type` 替代 `group` |
+| JTotalBarMap | `[{"name":"地区","lng":数字,"lat":数字,"value":数字,"group":"分类"}]` | ❌ 用 `coords:[lng,lat]` 数组；❌ 用 `type` 替代 `group` |
+
 ## 静态数据参考
 
 > **添加静态数据地图组件时，必须读取并使用 `map-static-data.md` 中的数据，禁止自行设计简陋数据。**
 
 `references/map-static-data.md` 包含：
-- 省份 GDP 数据（31省，2023年实际值）→ JAreaMap / JBarMap（省级）
-- 城市经纬度散点数据（24城）→ JBubbleMap / JBarMap / JHeatMap
-- 飞线数据（15条路线）→ JFlyLineMap
-- 时间轴飞线数据（4季度×8路线）→ JTotalFlyLineMap
-- 分组柱形数据（7大区×3产业）→ JTotalBarMap
+- 省份 GDP 数据（31省，2023年实际值）→ JAreaMap / JBubbleMap / JBarMap（name+value 格式）
+- 城市热力数据（24城）→ JHeatMap（name+value 格式）
+- 飞线数据（15条路线，fromLng/fromLat/toLng/toLat 格式）→ JFlyLineMap
+- 时间轴飞线数据（4季度×8路线，+group 字段）→ JTotalFlyLineMap
+- 分组柱形数据（7大区×3产业，lng/lat/group 格式）→ JTotalBarMap
 - JAreaMap 美化 option 配置（深蓝渐变 + 金色标注 + 炫光边框）
+
+> ⚠️ **map-static-data.md 中的"城市经纬度散点数据（24城，[经度, 纬度, 指标值]）"格式仅供参考，实际使用时 JBubbleMap/JBarMap/JHeatMap 只需 `name+value`，不需要坐标字段**（系统内置城市坐标库）。坐标格式仅在 JFlyLineMap/JTotalFlyLineMap/JTotalBarMap 的指定字段中使用。
+
+---
+
+## 各组件专属配置速查（来源：data.ts 实测 2026-04-21）
+
+> 以下配置项均为各组件独有、不被其他组件共享，且 map-guide 主体文档未覆盖。
+> 使用时仍须先从 default_configs.json 深拷贝，再覆盖对应字段。
+
+---
+
+### JAreaMap — 区域地图
+
+**⚠️ `option.geo.roam` 默认是 `false`（不可漫游），需要可拖拽时须显式设为 `true`。**
+
+```python
+# visualMap 色带文字样式（默认不显示，show=false 时无效）
+cfg['option']['visualMap']['textStyle'] = {
+    'color': '#ffffff', 'fontWeight': 'bold', 'fontSize': 12,
+}
+# tooltip 自定义字段映射（留空 = 默认展示）
+cfg['option']['tooltip'] = {'fieldMapping': []}
+```
+
+| 路径 | 说明 | 默认值 |
+|------|------|--------|
+| `option.geo.roam` | 可漫游拖拽 | `false`（⚠️ 不是 true） |
+| `option.visualMap.textStyle.color` | 色带文字颜色 | 无默认 |
+| `option.visualMap.seriesIndex` | visualMap 绑定的系列 | `[0]` |
+| `option.tooltip.fieldMapping` | tooltip 字段映射 | `[]` |
+| `commonOption.areaColor.color2` | 渐变色终止色 | `'#fcc02e'` |
+
+---
+
+### JBubbleMap — 散点地图（扩展 area 字段）
+
+散点标注比 JAreaMap 多几个独有字段：
+
+| 路径 | 说明 | 默认值 |
+|------|------|--------|
+| `option.area.markerSize` | 散点基础大小 | `1.5` |
+| `option.area.markerShape` | 散点形状 | `'circle'` |
+| `option.area.scatterLabelColor` | 散点标签文字颜色 | `'#ffffff'` |
+| `option.area.scatterLabelPosition` | 散点标签位置 | `'top'` |
+| `option.area.scatterFontSize` | 散点标签字号 | `12` |
+| `option.visualMap.seriesIndex` | visualMap 绑定系列 | `[1]`（不是 0） |
+| `commonOption.areaColor` | 仅有 `color1`（无 color2） | `{color1:'#132937'}` |
+
+```python
+cfg['option']['area'].update({
+    'markerSize': 2,
+    'markerShape': 'circle',        # 'circle'/'rect'/'roundRect'/'triangle'/'diamond'
+    'scatterLabelShow': True,
+    'scatterLabelColor': '#FFD700',
+    'scatterLabelPosition': 'top',
+    'scatterFontSize': 11,
+})
+```
+
+---
+
+### JFlyLineMap — 飞线地图（飞线动画 effect）
+
+**飞线动画完全由 `commonOption.effect` 控制，默认不文档，缺失会导致无动效：**
+
+| 路径 | 说明 | 默认值 |
+|------|------|--------|
+| `commonOption.effect.show` | 开启飞线动效 | `true` |
+| `commonOption.effect.trailLength` | 拖尾长度（0=无拖尾） | `0` |
+| `commonOption.effect.period` | 动画周期（秒） | `6` |
+| `commonOption.effect.symbolSize` | 飞点大小 | `15` |
+| `option.visualMap.seriesIndex` | visualMap 绑定系列 | `[2]`（⚠️ 是2，不是0/1） |
+
+```python
+cfg['commonOption']['effect'] = {
+    'show': True,
+    'trailLength': 0.2,   # 0~1，越大拖尾越长
+    'period': 4,
+    'symbolSize': 8,
+}
+```
+
+---
+
+### JBarMap — 柱形地图（tooltip + 地图比例）
+
+| 路径 | 说明 | 默认值 |
+|------|------|--------|
+| `option.tooltip.show` | 显示 tooltip | `false` |
+| `option.tooltip.trigger` | 触发方式 | `'item'` |
+| `option.tooltip.enterable` | 鼠标可进入 tooltip | `true` |
+| `option.tooltip.textStyle.fontSize` | tooltip 字号 | `20` |
+| `option.tooltip.textStyle.color` | tooltip 文字色 | `'#fff'` |
+| `option.tooltip.backgroundColor` | tooltip 背景色 | `'rgba(0,2,89,0.8)'` |
+| `option.tooltip.fieldMapping` | 字段映射 | `[]` |
+| `option.geo.aspectScale` | 地图宽高比缩放 | `0.96` |
+
+```python
+# 开启柱形地图 tooltip
+cfg['option']['tooltip'] = {
+    'show': True, 'trigger': 'item', 'enterable': True,
+    'textStyle': {'fontSize': 14, 'color': '#fff'},
+    'backgroundColor': 'rgba(0,2,89,0.8)',
+    'fieldMapping': [],
+}
+```
+
+---
+
+### JHeatMap — 热力地图（热力点参数）
+
+**热力效果完全由 `commonOption.heat` 控制，缺失则无热力扩散效果：**
+
+| 路径 | 说明 | 默认值 |
+|------|------|--------|
+| `commonOption.heat.pointSize` | 热力点大小（px） | `6` |
+| `commonOption.heat.blurSize` | 模糊扩散半径 | `13` |
+| `commonOption.heat.maxOpacity` | 最大不透明度 | `1` |
+| `option.visualMap.show` | 色带默认**显示** | `true`（⚠️ 与其他地图不同） |
+| `option.visualMap.seriesIndex` | 绑定系列 | `[1]` |
+| `commonOption.inRange.color` | 热力色阶 | `['#E08D8D','#ff9800']` |
+
+```python
+cfg['commonOption']['heat'] = {
+    'pointSize': 8,     # 越大热力圆越大
+    'blurSize': 20,     # 越大扩散越广
+    'maxOpacity': 0.9,
+}
+# 热力颜色（冷→热）
+cfg['commonOption']['inRange'] = {'color': ['#00bcd4', '#ff5722']}
+```
+
+---
+
+### JTotalFlyLineMap — 时间轴飞线地图（timeline 完整配置）
+
+**`option.timeline` 是该组件核心，控制时间轴播放行为：**
+
+| 路径 | 说明 | 默认值 |
+|------|------|--------|
+| `option.timeline.show` | 显示时间轴 | `true` |
+| `option.timeline.axisType` | 轴类型 | `'category'` |
+| `option.timeline.autoPlay` | 自动播放 | `false`（JTotalBarMap 是 true） |
+| `option.timeline.playInterval` | 播放间隔（ms） | `2000` |
+| `option.timeline.left/right` | 时间轴左右位置 | `'10%'` / `'5%'` |
+| `option.timeline.bottom` | 距底部距离 | `10` |
+| `option.timeline.width` | 时间轴宽度 | `'80%'` |
+| `option.timeline.symbolSize` | 轴点大小 | `10` |
+| `option.timeline.lineStyle.color` | 轴线颜色 | `'#555555'` |
+| `option.timeline.checkpointStyle.borderColor` | 当前帧圆圈颜色 | `'#777777'` |
+| `option.timeline.controlStyle.showNextBtn` | 显示下一帧按钮 | `true` |
+| `option.timeline.label.normal.textStyle.color` | 标签文字色 | `'#ffffff'` |
+| `option.title.subtextStyle.color` | 副标题颜色 | `'#ffffff'` |
+
+```python
+# 修改时间轴样式示例
+cfg['option']['timeline'].update({
+    'autoPlay': True,
+    'playInterval': 3000,
+    'lineStyle': {'color': '#00bcd4'},
+    'checkpointStyle': {'borderColor': '#00bcd4', 'borderWidth': 2},
+    'label': {
+        'normal': {'textStyle': {'color': '#c0e8ff'}},
+        'emphasis': {'textStyle': {'color': '#ffffff'}},
+    },
+})
+```
+
+---
+
+### JTotalBarMap — 柱形排名地图（右侧数据面板 + timeline）
+
+**右侧数据统计面板由 `commonOption` 中专有字段控制（其他地图没有）：**
+
+| 路径 | 说明 | 默认值 |
+|------|------|--------|
+| `commonOption.mapTitle` | 地图左上角标题 | `''` |
+| `commonOption.dataTitle` | 右侧统计面板标题 | `'数据统计情况'` |
+| `commonOption.dataTitleSize` | 面板标题字号 | `20` |
+| `commonOption.dataTitleColor` | 面板标题颜色 | `'#ffffff'` |
+| `commonOption.dataNameColor` | 面板条目名称颜色 | `'#dddddd'` |
+| `commonOption.dataValueColor` | 面板条目数值颜色 | `'#dddddd'` |
+| `commonOption.grid.bottom/left/top` | 右侧图表内边距 | `{bottom:50,left:75,top:20}` |
+| `option.timeline.autoPlay` | 自动播放（默认 true） | `true`（⚠️ 与 JTotalFlyLineMap 不同） |
+| `option.geo.show` | 地图显示 | `true` |
+| `option.geo.left` | 地图左移量 | `'3%'` |
+
+```python
+# 自定义右侧数据面板
+cfg['commonOption'].update({
+    'mapTitle': '全国产业布局',
+    'dataTitle': '区域产业统计',
+    'dataTitleSize': 18,
+    'dataTitleColor': '#c0e8ff',
+    'dataNameColor': '#a0c8f0',
+    'dataValueColor': '#FFD700',
+})
+```

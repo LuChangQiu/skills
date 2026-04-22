@@ -150,7 +150,7 @@ def signed_request(method, path, data=None, params=None):
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
 
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             resp_data = json.loads(resp.read().decode('utf-8'))
             return resp_data
     except urllib.error.HTTPError as e:
@@ -179,7 +179,7 @@ def simple_get(path, params=None):
     req = urllib.request.Request(url, headers=headers, method='GET')
 
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             resp_data = json.loads(resp.read().decode('utf-8'))
             return resp_data
     except urllib.error.HTTPError as e:

@@ -7,8 +7,22 @@
       --ds-id DS_ID --ds-type FILES --ds-name "数据集名" \\
       --ds-fields "name:String,type:String,sales:Integer"
 """
-import sys, json, time, subprocess, copy, argparse
-sys.path.insert(0, 'C:/Users/25067')
+import sys, os, json, time, subprocess, copy, argparse, datetime
+
+def _find_bi_utils():
+    candidates = [
+        os.path.dirname(os.path.abspath(__file__)),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'),
+        os.getcwd(),
+    ]
+    for d in candidates:
+        if os.path.exists(os.path.join(d, 'bi_utils.py')):
+            return d
+    return None
+
+_bu_dir = _find_bi_utils()
+if _bu_dir:
+    sys.path.insert(0, _bu_dir)
 import bi_utils
 
 parser = argparse.ArgumentParser(description='全组件大屏生成器')
@@ -222,9 +236,9 @@ if args.page_id:
         'backgroundImage': p_info.get('backgroundImage', '/img/bg/bg4.png'),
         'designType':      p_info.get('designType', 100),
     }
-    existing_tmpl = p_info.get('template', [])
+    existing_tmpl = p_info.get('template') or []
     if isinstance(existing_tmpl, str):
-        try:    existing_tmpl = json.loads(existing_tmpl)
+        try:    existing_tmpl = json.loads(existing_tmpl) or []
         except: existing_tmpl = []
     bi_utils._page_components[page_id] = list(existing_tmpl)
     existing_count = len(existing_tmpl)
@@ -324,6 +338,17 @@ for key, comp_type, name in all_comps:
     h   = cfg.pop('h', COMP_H)
     cfg['background']  = '#FFFFFF00'
     cfg['borderColor'] = '#FFFFFF00'
+
+    # 日历组件：chartData 日期必须替换为当月，否则数据点不显示
+    if comp_type == 'JPermanentCalendar':
+        _now = datetime.date.today()
+        _y, _m = _now.year, _now.month
+        _days   = [3, 5, 8, 10, 14, 15, 18, 20, 22, 25, 28]
+        _values = [620000, 265000, 564000, 120000, 565000, 120000, 88000, 102000, 315000, 120, 103]
+        cfg['chartData'] = [
+            {'date': f'{_y}-{_m:02d}-{_d:02d}', 'value': _v}
+            for _d, _v in zip(_days, _values)
+        ]
 
     # option 可能是 JSON 字符串，统一转为 dict
     opt = cfg.get('option', {})

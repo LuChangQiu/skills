@@ -453,6 +453,10 @@ def add_component(page_id, component, title, x, y, w, h, config=None):
     if config:
         _deep_merge(default_config, config)
 
+    # DoubleLineBar 特殊处理：补充 seriesType
+    if component == 'DoubleLineBar' and 'seriesType' not in default_config:
+        default_config['seriesType'] = []
+
     comp = {
         'component': component,
         'componentName': title,
@@ -1396,8 +1400,8 @@ def _get_category(component):
         'JMultipleBar': 'Bar', 'JNegativeBar': 'Bar', 'JStackBar': 'Bar',
         'JDynamicBar': 'Bar', 'JCapsuleChart': 'Bar',
         'JLine': 'Line', 'JSmoothLine': 'Line', 'JStepLine': 'Line',
-        'JMultipleLine': 'Line',
-        'JMixLineBar': 'MixLineBar', 'DoubleLineBar': 'DoubleLineBar',
+        'JMultipleLine': 'Line', 'JArea': 'Line', 'DoubleLineBar': 'Line',
+        'JMixLineBar': 'MixLineBar',
         'JPie': 'Pie', 'JRing': 'Ring', 'JRose': 'Rose',
         'JGauge': 'Gauge', 'JColorGauge': 'Gauge', 'JSemiGauge': 'Gauge',
         'JProgress': 'Progress', 'JCustomProgress': 'Progress',

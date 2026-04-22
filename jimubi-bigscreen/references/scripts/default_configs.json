@@ -210,7 +210,45 @@
           }
         }
       ],
-      "series": []
+      "series": [],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
+      ]
     }
   },
   "JActiveRing": {
@@ -262,7 +300,44 @@
       "radius": 100,
       "activeRadius": 120,
       "showOriginValue": false,
-      "customColor": [],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
+      ],
       "card": {
         "title": "",
         "extra": "",
@@ -443,6 +518,44 @@
           "label": {
             "position": "top"
           }
+        }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
         }
       ]
     }
@@ -1473,69 +1586,131 @@
     ],
     "chartData": [
       {
-        "name": "类别A",
-        "value": 40
+        "value": 1048,
+        "name": "oppo"
       },
       {
-        "name": "类别B",
-        "value": 30
+        "value": 735,
+        "name": "vivo"
       },
       {
-        "name": "类别C",
-        "value": 20
+        "value": 580,
+        "name": "苹果"
       },
       {
-        "name": "类别D",
-        "value": 10
+        "value": 484,
+        "name": "小米"
+      },
+      {
+        "value": 300,
+        "name": "三星"
       }
     ],
     "option": {
-      "outerCircle": {
-        "borderColor": "#324693",
-        "borderWidth": 3,
-        "radius": 100
+      "customColor": [
+        {
+          "color1": "#fae800",
+          "color": "#FAE800"
+        },
+        {
+          "color1": "#00c039",
+          "color": "#00C039"
+        },
+        {
+          "color1": "#0482dc",
+          "color": "#0482DC"
+        },
+        {
+          "color1": "#bb9581",
+          "color": "#BB9581"
+        },
+        {
+          "color1": "#ff7701",
+          "color": "#FF7701"
+        },
+        {
+          "color1": "#9c5ec3",
+          "color": "#9C5EC3"
+        },
+        {
+          "color1": "#00ccdf",
+          "color": "#00CCDF"
+        },
+        {
+          "color1": "#00c039",
+          "color": "#00C039"
+        },
+        {
+          "color1": "#ff7701",
+          "color": "#FF7701"
+        }
+      ],
+      "grid": {
+        "top": 50,
+        "left": 50,
+        "show": false
       },
-      "polar": {
-        "outerRadius": 86,
-        "innerRadius": 94
+      "series": [
+        {
+          "data": [],
+          "name": "Access From",
+          "avoidLabelOverlap": false,
+          "emphasis": {
+            "label": {
+              "show": true,
+              "fontSize": 14,
+              "fontWeight": "bold"
+            }
+          },
+          "itemStyle": {
+            "shadowBlur": 20,
+            "borderWidth": 5
+          },
+          "label": {
+            "color": "#EEF1FA",
+            "show": true,
+            "fontSize": 16,
+            "position": "center"
+          },
+          "labelLine": {
+            "length2": 38,
+            "show": false
+          },
+          "type": "pie",
+          "radius": [
+            "40%",
+            "70%"
+          ]
+        }
+      ],
+      "tooltip": {
+        "trigger": "item"
       },
-      "innerCircle": {
-        "borderColor": "#324693",
-        "borderWidth": 2,
-        "radius": 78
-      },
-      "legend": {
+      "outRadius": 90,
+      "title": {
+        "subtext": "{total}部",
+        "top": 41,
+        "textAlign": "",
+        "left": "center",
         "show": true,
-        "fontSize": 14,
-        "fontColor": "#FFFFFF",
-        "position": "bottom"
-      },
-      "backgroundStyle": {
-        "color": "#4242424D"
-      },
-      "titleStyle": {
-        "top": "30%",
-        "letterSpacing": 2,
-        "fontSize": 22,
-        "fontGradient": {
-          "endColor": "#FFFFFF",
-          "enabled": false,
-          "startColor": "#000000"
+        "customTop": true,
+        "text": "总数",
+        "textStyle": {
+          "color": "#EEF1FA",
+          "fontSize": 22,
+          "fontWeight": "normal"
         },
-        "fontColor": "#BFBFBF"
+        "subtextStyle": {
+          "color": "#EEF1FA",
+          "fontSize": 24
+        }
       },
-      "subTitleStyle": {
-        "fontFamily": "DIGITALDREAMFAT",
-        "top": "45%",
-        "fontSize": 30,
-        "fontGradient": {
-          "endColor": "#FF4500",
-          "type": "linear",
-          "enabled": true,
-          "startColor": "#FFD700",
-          "direction": "to bottom"
-        },
-        "fontColor": "#FFFFFF"
+      "innerRadius": 80,
+      "card": {
+        "rightHref": "",
+        "size": "default",
+        "extra": "",
+        "title": ""
       }
     }
   },
@@ -2079,7 +2254,44 @@
     "option": {
       "showValue": false,
       "unit": "",
-      "customColor": [],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
+      ],
       "card": {
         "title": "",
         "extra": "",
@@ -2716,6 +2928,44 @@
         {
           "type": "radar",
           "data": []
+        }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
         }
       ]
     }
@@ -4656,6 +4906,44 @@
               "fontSize": 20
             }
           }
+        }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
         }
       ]
     }
@@ -6765,6 +7053,44 @@
             "position": "top"
           }
         }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
       ]
     }
   },
@@ -7364,7 +7690,45 @@
           }
         }
       },
-      "series": []
+      "series": [],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
+      ]
     }
   },
   "JMultipleBar": {
@@ -7545,6 +7909,44 @@
           "itemStyle": {
             "borderRadius": 0
           }
+        }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
         }
       ]
     }
@@ -7727,6 +8129,44 @@
           "label": {
             "position": "top"
           }
+        }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
         }
       ]
     }
@@ -8742,6 +9182,44 @@
             "show": true
           }
         }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
       ]
     }
   },
@@ -9125,6 +9603,44 @@
             }
           }
         }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
       ]
     }
   },
@@ -9355,6 +9871,44 @@
         {
           "type": "radar",
           "data": []
+        }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
         }
       ]
     }
@@ -9783,6 +10337,44 @@
           },
           "data": []
         }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
       ]
     }
   },
@@ -9917,6 +10509,44 @@
             "show": true
           }
         }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
       ]
     }
   },
@@ -10002,6 +10632,44 @@
               "shadowColor": "rgba(0, 0, 0, 0.5)"
             }
           }
+        }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
         }
       ]
     }
@@ -11057,6 +11725,44 @@
             "position": "top"
           }
         }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
       ]
     }
   },
@@ -11232,7 +11938,45 @@
           }
         }
       },
-      "series": []
+      "series": [],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
+        }
+      ]
     }
   },
   "JStatsSummary_1": {
@@ -12011,6 +12755,44 @@
           "label": {
             "position": "top"
           }
+        }
+      ],
+      "customColor": [
+        {
+          "color1": "#1e90ff",
+          "color": "#1e90ff"
+        },
+        {
+          "color1": "#90ee90",
+          "color": "#90ee90"
+        },
+        {
+          "color1": "#00ced1",
+          "color": "#00ced1"
+        },
+        {
+          "color1": "#e2bd84",
+          "color": "#e2bd84"
+        },
+        {
+          "color1": "#7a90e0",
+          "color": "#7a90e0"
+        },
+        {
+          "color1": "#3ba272",
+          "color": "#3ba272"
+        },
+        {
+          "color1": "#2be7ff",
+          "color": "#2be7ff"
+        },
+        {
+          "color1": "#0a8ada",
+          "color": "#0a8ada"
+        },
+        {
+          "color1": "#ffd700",
+          "color": "#ffd700"
         }
       ]
     }

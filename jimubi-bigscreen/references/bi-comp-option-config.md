@@ -72,11 +72,11 @@ JDynamicBar 等也使用 `option.series[${index}].itemStyle.color`
 |------|---------|
 | 标题名称 | `option.title.text` |
 | 标题字体大小 | `option.title.textStyle.fontSize` |
-| 标题字体颜色 | `option.title.textStyle.fontColor` |
+| 标题字体颜色 | `option.title.textStyle.color` |
 | 标题字体粗细 | `option.title.textStyle.fontWeight` |
-| 副标题名称 | `option.title.subtextStyle` |
+| 副标题名称 | `option.title.subtext` |
 | 副标题字体大小 | `option.title.subtextStyle.fontSize` |
-| 副标题字体颜色 | `option.title.subtextStyle.fontColor` |
+| 副标题字体颜色 | `option.title.subtextStyle.color` |
 | 左对齐 | `option.title.left` |
 | 垂直居中 | `option.title.top` |
 
@@ -171,19 +171,37 @@ JDynamicBar 等也使用 `option.series[${index}].itemStyle.color`
 | 数值单位数量级 | `option.showUnit.numberLevel` | `1`（百分比）, `3`（千）, `4`（万） |
 | 数值单位小数位 | `option.showUnit.decimal` | |
 
-## 文本设置 (TextOption) - JText 组件
+## 文本设置 (TextOption) - JText / JCurrentTime / JNumber 组件
 
-| 说明 | 配置路径 |
-|------|---------|
-| 字体大小 | `option.body.fontSize` |
-| 字体间距 | `option.body.letterSpacing` |
-| 字体颜色 | `option.body.color` |
-| 千分符 | `option.body.thousandSeparator` |
-| 水平间距 | `option.body.marginLeft` |
-| 垂直间距 | `option.body.marginTop` |
-| 跑马灯 | `option.horseLamp` |
-| 超链接开关 | `option.isLink` |
-| 超链接地址 | `option.openUrl` |
+| 说明 | 配置路径 | 可选值 |
+|----|---------|--------|
+| 字体大小 | `option.body.fontSize` | |
+| 字体间距 | `option.body.letterSpacing` | |
+| 字体颜色 | `option.body.color` | |
+| 字体粗细 | `option.body.fontWeight` | `normal`, `bold`, `lighter` |
+| 对齐方式 | `option.body.textAlign` | `left`, `center`, `right` |
+| 字体 | `option.body.fontFamily` | |
+| 字体风格 | `option.body.fontStyle` | `normal`, `italic` |
+| 千分符 | `option.body.thousandSeparator` | |
+| 水平间距 | `option.body.marginLeft` | |
+| 垂直间距 | `option.body.marginTop` | |
+| 跑马灯 | `option.horseLamp` | |
+| 跑马灯速度(ms) | `option.speed` | |
+| 超链接开关 | `option.isLink` | |
+| 超链接地址 | `option.openUrl` | |
+| 超链接打开方式 | `option.openType` | `_blank`, `_self` |
+
+### 文本渐变配置（JText / JCurrentTime / JNumber 支持）
+
+| 说明 | 配置路径 | 可选值 |
+|------|---------|--------|
+| 启用渐变 | `option.body.gradient.enabled` | `true`/`false` |
+| 渐变类型 | `option.body.gradient.type` | `linear`（线性）, `radial`（径向） |
+| 渐变方向 | `option.body.gradient.direction` | `to right`, `to left`, `to bottom`, `to top`, `135deg` 等 |
+| 起始颜色 | `option.body.gradient.startColor` | `#000000` |
+| 结束颜色 | `option.body.gradient.endColor` | `#ffffff` |
+
+> **注意**：启用渐变后前端会自动设置 CSS `-webkit-background-clip: text`，`color` 字段将被忽略。
 
 ## 翻牌器设置 (CountToTextOption) - JCountTo 组件
 
@@ -257,13 +275,21 @@ JDynamicBar 等也使用 `option.series[${index}].itemStyle.color`
 | 文本颜色 | `option.textColor` |
 | 文本字体大小 | `option.textFontSize` |
 
-## 象形图设置 (PictorialOption)
+## 象形图设置 (PictorialOption) - JPictorialBar 组件
 
 | 说明 | 配置路径 |
 |------|---------|
 | 柱体颜色 | `option.barColor` |
 | 透明度 | `option.barOpacity` |
-| 间距 | `option.count` |
+| 图标间距 | `option.series[0].barCategoryGap` |
+
+## 象形图图标设置 (PictorialIconOption) - JPictorial 组件
+
+| 说明 | 配置路径 |
+|------|---------|
+| 图标间距 | `option.symbolMargin` |
+| 图标大小 | `option.symbolSize` |
+| 图标路径/URL | `option.symbol` |
 
 ## 仪表盘设置 (GaugeOption)
 
@@ -380,20 +406,23 @@ JDynamicBar 等也使用 `option.series[${index}].itemStyle.color`
 | 字体大小 | `option.textSize` |
 | 字体颜色 | `option.textColor` |
 
-## 轮播表格设置 (ScrollBoardOpt)
+## 轮播表格设置 (ScrollBoardOpt) - JScrollBoard 组件
 
-| 说明 | 配置路径 |
-|------|---------|
-| 悬浮暂停 | `option.hoverPause` |
-| 等待时间 | `option.waitTime` |
-| 开启排名 | `option.index` |
-| 列宽 | `option.indexWidth` |
-| 显示表头 | `option.headShow` |
-| 表头颜色 | `option.headerBGC` |
-| 表头行高 | `option.headerHeight` |
-| 每页行数 | `option.rowNum` |
-| 奇行颜色 | `option.oddRowBGC` |
-| 偶行颜色 | `option.evenRowBGC` |
+| 说明 | 配置路径 | 可选值 |
+|------|---------|--------|
+| 轮播方式 | `option.carousel` | `single`（单行）, `page`（整页） |
+| 悬浮暂停 | `option.hoverPause` | |
+| 等待时间(ms) | `option.waitTime` | |
+| 开启排名 | `option.index` | |
+| 序号列宽 | `option.indexWidth` | |
+| 显示表头 | `option.headShow` | |
+| 表头背景颜色 | `option.headerBGC` | |
+| 表头行高 | `option.headerHeight` | |
+| 表头字体大小 | `option.headFontSize` | |
+| 每页行数 | `option.rowNum` | |
+| 奇行颜色 | `option.oddRowBGC` | |
+| 偶行颜色 | `option.evenRowBGC` | |
+| 表体字体大小 | `option.bodyFontSize` | |
 
 ## 表格设置 (ScrollTableStyle)
 
@@ -442,7 +471,7 @@ JDynamicBar 等也使用 `option.series[${index}].itemStyle.color`
 | 开启动画 | `option.isEnableAnimation` |
 | 轮播时间(ms) | `option.scrollTime` |
 
-## 滚动设置 (ScrollOption)
+## 滚动设置 (ScrollOption) - JScrollRankingBoard 组件
 
 | 说明 | 配置路径 | 可选值 |
 |------|---------|--------|
@@ -450,6 +479,9 @@ JDynamicBar 等也使用 `option.series[${index}].itemStyle.color`
 | 轮播方式 | `option.carousel` | `single`（单行）, `page`（整页） |
 | 显示行数 | `option.rowNum` | |
 | 滚动时间(ms) | `option.waitTime` | |
+| 进度条颜色 | `option.color` | 默认 `#1370fb` |
+| 文字颜色 | `option.textColor` | 默认 `#fff` |
+| 字体大小 | `option.fontSize` | 默认 `13` |
 
 ## 历程设置 (DevHistoryOption)
 
@@ -462,16 +494,41 @@ JDynamicBar 等也使用 `option.series[${index}].itemStyle.color`
 | 内容字体颜色 | `option.titleColor` |
 | 内容字体大小 | `option.titleFontSize` |
 
+## 个性排名设置 (RankingStyle) - JFlashList 组件
+
+> ⚠️ **`option.title` 为字符串类型**（不是 ECharts title dict），`option.titleShow` 为独立布尔值控制显隐。
+> 禁止将 `title` 转为 `{show, text, textStyle}` 结构，否则模板渲染输出 `[object Object]`。
+
+| 说明 | 配置路径 | 类型 | 备注 |
+|------|---------|------|------|
+| 整体缩放 | `option.zoom` | number | 范围 1-5 |
+| 显示标题 | `option.titleShow` | boolean | 控制标题区域显隐 |
+| 标题文本 | `option.title` | **string** | ⚠️ 字符串，非 ECharts title dict |
+| 标题颜色 | `option.titleColor` | color | 十六进制色值 |
+| 标题字号 | `option.titleSize` | number | 字体大小(px) |
+| 排名项名称颜色 | `option.itemColor` | color | 十六进制色值 |
+| 数值颜色 | `option.numberColor` | color | 十六进制色值 |
+| 数值字号 | `option.numberSize` | number | 字体大小(px) |
+| 入场动画类型 | `option.animateType` | string | CSS动画类名，如 `zoomInUp` |
+
+**数据说明**：
+- chartData 最多取前 4 条（组件内部 `result.slice(0,4)`），按 value 降序排列
+- 字段映射：`name`（排名项名称）、`value`（数值）
+
 ## 气泡排名设置 (BubbleRankingStyle)
 
 | 说明 | 配置路径 |
 |------|---------|
 | 比例 | `option.zoom` |
 | 显示提示词 | `option.showTip` |
-| 提示词颜色 | `option.titleColor` |
+| 提示词背景颜色 | `option.tipColor` |
 | 提示词宽度 | `option.tipWidth` |
 | 提示词内容颜色 | `option.tipFontColor` |
 | 提示词内容字体大小 | `option.tipFontSize` |
+
+## 滚动列表 (JScrollList)
+
+详细配置见 `references/scroll-list-option-config.md`（变体区分规则、容器/行/表头/序号列/字段映射完整路径 + 三变体 option 示例）。
 
 ## 3D金字塔/漏斗设置 (Pyramid3DOption)
 
@@ -479,6 +536,89 @@ JDynamicBar 等也使用 `option.series[${index}].itemStyle.color`
 |------|---------|
 | 缩放 | `option.zoom` |
 | 尺寸 | `option.size` |
+
+## 圆形进度图设置 (RoundProgressOption) - JRoundProgress 组件
+
+| 说明 | 配置路径 |
+|------|---------|
+| 背景颜色 | `option.backgroundStyle.color` |
+| 外圆边框颜色 | `option.outerCircle.borderColor` |
+| 内圆边框颜色 | `option.innerCircle.borderColor` |
+
+## 图片设置 (ImageOption) - JImg 组件
+
+| 说明 | 配置路径 |
+|------|---------|
+| 图片地址 | `option.body.url` |
+| 旋转开关 | `option.izRotate` |
+| 旋转时间(ms) | `option.rotateTime` |
+| 透明度 | `option.opacity` |
+| 背景颜色 | `option.backgroundColor` |
+| 圆角 | `option.borderRadius` |
+| 内边距 | `option.padding` |
+
+## 图标设置 (CustomIconOption) - JCustomIcon 组件
+
+| 说明 | 配置路径 |
+|------|---------|
+| 图标颜色 | `option.color` |
+| 透明度 | `option.opacity` |
+| 模糊度 | `option.filter` |
+
+> `config.type` 设 `'01'`~`'36'` 决定显示哪个系统图标，与 option 无关。
+
+## 轮播图设置 (CarouselOption) - JCarousel 组件
+
+| 说明 | 配置路径 |
+|------|---------|
+| 自动轮播 | `option.autoplay` |
+| 显示指示点 | `option.dots` |
+| 指示点位置 | `option.dotPosition` |
+
+## 边框/装饰设置 (BorderDecorationStyle) - JDragBorder / JDragDecoration 组件
+
+| 说明 | 配置路径 |
+|------|---------|
+| 边框/装饰类型 | `option.type` |
+| 标题文本 | `option.title` |
+| 主颜色 | `option.mainColor` |
+| 副颜色 | `option.subColor` |
+| 翻转 | `option.reverse` |
+| 动画时长(s) | `option.dur` |
+| 扫描动画时长 | `option.scanDur` |
+| 光晕动画时长 | `option.haloDur` |
+
+## 播放器设置 (VideoPlayOption) - JVideoPlay 组件
+
+| 说明 | 配置路径 |
+|------|---------|
+| 自动播放 | `option.autoPlay` |
+| 循环播放 | `option.loop` |
+
+## Iframe 设置 (IframeOption) - JIframe 组件
+
+| 说明 | 配置路径 |
+|------|---------|
+| 链接地址 | `option.body.url` |
+
+## 按钮设置 (RadioButtonStyle) - JRadioButton 组件
+
+| 说明 | 配置路径 | 可选值 |
+|------|---------|--------|
+| 按钮形状 | `option.body.shape` | |
+| 水平间距 | `option.body.marginLeft` | |
+| 垂直间距 | `option.body.marginTop` | |
+
+## 天气设置 (WeatherOption) - JWeatherForecast 组件
+
+| 说明 | 配置路径 |
+|------|---------|
+| 城市 | `option.city` |
+| 显示模板 | `option.template` |
+| 显示天数 | `option.num` |
+| 背景颜色 | `option.bgColor` |
+| 字体大小 | `option.fontSize` |
+| 字体颜色 | `option.fontColor` |
 
 ## 环形设置 (RingOption)
 
@@ -666,7 +806,46 @@ JText
 ### 排行榜
 JScrollRankingBoard（直接数组，不要 JSON.stringify）
 ```json
-[{"name": "北京", "value": 1200}, {"name": "上海", "value": 1050}]
+[{"name": "北京", "value": 1200, "type": "城市"}, {"name": "上海", "value": 1050, "type": "城市"}]
+```
+
+### 轮播表（二维数组）
+JScrollBoard — **chartData 是二维数组**（行 × 列），首行不是表头，表头由 `option.header` 配置：
+```json
+[
+  ["行1列1", "行1列2", "行1列3"],
+  ["行2列1", "行2列2", "行2列3"]
+]
+```
+列名通过 `option.header: [{label:"列名", key:"", width:100}]` 配置，`key` 为空时按索引顺序取二维数组值。
+
+### 个性排名
+JFlashList（最多取前4条，按 value 降序排列）
+```json
+[{"name": "苹果", "value": 1000, "type": "手机品牌"}]
+```
+
+### 气泡排名
+JBubbleRank — **字段为 title/desc，不是 name/value**：
+```json
+[{"title": "Java", "desc": "事项数：369"}, {"title": "Python", "desc": "事项数：258"}]
+```
+
+### 滚动列表
+JScrollList — chartData 为业务对象数组，字段名与 `option.fieldMapping[].key` 对应：
+```json
+[{"plateNumber": "粤A12345", "violationCount": 3}, {"plateNumber": "粤B67890", "violationCount": 1}]
+```
+
+### 透视表
+JPivotTable — chartData 是复杂对象，不是数组：
+```json
+{
+  "x": [{"fieldId1": ["值A", "值B"]}, {"fieldId2": ["1", "2"]}],
+  "data": [
+    {"y": ["2022/09", "2022"], "t_id": "rowId1", "data": [111, null], "sum": 111, "summary_col": false}
+  ]
+}
 ```
 
 ### 滚动表格
@@ -812,11 +991,11 @@ JStatsSummary
 ### 文本/数字系列
 | 组件 | 设置面板 |
 |------|---------|
-| JText | BasicOption, TextOption |
+| JText | BasicOption, TextOption, ModalSettingsOption |
 | JCountTo | BasicOption, CountToTextOption |
-| JNumber | BasicOption |
+| JNumber | BasicOption, TextOption |
 | JColorBlock | BasicOption, ColorBlockOption |
-| JCurrentTime | BasicOption, CountToTextOption |
+| JCurrentTime | BasicOption, TextOption |
 
 ### 表格/列表系列
 | 组件 | 设置面板 |
@@ -846,17 +1025,25 @@ JStatsSummary
 ### 其他组件
 | 组件 | 设置面板 |
 |------|---------|
-| JWordCloud | BasicOption, WordCloudOption |
+| JWordCloud | BasicOption, WordCloudOption, CustomColorOption |
+| JImgWordCloud | BasicOption, WordCloudOption |
 | JFlashCloud | BasicOption, FlashCloudOption |
-| JRadioButton | BasicOption, CustomColorOption |
-| JSelectRadio | BasicOption |
-| JPictorialBar | BasicOption, TitleOption, XAxisOption, YAxisOption, PictorialOption |
-| JGender | BasicOption |
-| JStatsSummary | BasicOption |
+| JRadioButton | BasicOption, RadioButtonStyle, CustomColorOption |
+| JSelectRadio | BasicOption, TabSelectOption |
+| JPictorialBar | BasicOption, TitleOption, YAxisOption, XAxisOption, GridOption, PictorialOption, OtherOption |
+| JPictorial | BasicOption, TitleOption, XAxisOption, YAxisOption, GridOption, PictorialIconOption, OtherOption |
+| JGender | BasicOption, LegendOption |
+| JStatsSummary | BasicOption, StatsSummaryOption |
 | JCarousel | BasicOption, CarouselOption |
-| JVideoPlay | BasicOption |
-| JIframe | BasicOption |
+| JVideoPlay | BasicOption, VideoPlayOption |
+| JIframe | BasicOption, IframeOption |
 | JRectangle | BasicOption, RectangleOption |
+| JImg | BasicOption, ImageOption |
+| JCustomIcon | BasicOption, customIconOption |
+| JWeatherForecast | BasicOption, WeatherOption |
+| JDragBorder | BasicOption, BorderDecorationStyle |
+| JDragDecoration | BasicOption, BorderDecorationStyle |
+| JRoundProgress | BasicOption, RoundProgressOption |
 
 ---
 
