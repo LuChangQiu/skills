@@ -23,10 +23,53 @@
 
 > **前提条件**：需要MiniMax AI 开放平台账号， [社区专属9折订阅](https://platform.minimaxi.com/subscribe/token-plan?code=4sOp1aM1Qh&source=link)
 
+**方案三：Claude Code + deepseek-v4-pro**
+
+✅ Skills 支持很好，国内可直接访问，无需网络处理。
+
+> **前提条件**：需要 DeepSeek 开放平台账号， [DeepSeek Platform](https://platform.deepseek.com)
+
+<details>
+<summary><b>Claude Code settings.json 配置（点击展开）</b></summary>
+
+将以下配置添加到 Claude Code 的 `settings.json` 中：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "${DEEPSEEK_API_KEY}",
+    "API_TIMEOUT_MS": "3000000",
+    "ANTHROPIC_MODEL": "deepseek-v4-pro",
+    "ANTHROPIC_SMALL_FAST_MODEL": "deepseek-v4-flash",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4-pro",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": "1",
+    "CLAUDE_CODE_EFFORT_LEVEL": "max"
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true,
+    "github@claude-plugins-official": true,
+    "code-review@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "gopls-lsp@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true
+  },
+  "autoUpdatesChannel": "latest",
+  "skipDangerousModePermissionPrompt": true,
+  "model": "deepseek-v4-pro"
+}
+```
+
+</details>
+
 
 **结论**
 
-优先使用方案一，方案二为国内无法访问官方时的备选。
+优先使用方案一或方案三，方案二为国内无法访问官方时的备选。
 
 **相关文档：**
 - [Claude Code 下载与安装](https://code.claude.com/docs/zh-CN/quickstart)
