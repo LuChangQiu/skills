@@ -8,3 +8,9 @@
 
 ## front
 **/*.lock
+
+## python
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
