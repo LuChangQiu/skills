@@ -73,8 +73,8 @@
 
 **相关文档：**
 - [Claude Code 下载与安装](https://code.claude.com/docs/zh-CN/quickstart)
-- [MiniMax API 配置（方案三）](https://platform.minimaxi.com/docs/api-reference/text-anthropic-api)
-- [Deepseek接入Claude Code](https://api-docs.deepseek.com/zh-cn/guides/coding_agents)
+- [Claude Code接入Deepseek4(方案二)](https://api-docs.deepseek.com/zh-cn/guides/coding_agents)
+- [MiniMax API 配置 (方案三)](https://platform.minimaxi.com/docs/api-reference/text-anthropic-api)
 
 ## 功能清单
 
