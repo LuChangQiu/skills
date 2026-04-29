@@ -3,6 +3,22 @@
 > 源码分析自 `packages/dragEngine/otherStyles/DragEngineScreen.vue` 及相关文件
 > 适用于大屏（bigscreen）和仪表盘（dashboard）
 
+## 目录（按需跳读）
+
+| 你要做什么 | 跳到 |
+|-----------|------|
+| 搞懂 dataType=4 是怎么回事 | §一、概述 |
+| 了解用户在前端的完整操作顺序 | §二、完整流程（前端交互） |
+| 学 chart 字段结构（widgetType/groupField/valueFields...）| §三、字段结构 |
+| 写一份完整的 `config` | §四、完整 Config 结构（dataType: 4） |
+| 理解运行时数据是怎么查出来的 | §五、运行时数据查询 / §六、设计模式数据查询 |
+| 手动调 API 创建图表 | §六、通过 API 创建设计器表单图表 |
+| 端到端脚本化批量创建 | §八、API 自动创建图表（脚本化方案） |
+| 搞清 compType vs component、chart 字段和 option 差异 | §九、关键差异对比 / §十、compType 与最终 component 的关系 |
+| 给 AI 提示工程做参考 | §十一、使用技巧（AI 生成时参考） |
+| 知道哪些接口会被调到 | §七、涉及的全部 API 接口 |
+| 绑定字段最新的正确字段结构（2026-04-03）| §十二、设计器表单绑定字段的完整配置 |
+
 ---
 
 ## 一、概述
@@ -684,7 +700,7 @@ def _get_default_chart_option(chart_type):
             'series ': [],   # ⚠️ 注意：JBarMap 的 series 键名有尾部空格（源码如此）
             'grid': {'bottom': 115, 'show': False},
             'tooltip': {
-                'backgroundColor': 'rgba(0,2,89,0.8)',
+                'backgroundColor': '#000259CC',
                 'enterable': True,
                 'fieldMapping': [],
                 'show': False,

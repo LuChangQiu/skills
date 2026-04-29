@@ -1,69 +1,218 @@
 # 已知坑点速查
 
-遇到异常时先查此表。
+遇到报错先查「症状速查」，用 `Read(offset=N, limit=40)` 只读该节，**禁止每次全读**。
 
-## 什么该记录到坑点，什么不该
+## 症状速查
 
-| 该记录 ✅ | 不该记录 ❌ |
-|----------|-----------|
-| API 接口字段名非预期（如 `paramName` 而非 `fieldName`）| 文档示例写错了（直接改文档即可） |
-| 接口返回值路径非预期（如必须 `resp["result"]["id"]`）| 正常的配置规范（改写到 SKILL.md 规范章节） |
-| 运行时才暴露的隐性错误（如 `{**bd}` 展开导致边框不生效）| 只要改文档就能避免的问题 |
-| 引擎行为与直觉不符（如 `isPage:"1"` 分组导致合计不完整）| 正常业务规则（放 SKILL.md 对应说明） |
-| 并发/顺序依赖导致的失败（如同秒 gen_code 重复）| — |
-
-**判断标准：** 如果问题根源是"文档写错了"→ 改文档；如果根源是"API/引擎行为本身出乎意料"→ 记坑点。
+| 现象 / 关键词 | 节 | offset |
+|-------------|-----|--------|
+| 预览全空 / `#{}` 不渲染 / dbCode / jsonData / fieldList / save_db 报错 | §数据集保存 | 15 |
+| 图表空白 / extData / series / apiStatus / colors / qurest | §图表渲染 | 60 |
+| 样式不生效 / border / merge / merges / col0 / align / 留白 | §样式布局 | 88 |
+| GBK崩溃 / ModuleNotFoundError / python -c / deadlock / sleep 浪费 | §脚本执行 | 115 |
+| 404 / 签名失败 / Session / report_urls / make_designer / 参数名 | §API接口 | 138 |
+| Access denied / 连接失败 / dbSource / 密码 / 建表库不对 | §数据库数据源 | 176 |
+| 循环块不展开 / loopBlock / 主子表错位 / zonedEdition / loopTime | §循环块分组 | 189 |
+| UPPER / CEIL / DBSUM / LIKE / FreeMarker / widgetType / 下拉控件 | §表达式查询控件 | 210 |
+| 执行太慢 / 多读文件 / 一键脚本被拒后重发 | §执行效率 | 226 |
+| 明细报表合计行 / funcname 无效 / 计算规则 / filterNegative / 合计行不出现 | §数据集保存 | 15 |
 
 ---
 
+## §数据集保存
+
 | 坑 | 现象 | 解决 |
 |----|------|------|
-| dbCode 纯数字（所有数据集） | `#{1775721592817440.field}` 预览数据全空 | **所有类型数据集**（SQL/JSON/API）的 dbCode 均禁止纯数字；必须用字母开头的驼峰字符串如 `"schoolJf"`，禁止 `gen_code()` 直接作为 dbCode |
-| dbCode 含保留关键词或特殊字符 | 数据集保存异常或绑定失败（如 `returnOrder` 含 `return`） | dbCode 只能用纯字母+数字的驼峰命名；**禁止含 `return`、`for`、`if`、`while` 等 JS/Java 保留字**；**禁止含下划线 `_`、连字符 `-`、点 `.` 等特殊字符**；正确示例：`thdMain`、`salesOrder`、`empInfo` |
-| save 返回值取错路径 | `resp.get("id")` 返回 None，后续全部静默失败 | 正确路径：`resp["result"]["id"]` |
-| 预览/设计器 URL 用 `?id=` | 页面可能加载但报表为空 | 正确格式：`/jmreport/view/{id}` 和 `/jmreport/index/{id}`（路径参数） |
-| rows/cols 被 json.dumps | 设计器空白 | 只 dumps designerObj |
-| gen_code() 同秒重复 | INSERT code 唯一键冲突 | 用毫秒+随机数：`str(time.time()*1000)+str(random.randint(100,999))`；多报表顺序创建时加 `time.sleep(2)` |
-| save_db 之间加 sleep | 脚本慢 1~2 秒 | `save_db` 内部用 `gen_id()`（毫秒+随机），**不会重复**；同一报表的多个数据集之间**不需要 sleep**，直接顺序调用即可 |
-| 只改报表展示配置也调 save_db | 多调了一次不必要的接口 | 修改 rpbar/样式/合并等**纯报表配置**时，不需要调 `save_db`；直接 `get_report` → 改配置 → `/save` 两步即可 |
-| 修改数据集单个字段（如 isPage）用 save_db 全量重传 | 代码繁琐，需要重新填写所有参数 | 正确做法：`update_db(session, db_id, isPage="1")`；内部先 `/loadDbData/{dbId}` 取回原始数据，只改指定字段，原样回传 `/saveDb`（所有接口本身都很快，<0.1s）|
+| dbCode 纯数字 | `#{1775.field}` 预览全空 | **所有类型**数据集 dbCode 禁止纯数字；用字母开头驼峰如 `schoolJf`，禁止 `gen_code()` 直接作为 dbCode |
+| dbCode 含保留字/特殊字符 | 保存异常或绑定失败（如 `returnOrder` 含 `return`） | 只用纯字母+数字驼峰；**禁止** `return/for/if/while` 等 JS/Java 保留字，禁止 `_/-/.` |
+| rows/cols 被 json.dumps | 设计器空白 | 只 dumps designerObj，rows/cols/styles 传 dict |
+| isPage:"1" + 分组 | 合并/合计不完整 | 分组报表数据集 isPage:"0" |
+| dbSource 传名称不传 ID | 数据源下拉不显示 | 先 getDataSourceByPage 查 ID |
+| SQL 数据集 dbSource 留空 | 界面看不出用哪个库 | SQL 数据集必须传 `dbSource` 数据源 ID |
+| customRows 缺 datasetCode | build_table_rows 报 KeyError | 即使用 customRows，table 里也必须有 `"datasetCode":""` 占位 |
+| 文件数据集 dataType 写 "sql" | 图表空白，报 "reportDb is null" | 文件数据集（dbType=5/6）chart_entry 必须传 `data_type="files"` |
+| 文件数据集(dbType=5) fieldList 丢失 | UI「字段名」列全空，图表不渲染 | 拿到 db_id 后立即做第二次 `/saveDb`（payload 加 `"id": db_id`）；条目必须带 `fieldNamePhysics` |
+| save_db 重复创建 | 多次运行后出现多个同名数据集 | 更新时必须传 `db_id=<已有ID>`；`save_db` 不传 id 始终 INSERT 新行 |
+| save_db 返回值误用 | `r["result"]["id"]` TypeError | `save_db()` 直接返回 ID 字符串，直接 `db_id = save_db(...)` |
+| save_db 修改已有仍新增 | 每次调 save_db 都 INSERT 新行 | **更新**已有数据集用 `update_db(session, db_id, ...)`，而非再次调 save_db |
+| 修改数据集单个字段用 save_db 全量重传 | 代码繁琐 | 用 `update_db(session, db_id, isPage="1")`；内部先取回原始数据，只改指定字段 |
+| JSON json_data 传 list/dict | `Cannot deserialize value of type java.lang.String` | 必须 `json.dumps({"data": raw_list}, ensure_ascii=False)`；`json_data` 是**字符串** |
+| JSON jsonData 单对象而非数组 | 字段解析失败或预览无数据 | 必须 `{"data": [...]}`，即使只有一条也包在数组里 |
+| JSON jsonData 裸数组 | `#{db.field}` 全部为空 | 引擎从 `data` 键取行；裸数组找不到 `data`，全空；正确：`{"data": [...]}` |
+| JSON 数据集绑定多系列/数组值图表 | legend 显示 undefined，只渲染一个点 | scatter.bubble/radar 等复杂静态数据必须用 `_NONE()`（不绑数据集），config 里的静态数据才能直接渲染 |
+| API 分页缺分页参数 | 不分页或字段解析失败 | api_url 末尾带 `?pageSize='${pageSize}'&pageNo='${pageNo}'`，param_list 加两条 searchFlag=0 分页参数，默认值不能留空 |
+| API 数据集图表调 /qurestSql | 返回 0 行 | API 数据集必须调 `/qurestApi`，返回值路径 `resp["result"]["data"]`；SQL 才用 `/qurestSql` |
+| save_db 省略 field_list | TypeError（必填参数缺失） | 第6个位置参数 field_list 为必填；每个字段含 `fieldName/fieldText/widgetType/isShow/isQuery` |
+| paramList 字段键名用 fieldName/fieldTxt | `Column 'param_name' cannot be null` | 正确键名：`paramName/paramTxt/paramValue/searchFlag/widgetType/searchMode` |
+| JavaBean 数据集 dbType 用 "0" | 显示为「SQL数据集」而非「JavaBean数据集」 | dbType 必须 **"2"**；chart_entry data_type 必须 **"javabean"** |
+| SQL field_list=[] 传空 | 字段明细「暂无数据」，图表无法绑定 | 先调 `parse_sql(session, sql, db_source=ds_id)` 拿字段列表再传给 save_db |
+| **SQL 表名照搬文档示例** | `save_db` 保存成功但预览报 `Table 'xxx' doesn't exist`，数据全空 | 示例表名（如 `test_order_main`）不代表用户环境存在。创建 SQL 数据集前必须：① `resolve_db_source` 取数据源 ID → ② `get_ds_connection(session, ds_id)` 取 MySQL 凭证 → ③ `SHOW TABLES LIKE 'xxx'` 验证表存在 → 不存在则先建表插数据 → ④ 再调 `parse_sql` 取字段。**禁止**硬编码 fieldList 跳过表存在性验证 |
+
+---
+
+## §图表渲染
+
+| 坑 | 现象 | 解决 |
+|----|------|------|
 | 图表 linkIds 放顶层 | 钻取/联动无效 | 放 extData 内部 |
 | 联动目标图表无默认值 | 初始页面图表空白 | paramList 必须设 paramValue |
-| isPage:"1" + 分组 | 合并/合计不完整 | 分组报表数据集 isPage:"0" |
 | bar.multi 用 apiStatus:"1" | 图表渲染异常 | 静态数据必须用 apiStatus:"0" |
-| dbSource 传名称不传 ID | 数据源下拉不显示 | 先 getDataSourceByPage 查 ID |
-| SQL 数据集 dbSource 留空 | 界面打开数据集看不出用的是哪个数据库/数据源 | SQL 数据集必须传 `dbSource` 数据源 ID（非空字符串）；从 memory 取或先调 getDataSourceByPage 查询 |
-| getDataSourceByPage GET 签名校验失败 | `签名校验失败，参数有误！` | GET 签名接口必须先把 `token` 加入 params，再对完整 params（含 token）计算 X-Sign；`jimureport_utils.py` 的 `Session.request` 已修复：GET + need_sign 时先 `params["token"]=token` 再 `_compute_sign(params)` |
-| executeSelectApi 调用方式 | POST + query string，不是 JSON body；result 直接是 fieldList 数组 | 用 `parse_api(session, url)` |
-| 脚本走系统代理 | 连接失败 | Session 已封装 trust_env=False |
 | paramValue 用图表字段名 | 图表钻取无值 | 用 name/value/seriesName |
-| 诊断命令用 run_in_background | 用户等待输出超时 | 诊断/计时命令必须前台同步执行，禁止 run_in_background |
-| 脚本多次并发启动 | 数据库连接池耗尽，报 `Could not open JDBC Connection for transaction` | 脚本只启动一次，用一次 `TaskOutput(block=true, timeout=30000)` 等结果；TaskOutput 超时后**不要重新启动脚本**，等原进程完成即可 |
-| 修改已有报表用 `**design` | design 含 `name` 等字段冲突，图表消失 | 始终显式传 `rows=design['rows'], cols=design['cols'], styles=..., merges=..., chartList=...`，禁止 `**design` |
-| 图表 extData.id 为 None | 预览图表不渲染/消失 | `extData` 中 `chartId` 和 `id` 必须同时赋值为 `layer_id`，不可缺一 |
-| 只改 `color[]` 设置颜色 | 颜色不生效或不持久化 | 饼图改3处(data[i].itemStyle/label/colors[])，柱形图改2处(series[i].itemStyle/colors[])，`color[]` 不动 |
-| cell 直接写 `align`/`font`/`valign` | 样式不生效（浏览器实测 2026-04-07） | 对齐+字体必须放入顶层 `styles[]` 数组，cell 用 `style` 整数索引引用；不能把 align/font/valign 直接写在 cell 对象上 |
-| `color`（文字颜色）写在 `font` 内 | `font.color` 在某些 style 不生效，表头白字不显示 | `color` 必须在 style 顶层，与 `font`/`bgcolor` 同级：`{"font":{...}, "color":"#FFFFFF", "bgcolor":"..."}` |
-| `merge` 不加 `merges` 顶层数组 | 合并区域在设计器显示为未合并 | cell 设 `merge:[rowSpan,colSpan]` 同时，**必须**在顶层 `merges` 加 `"B1:J1"` 等 Excel 范围字符串（UI 行号 = code 行号+1） |
-| `merge` 与顶层 `merges` 列范围不一致 | 单元格合并只到部分列，右侧留空白（如收货地址未对齐） | cell `merge:[0,N]` 表示额外跨 N 列，顶层 `merges` 的结束列必须一致：`merge:[0,4]` → 起始列为C时应为 `"C?:G?"` 而非 `"C?:E?"`；**改 merge 必须同步核查 merges 字符串** |
-| 用切片限制图表数据条数 | SQL LIMIT 或 Python 切片控制不稳定 | 图表 config 中设 `"dataFilter":{"filterCount":N}`，积木报表引擎会自动只显示前 N 条；SQL 不加 LIMIT |
-| 象形图 symbol 图片 URL 拼错 | 图标看不到 | upload 返回 `message="jimureport/x.png"`；访问 URL = `BASE_URL + "/img/" + message`；symbol 写 `f"image://{BASE_URL}/img/{message}"` |
-| 象形图开启补全用 `symbolClip` | 补全不生效 | 补全（背景虚影）用 `"double": True`，不是 `symbolClip` |
-| 雷达图 series 传空字符串 | 系列属性"请选择"，legend 显示 undefined | SQL 里 `'' AS type` 只是占位，`chart_entry(series="type")` 仍必须填 `"type"` |
-| 雷达图 legend.data 为空数组 | 图例显示空白方块 | `legend.data` 必须预填系列名列表，如 `["综合评分"]`；SQL动态数据集引擎不会自动填充 legend.data |
-| 雷达图 SQL type 字段传空字符串 | 图例空白、tooltip 显示 series0 | 引擎用 type 字段值作为系列名；必须传实际名称如 `'综合评分' AS type`，且与 `legend.data` 和 `series[].data[].name` 三处保持一致 |
-| 同一报表多图表垂直排列重叠 | 第二个图表盖在第一个上 | chart_entry rowspan 默认14但 height=420px 实际占≈17行；第二个图表的 row 必须 ≥ 第一个 row + ceil(height/行高) + 间距，保守估算：height=420 时第二图表 row = 第一图表 row + 20 |
-| 表达式列写 `=` 开头 | 后端将文本当公式求值，显示计算结果而非表达式字符串 | 表达式说明列（col2）去掉 `=` 前缀，只写 `ABS(-88.5)` 而非 `=ABS(-88.5)` |
-| `CEIL(n)` / `FLOOR(n)` 无结果 | JimuReport 内置函数不含 CEIL/FLOOR，只有 Aviator 的 `math.ceil/floor` 有效 | 去掉这两行；若需要向上/向下取整只能用 `math.ceil()`/`math.floor()` |
-| `UPPER(#{field})` / `LOWER(#{field})` 无结果 | `#{field}` 替换后变成 `UPPER(Hello World)`（无引号），Aviator 解析失败；且绑定字段的行会随数据集展开重复多行 | 改用字符串字面量：`=UPPER('hello world')`；不要在 UPPER/LOWER 公式内使用 `#{}` 绑定 |
-| get_report→删行→shift 后按硬编码行号修改 | 行号计算出错，改错了行 | 删行/移行后，按 col1 函数名（文本内容）匹配目标行，而非依赖行号索引 |
-| rpbar 用 json.dumps 字符串 | 保存成功但预览工具条设置不生效 | rpbar 必须用 dict 对象，不能用 `json.dumps()`；字段名是 `rpbar`（不是 rqbar） |
-| 单系列图表 series 传了 `"type"` | 预览时图表不自动加载，需手动点击"运行"按钮 | 单系列图表（pie/bar.simple/line.simple 等）`series` 必须传空字符串 `""`；`"type"` 仅用于多系列图表（bar.multi 等）且数据集中确实有该字段时才传 |
+| 图表 extData.id 为 None | 预览图表不渲染/消失 | `chartId` 和 `id` 必须同时赋值为 `layer_id` |
+| 只改 `color[]` 设置颜色 | 颜色不生效 | 饼图改3处(data[i].itemStyle/label/colors[])，柱形图改2处(series[i].itemStyle/colors[]) |
+| **用切片/改数据集类型限制图表数据条数** | 数据集被破坏，API 类型变 JSON 后动态查询失效 | **⚠️ 禁止**改数据集类型或切片数据；图表 config 根级设 `"dataFilter":{"filterCount":N}`，对应 UI「数据过滤→显示X轴前N项」，引擎渲染时自动截取 |
+| 象形图 symbol URL 拼错 | 图标看不到 | upload 返回 `message="jimureport/x.png"`；symbol 写 `f"image://{BASE_URL}/img/{message}"` |
+| 象形图用 symbolClip 补全 | 补全不生效 | 补全背景虚影用 `"double": True`，不是 symbolClip |
+| 雷达图 series 传空字符串 | 系列属性「请选择」，legend 显示 undefined | SQL `'' AS type` 只是占位，chart_entry series 仍必须填 `"type"` |
+| 雷达图 legend.data 为空数组 | 图例空白方块 | `legend.data` 必须预填系列名列表，引擎不自动填充 |
+| 雷达图 SQL type 字段传空字符串 | 图例空白、tooltip 显示 series0 | 必须传实际名称如 `'综合评分' AS type`，与 legend.data 和 series[].data[].name 三处一致 |
+| 单系列图表 series 传了 "type" | 预览不自动加载，需手动点「运行」 | 单系列图表 series 必须传 `""`；"type" 仅用于多系列且数据集有该字段时 |
+| 多系列图表 series 为空数组 | 所有带 type 字段图表全部空白 | 所有多系列图表 series 必须提供至少一个带 itemStyle 的占位条目，禁止 `"series":[]`；水平堆叠图分类数据写 yAxis 不写 xAxis |
+| graph.simple 误配 extData | 绑数据集/设 apiStatus 导致图表不渲染 | extData 只需 `{"chartId":layer_id,"chartType":"graph.simple"}`；节点+边全部内嵌 config；不需要数据集 |
+| bar.background extData.chartType 写错 | 柱体数据全部消失 | extData.chartType 保持 `bar.simple`；带背景只在 echarts series 层配 showBackground |
+| API 图表字段名不是 name/value | 设计器「运行」后图表空白 | extData 设 `"isCustomPropName": True`，`xText` 设实际分类字段名，`yText` 设实际值字段名 |
+| JavaBean 图表调 /qurestSql 回填 | 返回 result:null | JavaBean 不支持设计态填充；/qurestSql/Api/Bean 均无效；**创建 JavaBean 图表时跳过回填** |
+| SQL 图表 config 无初始数据 | 设计器 ECharts 空白 | 创建 SQL 图表后必须调 `/qurestSql` 回填：转换后写入 config.xAxis.data/series[i].data/legend.data 再 /save |
+
+---
+
+## §样式布局
+
+| 坑 | 现象 | 解决 |
+|----|------|------|
+| cell 直接写 align/font/valign | 样式不生效 | 对齐+字体放入顶层 `styles[]` 数组，cell 用 `style` 整数索引引用 |
+| color 写在 font 内 | 表头白字不显示 | `color` 必须在 style 顶层与 font/bgcolor 同级：`{"font":{...},"color":"#FFF","bgcolor":"..."}` |
+| border 写在 style 顶层（展开写法） | 部分边框方向不渲染 | `bottom/top/left/right` **必须嵌套在 `"border"` key 下**，不能展开到顶层 |
+| border 写成 `{"style":1}` 对象格式 | 整张表渲染空白 | border 每个方向必须是**数组**：`["thin","#000000"]`；不能是 `{"style":1}` |
+| 表格 styles 未加边框 | 预览无边框 | 所有 style 对象默认必须加 border（底部/顶部/左/右各 `["thin","#BFBFBF"]`） |
+| **分组行用静态 merge 做动态合并** | 分组列旁的标签格未合并或错位 | 分组数据行的静态标签列（如"基本信息"）必须用 `"dynamicMerge": 1`，禁止用 `merge:[N,0]`——行数不固定，静态 merge 无效。同时标签列插 col1，group 列从 col2 开始右移，标题 merges 从 C 列起（`"C1:G1"`） |
+| merge 不加 merges 顶层数组 | 合并区域在设计器未合并 | cell 设 `merge:[rowSpan,colSpan]` 同时，**必须**在顶层 `merges` 加 Excel 范围字符串（UI 行号=code 行号+1） |
+| merge 与 merges 列范围不一致 | 单元格合并只到部分列，右侧留空白 | `merge:[0,4]` 起始列为 C 时应为 `"C?:G?"`；**改 merge 必须同步核查 merges 字符串** |
+| 斜线表头 style 含 valign/align | 标签错位，合并单元格内大片空白 | 斜线表头 style **只能有** border+bgcolor+color，**禁止加 align/valign** |
+| 报表无左侧留白 | 内容紧贴左边框 | col0 固定 30px 留空白格；标题从 col1 开始合并，merges 写 `"B1:F1"` 不含 A 列 |
+| rows dict 缺 "len" key | 设计器列数/行数异常，图表位置偏移 | rows 必须带 `"len": 200`：`{"len": 200, "1": {"height": 25, "cells": {}}, ...}` |
+| 同行图表水平重叠 | 左图溢出覆盖右图 | `width`（px）必须 ≤ `colspan × 列宽`；设 width 与列宽必须同步校验 |
+| 多行图表垂直重叠 | 下方图表盖在上方图表上 | height=420 实际占≈17行；下一图表 row ≥ 上一图表 row + ceil(height/行高) + 间距（保守估算 row_step=20）；**必须初始化所有行 height=25** |
+| loopTime 标题列范围含尾部空白列 | 标题偏窄，右侧留白 | 标题行的 merge 和 merges 不应包含 loopTime 末尾间距列 |
+| 主子表列数不统一 | 主表比子表宽，视觉不对齐 | 主表和子表必须使用**完全相同的列范围** |
+| 纵横组合缺二级子列表头 | 月份列下无子列标题 | 需4行布局：标题行+双层表头行+数据行；row2 静态表头 `merge:[1,0]` 纵跨2行，groupRight `merge:[0,N-1]` 横跨N子列 |
+| 纵横组合 merges 只写标题 | 静态表头不合并，与子列行错位 | 必须同时写 `"B3:B4"` 跨行 + `"D3:F3"` 月份模板跨列，三处缺一不可 |
+| groupRight 月份列头字母序错误 | "10月"排在"1月"前面 | 月份字段用零填充：`CONCAT(LPAD(month_no,2,'0'),'月')` → "01月"~"12月" |
+
+---
+
+## §脚本执行
+
+| 坑 | 现象 | 解决 |
+|----|------|------|
+| Windows Python stdout GBK | `UnicodeEncodeError: 'gbk' codec` 崩溃重试 | 每个脚本开头必须加：`import sys; sys.stdout.reconfigure(encoding='utf-8')` |
+| python -c 跑到后台 | 命令自动进入 background，输出丢失 | 永远 Write .py 文件后 `python /path/to/file.py` 执行，禁止 `python -c` |
+| 导入 JimuSession / JimuReportSession | `ImportError` 整个脚本挂掉 | 唯一正确写法：`from jimureport_utils import Session, gen_id, gen_layer, make_styles, base_save, save_db, make_designer, chart_entry, virtual_row, print_summary, get_report, report_urls, parallel_save_dbs, ensure_datasource, parse_and_save_dataset` |
+| 工具库模块名写错 | ModuleNotFoundError | 正确导入：`from jimureport_utils import Session, gen_id, gen_code, save_db, make_designer, base_save` |
+| 脚本走系统代理 | 连接失败 | Session 已封装 trust_env=False |
+| 诊断命令用 run_in_background | 用户等待超时 | 诊断/计时命令必须前台同步执行，禁止 run_in_background |
+| 脚本多次并发启动 | 连接池耗尽，`Could not open JDBC Connection` | 脚本只启动一次，用一次 TaskOutput(block=true) 等结果；超时后**不要重新启动**，等原进程完成 |
+| gen_code() 同秒重复 | INSERT code 唯一键冲突 | 用毫秒+随机：`str(time.time()*1000)+str(random.randint(100,999))`；多报表顺序创建时加 sleep(2) |
+| save_db 之间加 sleep | 脚本慢 1~2 秒 | `save_db` 内部用 `gen_id()`（毫秒+随机），同一报表多数据集之间**不需要 sleep** |
+| 首次 save 后 sleep | 白白增加延迟 | `/save` 是同步请求，完成即可立即调 `save_db`，不需要 sleep |
+| report_tools.py 参数名 | unrecognized arguments | 用 `--base-url`，不是 `--api-base` |
+| parallel_save_dbs deadlock | `Deadlock found when trying to get lock`，部分数据集失败 | 多数据集保存改为**串行** `[save_db(session, **a) for a in save_args]` |
+| 预调外部 API 验证字段 | 网络慢或超时，白等 | 直接按用户提供的字段写脚本，不预调 API |
+| YApi init_yapi() 后 create_mock 报"请登录" | `urllib` 多 Set-Cookie 头只取了第一条 | 已在 `yapi_mock.py` 修复；升级后可正常串联使用 |
+| yapi_mock.create_mock 重复 path | `RuntimeError: 已存在的接口` 中断流程 | `yapi_mock.py` 已修复：errmsg 含「已存在」时自动复用 id |
+
+---
+
+## §API接口
+
+| 坑 | 现象 | 解决 |
+|----|------|------|
+| Session base_url 缺 /jmreport | `session.request("/save",...)` 返回 404 | 初始化必须传含 `/jmreport` 的完整路径：`http://host:port/jmreport` |
+| save 返回值取错路径 | `resp.get("id")` 返回 None | 正确路径：`resp["result"]["id"]` |
+| 预览/设计器 URL 用 `?id=` | 页面可能加载但报表为空 | 正确格式：`/jmreport/view/{id}` 和 `/jmreport/index/{id}`（路径参数） |
+| getDataSourceByPage GET 签名失败 | `签名校验失败，参数有误！` | GET 签名必须先把 `token` 加入 params，再对完整 params 计算 X-Sign |
+| executeSelectApi 调用方式 | 接口不通 | POST + query string，不是 JSON body；result 直接是 fieldList 数组；用 `parse_api(session, url)` |
+| 修改已有报表用 `**design` | design 含 name 等字段冲突，图表消失 | 始终显式传 `rows=design['rows'], cols=design['cols'], styles=..., merges=..., chartList=...` |
+| rpbar 用 json.dumps 字符串 | 保存成功但预览工具条设置不生效 | rpbar 必须用 **dict 对象**，不能 `json.dumps()`；字段名是 `rpbar` 不是 rqbar |
 | get_report 对新报表失败 | 刚 /save 创建的报表调 get_report 返回 None | 改为从 create 响应手动构建 designer dict |
-| customRows 仍需 datasetCode | build_table_rows 报 KeyError | 即使用 customRows，table 里也必须有 `"datasetCode":""` 占位 |
-| report_tools.py 参数名 | 命令行报错 unrecognized arguments | 用 `--base-url`，不是 `--api-base` |
-| MySQL Docker 中文乱码 | 中文以 latin1 存储损坏 | 必须加 `--default-character-set=utf8mb4` |
+| 只改报表展示配置也调 save_db | 多调一次接口 | 修改 rpbar/样式/合并等**纯报表配置**时，直接 `get_report` → 改配置 → `/save` 两步 |
+| get_report 删行后按行号修改 | 行号计算出错，改错行 | 删行/移行后，按 col1 文本内容匹配目标行，而非依赖行号索引 |
+| /link/saveAndEdit 参数格式错误 | 关联不生效，子表数据不展开 | 正确格式：`reportId` + `mainReport/subReport`（dbCode别名）+ `parameter`（JSON字符串含 main/sub/subReport 数组）+ `linkType:"4"` |
+| make_designer 参数顺序写错 | TypeError 或 id 用了报表名 | 正确签名：`make_designer(report_id: str, name: str, **extra)`；新建时 report_id 传 `""` |
+| save_db 参数名用了 db_ch_name | `TypeError: unexpected keyword argument` | 第4个参数名是 `db_name`，不是 `db_ch_name` |
+| base_save 用关键字参数传 report_id | `TypeError: missing positional argument` | 前两个是位置参数：`base_save(report_id, designer_obj, **overrides)` |
+| report_urls 参数顺序写反 | 预览链接指向错误 id | 正确签名：`report_urls(report_id, base_url, token)`，id 在前 |
+| report_urls 返回值当 dict 用 | `TypeError: tuple indices must be integers or slices, not str` | `report_urls` 返回 **tuple**；用 `preview, design = report_urls(...)` 或 `[0]`/`[1]` |
+| /save 新建 result.id 为 null | 无法构造预览链接 | 新建时用 `gen_id()` 预生成，`rid = resp["result"].get("id") or report_id` |
+| 首次 /save 返回值当字符串 | `str(resp["result"])` 得到整个 dict 字符串 | `/save` 新建时 `resp["result"]` 是 **dict**，需要 `resp["result"]["id"]` |
+| 工具函数签名靠记忆 | 运行才发现写错，多轮重试 | 写主脚本前先 `python -c "from jimureport_utils import X; help(X)"` 确认签名 |
+| 单报表误用首次占位 /save | 多一次 HTTP | 推荐：`gen_id()` 预生成 report_id → `parse_and_save_dataset(orphan report_id)` → 最终 `/save` 首次创建 |
+| DBSUM/DBAVERAGE/DBMIN/DBMAX 不出数 | 预览结果为空，无报错 | `base_save` 必须同时传 `dbexps=["=DBSUM(ds.field)",...]`，修改已有报表用 `dbexps=design.get("dbexps",[])` 透传 |
+| 报表存在性验证走错接口 | queryById/reportList 均 404 | 最简验证：`curl http://BASE/jmreport/index/{id}` 返回 HTML 即存在 |
+| 猜测不存在的 JimuReport 接口 | 调自造接口返回 404 | 不确定哪个接口时，**直接问用户**或查 references/ 文档，严禁凭感觉拼接路径 |
+| SQL 别名已知仍调 parse_sql | 签名失败或中文报错，浪费数十分钟 | SQL 字段别名已确定时，**直接硬编码 fieldList**；`parse_sql` 仅用于别名未知的情况 |
+| parse_sql SQL 含中文导致签名失败 | `签名校验失败，请重新登录` | 必须调 parse_sql 时，传**纯 ASCII 简化 SQL**（`SELECT col1 FROM table LIMIT 1`），完整业务 SQL 只传给 save_db |
+| queryFieldByBean 返回结构误判 | `AttributeError: 'list' object has no attribute 'get'` | `result` 直接是字段数组（list），不是 `{"fieldList":[...]}` dict；正确：`raw_fields = resp["result"]` |
+
+---
+
+## §数据库数据源
+
+| 坑 | 现象 | 解决 |
+|----|------|------|
+| DB 凭证未知时猜测 | 连接失败→修改→重试，浪费多轮 | DB host/password 不确定时，写代码前先问用户，1 句话拿到信息比反复重试快 |
+| DB 密码错误不立即问 | `Access denied` 后继续猜，耗费多轮 | 首次连接失败且密码来自记忆（可能过时），**立刻停下来问用户** |
+| 脚本执行失败猜测数据库配置 | 数据源名称/库名猜错导致多次失败，产生脏数据 | 失败涉及数据库/数据源配置时，**立刻停下来问用户** |
+| MySQL Docker 中文乱码 | `docker exec ... mysql` 默认 `character_set_client=latin1`，中文字节被错误编码存入，报表预览显示乱码 | 插入/更新中文数据必须加 `--default-character-set=utf8mb4`：`docker exec <container> mysql -uroot -pXXX --default-character-set=utf8mb4 <db> -e "..."` |
+| query_mysql 执行 DML/DDL 数据不落库 | INSERT/DELETE 看似成功但 COUNT 仍为 0 | `query_mysql` 无 commit，只适合 SELECT；写数据必须用 pymysql：`conn.execute(...); conn.commit()` |
+| MySQL 密码从 memory 或 get_ds_connection 猜测 | `Access denied` 反复重试 | get_ds_connection 返回的密码可能加密；memory 记录可能过时；**首次失败立刻问用户** |
+| 建表数据库与 JimuReport 默认数据源不一致 | `Table 'xxx.table' doesn't exist` | JimuReport 默认数据源连的库才是 dbSource="" 时的目标；**建表必须在该库**，不确定先看 application.yml。指定 dbSource 时先调 `get_ds_connection(session, ds_id)` 确认目标 host/port/db，再决定在哪个 Docker 容器建表 |
+| 用户指定 API URL 时擅自调 create_mock | 原有 mock 数据被覆盖 | 用户提供了完整 API URL 直接填 `save_db(api_url=...)`；**禁止**调 init_yapi/create_mock |
+| pymysql SUM() 返回 Decimal 导致 json.dumps 报错 | `TypeError: Object of type Decimal is not JSON serializable`，出现在把查询结果直接放入 ECharts config 时 | `cur.fetchall()` 的 SUM/AVG 列返回 `decimal.Decimal`；构建图表初始数据时必须显式转型：`int(r[1])` 或 `float(r[1])` |
+
+---
+
+## §循环块分组
+
+| 坑 | 现象 | 解决 |
+|----|------|------|
+| 主子表循环块用两个 loopBlock | 子表不展开 | **只有一个 loopBlockList，db=主表**；子表行（`#{sub.field}`）嵌入同一循环块模板 |
+| loopBlockList eri 设太大 | 预览页出现大片空白 | eri 设为**模板内容末行 + 2~3 行缓冲**；引擎按数据量自动扩展 |
+| 循环块 db 别名与 dbCode 不一致 | 预览数据全空 | `DB_ALIAS` 必须等于完整 dbCode；单元格 `#{alias.field}`、loopBlockList.db、displayConfig.text 三处保持一致 |
+| 分版误用 loopBlockList | 并列多数据集表格数据错乱 | 分版禁止用 loopBlockList；正确：第一个表自然展开，右侧表单元格加 `zonedEdition:N`，顶层加 `zonedEditionList`，loopBlockList 留空 `[]` |
+| 多源报表误做成两个独立表格 | 主子字段无法同行显示 | 多源报表 = 同一行混合 `#{aa.*}` 和 `#{bb.*}`；**不需要 loopBlockList**；必须调 `/link/saveAndEdit`(linkType="4") |
+| loopTime 标题列范围含尾部空白列 | 标题偏窄，右侧留白 | 标题 merge/merges 不应包含 loopTime 末尾间距列（如 col9） |
+| 纵向分组报表缺顶层 isGroup/groupField | 预览报 `For input string: "cells"`（Java NumberFormatException） | 含 `#{db.group(field)}` 时，base_save 必须传 `isGroup=True, groupField="dbCode.fieldName"` |
+| 分组聚合列缺少 subtotal:"-1" | funcname:"SUM" 设了但合计行数值空白 | 聚合列必须**同时**设 `funcname:"SUM"` + `subtotal:"-1"`；只设 funcname 不够 |
+| 主子表 /link/saveAndEdit 参数格式 | 关联不生效，子表不展开 | 正确格式：reportId + mainReport/subReport（dbCode别名）+ parameter（JSON字符串）+ linkType:"4" |
+
+---
+
+## §表达式查询控件
+
+| 坑 | 现象 | 解决 |
+|----|------|------|
+| CEIL(n) / FLOOR(n) 无结果 | JimuReport 内置函数不含这两个 | 去掉；若需要取整只能用 `math.ceil()`/`math.floor()` |
+| UPPER/LOWER 内使用 `#{}` | 展开后变 `UPPER(Hello World)` 无引号，Aviator 解析失败 | 改用字符串字面量：`=UPPER('hello world')`；不要在 UPPER/LOWER 内用 `#{}` |
+| 表达式列写 `=` 开头 | 后端将文本当公式求值 | 说明列去掉 `=` 前缀，只写 `ABS(-88.5)` 而非 `=ABS(-88.5)` |
 | FreeMarker 空值判断 | 条件不生效 | 用 `isNotEmpty(x)` 而非 `x??` 或 `x?has_content`；后两者无法过滤空串 `""` |
+| LIKE 模糊查询写法 | 绑定失败 | 必须 `LIKE CONCAT('%','${x}','%')`，不能 `LIKE '%${x}%'` |
+| 文本参数 widgetType 用 "text" | 控件渲染异常 | 应为 `"string"`，不是 `"text"` |
+| 下拉控件 widgetType 用 "sel_search" | 控件渲染异常 | 下拉单选：`widgetType:"String"` + `searchMode:4`；下拉多选：`widgetType:"String"` + `searchMode:3` |
+| DBSUM/DBAVERAGE 不出数 | 预览结果为空 | `base_save` 必须同时传 `dbexps=["=DBSUM(ds.field)",...]`（见 §API接口 详解） |
+
+---
+
+## §执行效率
+
+| 坑 | 现象 | 解决 |
+|----|------|------|
+| 纵向分组+自定义排序读了无关文件 | 读 misc-config.md 等浪费 30s+ | 自定义排序只需读 `examples/vertical-group-custom-sort.md`，关键字段 `textOrders:"华北\|华南\|华东"` |
+| 横向分组不读模板直接写脚本 | groupRight 与 customGroup 混用，布局错误 | 凡涉及横向分组**必须先读** `references/horizontal-grouping.md`，确认类型后再写脚本 |
+| 创建表达式报表前读多余文件 | 超时 | 表达式报表：只读 `references/expressions.md`；**严禁** grep/Read jimureport_utils.py 查签名 |
+| 「全图表/所有图表」绕开一键脚本手拼 JSON | 25 张图表手写几百行 JSON，反复出错 | 命中「全图表」「图表大全」「测试三种数据集」时，**第一反应**直接 `python scripts/generate_all_reports.py ...` |
+| 一键脚本被中断后原样重发等审批 | 用户拒绝后重发 N 次，每次等几十秒 | 用户中断后**立刻读反馈消息找原因**，按反馈修改后再执行；不能盲目重发 |
+
 | 文本参数 widgetType | 控件渲染异常 | 应为 `"string"`，不是 `"text"` |
 | LIKE 模糊查询写法 | 必须用 `LIKE CONCAT('%','${x}','%')`，不能用 `LIKE '%${x}%'`；后者 `${x}` 展开为 JDBC 占位符后嵌在字符串字面量里无法绑定 |
 | 下拉控件配置 | 下拉单选：`widgetType:"String"` + `searchMode:4`；下拉多选：`widgetType:"String"` + `searchMode:3`；`widgetType` 不能用 `"sel_search"`，否则控件渲染异常 |
@@ -75,6 +224,8 @@
 | save_db 重复创建数据集 | 不传 `db_id` 时每次都 INSERT 新记录，多次运行后报表内出现多个同名数据集；**更新时必须传 `db_id=<已有ID>`** |
 | save_db 返回值误用 | `save_db()` 直接返回数据集 ID 字符串，不是 dict；错误用 `r["result"]["id"]` 会 TypeError | 直接用 `db_id = save_db(...)` |
 | 主子表循环块用两个 loopBlock | 以为要分别配主表和子表各一条 loopBlockList → 无效，子表不展开 | **只有一个 loopBlockList，db=主表**；子表行（`#{sub.field}`）嵌入同一循环块模板，引擎靠 link 关联自动展开 |
+| 主子表循环块 sri 从行1开始 | 技术上 sri:1 也可行，但主子表+循环块模式约定从 **sri:0** 开始（含标题行）；统一从0起可避免部分版本引擎的兼容问题 | 主子表循环块 loopBlockList 的 `sri` 固定写 `0`，`eri` 设为模板末行（通常是间隔行） |
+| 主子表循环块 eri 设得过小 | eri 恰好等于模板末行（如 eri=6）→ 循环块展开空间不足，预览空白或渲染异常 | 主子表循环块 `eri` 应给足缓冲，建议设为模板行数 × 预估最大主表条数（如 `40`），引擎按实际数据量渲染，不会因 eri 大而截断 |
 | loopBlockList eri 设太大 | eri=35/36 等很大值 → 子表记录少时预览页出现大片空白 | eri 设为**模板内容末行 + 2~3 行缓冲**即可；引擎自动按数据量扩展，数据多不截断，数据少不留白 |
 | `/link/saveAndEdit` 参数格式错误 | 用 `mainDbId/subDbId/paramList` → 关联不生效，子表数据不展开 | 正确格式：`reportId` + `mainReport/subReport`（dbCode别名）+ `parameter`（JSON字符串含 main/sub/subReport 数组）+ `linkType:"4"` |
 | 主子表循环块列数不统一 | 主表标题跨 A-G（7列），子表只用 B-F（5列）→ 预览时子表比主表窄，视觉不对齐 | 主表和子表必须使用**完全相同的列范围**（如都用 col0-col5）；主表标题 `merge:[0,5]`，子表表头和数据行也铺满同样的列范围 |
@@ -119,13 +270,16 @@
 | YApi `init_yapi()` 后 `create_mock()` 报"请登录" | `urllib` 多 Set-Cookie 头只取了第一条，`_yapi_uid` 丢失 | 已在 `yapi_mock.py` 修复（`get_all('Set-Cookie')`）；升级后 `init_yapi()` + `create_mock()` 可正常串联使用 |
 | API 数据集图表用 `/qurestSql` 回填 | 返回 0 行，图表 config 中数据为空 | API 数据集（`dataType="api"`）必须调 `/qurestApi`，返回值路径是 `resp["result"]["data"]`；SQL 数据集才用 `/qurestSql`（返回 `resp["result"]` 直接是列表）|
 | API 图表字段名不是 name/value | 设计器「运行」后图表空白，分类/值属性无法绑定 | 字段名不是 `name`/`value`/`type` 时，必须在 `extData` 中设置 `"isCustomPropName": True`，并将 `xText` 设为实际分类字段名、`yText` 设为实际值字段名，`axisX`/`axisY` 同步跟随；`chart_entry` 调用后立即追加这三个字段（服务端确实会保存，放在 extData 位置正确） |
+| 单元格自动换行用 `wordWrap` | 预览不换行，长文本溢出 | 自动换行**必须**写在 **style 对象**里：`{"border":{...}, "align":"left", "valign":"middle", "textwrap": True}`；单元格属性 `wordWrap:"break-word"` 或 `wordWrap:1` 均无效。长文本列建议 `align:"left"`，配合 `isAdaptive:1`（行自适应高度）使用 |
 | `query_mysql` 执行 DML/DDL 数据不落库 | INSERT/DELETE/CREATE TABLE 看似成功但 COUNT 仍为 0 | `query_mysql` 内部无 `conn.commit()`，只适合 SELECT；**写数据必须直接用 pymysql**：`conn = pymysql.connect(...); cur.execute(...); conn.commit()` |
 | MySQL 密码从 memory 或 get_ds_connection 猜测 | `Access denied` 后反复重试浪费多轮 | `get_ds_connection` 返回的密码可能加密；memory 记录的密码可能过时；**首次连接失败立刻停下来问用户**，不要尝试其他密码 |
 | SQL 数据集 `field_list=[]` 传空 | 数据集保存成功但字段明细「暂无数据」，图表无法绑定字段 | 必须先调 `parse_sql(session, sql, db_source=ds_id)` 拿到字段列表再传给 `save_db`；不能传空数组 `[]` |
 | `paramList` 字段键名用 fieldName/fieldTxt/defaultVal | `Column 'param_name' cannot be null` 报错，数据集保存失败 | `paramList` 正确键名：`paramName`（参数名）、`paramTxt`（显示名）、`paramValue`（默认值）、`searchFlag`、`widgetType`、`searchMode`；不要用 fieldName/fieldTxt/defaultVal |
 | JSON 数据集 jsonData 用单对象而非数组 | 数据集保存后字段解析失败或预览无数据 | jsonData 格式必须是 `{"data": [...]}` 数组，即使只有一条记录也要包在数组里：`{"data": [{"name":"张三",...}]}`；`isList:"0"`（不勾选集合）只影响绑定方式（`${}`），不影响 jsonData 格式 |
 | `border` 写成 `{"style":1}` 对象格式 | 设计器整张表渲染空白（前端 JS 解析异常） | `border` 每个方向必须是**数组**格式：`["thin","#000000"]`；正确：`"border":{"top":["thin","#000"],...}`；错误：`"border":{"top":{"style":1},...}` |
-| 纵向分组报表缺少顶层 `isGroup/groupField` | 预览报 `For input string: "cells"`（Java NumberFormatException）；设计器正常但预览崩溃 | 含 `#{db.group(field)}` 绑定的报表，`base_save` 必须传 `isGroup=True, groupField="dbCode.fieldName"`；缺少这两个字段时后端走标准引擎，遇到行内 `"cells"` 子对象 key 尝试 `parseInt` 失败；`aggregate/subtotal/funcname/subtotalText` 放在**单元格**上，不是行对象上；无需手写小计行，引擎自动生成 |
+| 纵向分组报表缺少顶层 `isGroup/groupField` | 预览报 `For input string: "cells"`（Java NumberFormatException）；设计器正常但预览崩溃 | 含 `#{db.group(field)}` 绑定的报表，`base_save` 必须传 `isGroup=True, groupField="dbCode.fieldName"`；缺少这两个字段时后端走标准引擎，遇到行内 `"cells"` 子对象 key 尝试 `parseInt` 失败 |
+| 纵向分组数值列小计为空 | 合计行薪资空白，不论 API/JSON/SQL 数据集 | **数值列禁止加任何 funcname 或 subtotal 属性**，引擎对数值型字段自动聚合求和。只要写了 `funcname:"SUM"`、`subtotal:"-1"` 或 `subtotal:"groupField"` 中的任意一个，都会覆盖自动逻辑导致空白。正确写法：`{"text":"#{db.salary}","style":N}`，什么都不加，仅有 text 和 style |
+| 纵向分组报表分组单元格缺少 `aggregate:"group"` | 分组不生效，每行独立显示，不合并相同部门 | 分组单元格必须同时设置四个属性：`aggregate:"group"`、`subtotal:"groupField"`（固定字面量，非字段名）、`funcname:"-1"`、`subtotalText:"合计"`；缺少 `aggregate:"group"` 时分组引擎不识别该列为分组列 |
 | 分组聚合列缺少 `subtotal:"-1"` | 设置了 `funcname:"SUM"` 但合计行数值仍为空白 | 分组聚合列（非分组键列）必须**同时**设置 `funcname:"SUM"` + `subtotal:"-1"`，引擎才会在合计行渲染 SUM 值；只设 funcname 不够。分组键列：`subtotal:"groupField"` + `funcname:"-1"` + `subtotalText:"合计"`；聚合列：`subtotal:"-1"` + `funcname:"SUM"` |
 | SQL 图表 config 无初始数据 | 设计器页面 ECharts 空白，预览正常但设计态看不到图 | **创建 SQL 图表后必须调 `/qurestSql` 回填数据**：`session.request("/qurestSql", {"apiSelectId": db_id, "chartSetting": {..."run":1}})` 返回原始行列表，转换后写入 `config.xAxis.data` / `config.series[i].data` / `config.legend.data`，再调 `/save` 保存；具体转换见下方「SQL 图表数据回填」代码片段 |
 | bar.background extData.chartType 写错 | 坐标轴正常但柱体数据全部消失 | extData.chartType 必须保持 `bar.simple`，不能写 `bar.background`；带背景效果只需在 echarts series 层配置 showBackground |
@@ -147,3 +301,4 @@
 | JSON 数据集 jsonData 裸数组导致渲染空白 | 数据集保存成功、字段也正常，但预览时 `#{db.field}` 全部为空 | jsonData **必须**包裹 `{"data":[...]}` 外层对象，引擎从 `data` 键取行数据；直接传裸数组（如 `[{"name":"张三"}]`）引擎找不到 `data` 键，数据全空。正确：`json.dumps({"data": rows}, ensure_ascii=False)`；dbexps 里的 jsonData 字段同样要用此格式 |
 | save_db 修改已有数据集仍新增记录 | 每次调 `save_db` 都 INSERT 新行，报表内出现多个同名 dbCode 数据集 | **更新**已有数据集必须用 `update_db(session, db_id, jsonData=...)`，而非再次调 `save_db`；`save_db` 不传 `db_id` 时始终新增 |
 | 用户指定 API URL 时擅自调用 create_mock 修改数据 | 原有 mock 数据被覆盖，用户未要求却丢失数据 | 用户提供了完整 API URL 即表示接口已存在，直接将 URL 填入 `save_db(api_url=...)` 即可；**禁止**调用 `init_yapi` / `create_mock`，除非用户明确说「帮我创建 mock 数据」或「帮我修改 mock 数据」 |
+| 明细报表合计行误用 funcname 分组机制 | 设了 `funcname:"SUM"` 但预览无合计行，越调越复杂甚至引入不必要的分组 | **明细列表（非分组报表）的合计行直接在模板里多加一行，用 Excel 公式 `=SUM(C3)` / `=AVERAGE(D3)`**；`funcname` + 自动生成合计行只在分组报表（`isGroup:true` + `group()` 绑定）下生效；`filterNegative`/`filterEmptyValue`/`filterZeroValue`/`noCalculate` 是数据绑定单元格上的元数据属性，与合计行公式是两件独立的事，不要混为一谈 |

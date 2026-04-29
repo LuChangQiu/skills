@@ -15,13 +15,18 @@
   py style_ops.py set-axis-color <API_BASE> <TOKEN> <PAGE_ID> --color "#ffffff"
 
   # 设置所有图表的网格线颜色
-  py style_ops.py set-grid-color <API_BASE> <TOKEN> <PAGE_ID> --color "rgba(255,255,255,0.1)"
+  py style_ops.py set-grid-color <API_BASE> <TOKEN> <PAGE_ID> --color "#FFFFFF1A"
 
   # 设置所有图表的图例文字颜色
   py style_ops.py set-legend-color <API_BASE> <TOKEN> <PAGE_ID> --color "#ffffff"
 
-  # 设置所有图表的调色板
+  # 设置所有图表的调色板（按产品 UI 命名色板，与页面"配色"下拉一致）
+  py style_ops.py set-palette <API_BASE> <TOKEN> <PAGE_ID> --name 复古
+  #   可选名：默认/复古/淡雅/未来/渐变/简洁/商务/柔和/科技/明亮/经典/清新/活力/火红/轻快/灵动
+  # 或自定义：
   py style_ops.py set-palette <API_BASE> <TOKEN> <PAGE_ID> --colors "#5470C6,#91CC75,#FAC858,#EE6666,#73C0DE"
+  # 默认按组件 y/x 轮转色板，每个图首色不同；加 --no-rotate 则全部从 color[0] 开始
+  py style_ops.py list-palettes
 
   # 设置所有图表的标题字号
   py style_ops.py set-font-size <API_BASE> <TOKEN> <PAGE_ID> --size 16
@@ -34,6 +39,28 @@
 """
 
 import sys, json, os, argparse
+
+# ============================================================
+# 命名色板（与 jmreport 前端 "配色" 下拉一致，源自大屏设计器源码）
+# ============================================================
+NAMED_PALETTES = {
+    '默认': ['#1e90ff', '#90ee90', '#00ced1', '#e2bd84', '#7a90e0', '#3ba272', '#2be7ff', '#0a8ada', '#ffd700'],
+    '复古': ['#0780cf', '#765005', '#fa6d1d', '#0e2c82', '#b6b51f', '#da1f18', '#701866', '#f47a75', '#009db2'],
+    '淡雅': ['#95a2ff', '#fa8080', '#ffc076', '#fae768', '#87e885', '#3cb9fc', '#73abf5', '#cb9bff', '#434348'],
+    '未来': ['#63b2ee', '#76da91', '#f8cb7f', '#f89588', '#7cd6cf', '#9192ab', '#7898e1', '#efa666', '#eddd86'],
+    '渐变': ['#71ae46', '#96b744', '#c4cc38', '#ebe12a', '#eab026', '#e3852b', '#d85d2a', '#ce2626', '#ac2026'],
+    '简洁': ['#929fff', '#9de0ff', '#ffa897', '#af87fe', '#7dc3fe', '#bb60b2', '#433e7c', '#f47a75', '#009db2'],
+    '商务': ['#194f97', '#555555', '#bd6b08', '#00686b', '#c82d31', '#625ba1', '#898989', '#9c9800', '#007f54'],
+    '柔和': ['#5b9bd5', '#ed7d31', '#70ad47', '#ffc000', '#4472c4', '#91d024', '#b235e6', '#02ae75', '#5b9bd5'],
+    '科技': ['#05f8d6', '#0082fc', '#fdd845', '#22ed7c', '#09b0d3', '#1d27c9', '#f9e264', '#f47a75', '#009db2'],
+    '明亮': ['#884898', '#808080', '#82ae46', '#00a3af', '#ef8b07', '#007bbb', '#9d775f', '#fae800', '#5f9b3c'],
+    '经典': ['#007bbb', '#ffdb4f', '#dd4b4b', '#2ca9e1', '#ef8b07', '#4a488e', '#82ae46', '#dd4b4b', '#bb9581'],
+    '清新': ['#5f9b3c', '#75c24b', '#83d65f', '#aacf53', '#c7dc68', '#d8e698', '#e0ebaf', '#bbc8e6', '#e5e5e5'],
+    '活力': ['#ef8b07', '#2a83a2', '#f07474', '#c55784', '#274a78', '#7058a3', '#0095d9', '#75c24b', '#808080'],
+    '火红': ['#ff0000', '#ef8b07', '#4c6cb3', '#f8e944', '#69821b', '#9c5ec3', '#00ccdf', '#f07474', '#bb9581'],
+    '轻快': ['#fae800', '#00c039', '#0482dc', '#bb9581', '#ff7701', '#9c5ec3', '#00ccdf', '#00c039', '#ff7701'],
+    '灵动': ['#00a3af', '#4da798', '#57baaa', '#62d0bd', '#6ee4d0', '#86e7d6', '#aeede1', '#bde1e6', '#e5e5e5'],
+}
 
 # ============================================================
 # bi_utils 加载（自动查找）
@@ -62,13 +89,32 @@ from bi_utils import init_api, query_page, save_page
 # 图表组件类型列表
 # ============================================================
 CHART_TYPES = {
-    'JBar', 'JLine', 'JPie', 'JRing', 'JRose', 'JFunnel', 'JRadar', 'JGauge',
-    'JSmoothLine', 'JStackBar', 'JHorizontalBar', 'JMixLineBar', 'JScatter',
-    'JBubble', 'JWordCloud', 'JAreaMap', 'JArea', 'JStackArea',
+    # ECharts 笛卡尔（18 个，与 spec_builder ECHARTS_CARTESIAN 一致）
+    'DoubleLineBar', 'JArea', 'JBackgroundBar', 'JBar', 'JBubble', 'JDynamicBar',
+    'JHorizontalBar', 'JLine', 'JMixLineBar', 'JMultipleBar', 'JMultipleLine',
+    'JNegativeBar', 'JPercentBar', 'JQuadrant', 'JScatter', 'JSmoothLine',
+    'JStackBar', 'JStepLine',
+    # ECharts 极坐标（11 个，与 spec_builder ECHARTS_POLAR 一致）
+    'JActiveRing', 'JBreakRing', 'JCircleRadar', 'JFunnel', 'JPie',
+    'JPyramidFunnel', 'JRadar', 'JRadialBar', 'JRing', 'JRose', 'JRotatePie',
+    # 仪表盘/水波/胶囊（ECharts 或 AntV 渲染，但都吃 option.color / customColor）
+    'JAntvGauge', 'JColorGauge', 'JGauge', 'JLiquid', 'JSemiGauge',
+    'JCapsuleChart', 'JListProgress', 'JRingProgress',
+    # 地图
+    'JAreaMap', 'JBarMap', 'JBubbleMap', 'JFlyLineMap', 'JHeatMap',
+    # 其他 ECharts 类
+    'JWordCloud', 'JStackArea',
+    # 兜底：保留历史列表里的其他 echarts 通用类型（可能未来扩展会用）
     'JWaterfall', 'JBoxplot', 'JHeatmap', 'JTreemap', 'JSunburst',
     'JSankey', 'JGraph', 'JTree', 'JParallel', 'JThemeRiver',
     'JCandlestick', 'JPictorialBar', 'JMap', 'JGlobe',
 }
+
+
+# 单值自定义渲染图表：option.color 必须是 string，写 array 会 fallback 到默认色
+# （与 ECharts 类不同——ECharts 把 color 数组当作 palette 轮询，这些组件直接当颜色值读）
+# 判断依据：defaults/<Type>.json 中 option.color 默认就是 string
+STRING_COLOR_TYPES = {'JRingProgress', 'JLiquid'}
 
 
 # ============================================================
@@ -327,27 +373,69 @@ def cmd_set_legend_color(args):
 
 
 def cmd_set_palette(args):
-    """设置所有图表的调色板"""
-    color_list = [c.strip() for c in args.colors.split(',')]
+    """设置所有图表的调色板
+
+    同时处理三处：
+      - option.customColor（jmreport 自定义色板，多系列图/饼图用）
+      - option.color（ECharts 原生 palette，单系列兜底）
+      - 清除 series[].itemStyle/lineStyle/areaStyle.color（否则硬编码色
+        会盖住 palette，单系列柱/线/面积图表现不出色板切换）
+
+    默认按组件 y/x 排序轮转色板：第 i 个图从 palette[i % N] 开始，
+    让单色图各自不同；--no-rotate 则所有图都从 color[0] 开始。
+    """
+    # 1) 取色板：优先 --name
+    if getattr(args, 'name', None):
+        if args.name not in NAMED_PALETTES:
+            print(f'未知色板 "{args.name}"；可选: {", ".join(NAMED_PALETTES.keys())}')
+            return
+        color_list = list(NAMED_PALETTES[args.name])
+        src = f'命名色板 "{args.name}"'
+    elif getattr(args, 'colors', None):
+        color_list = [c.strip() for c in args.colors.split(',') if c.strip()]
+        src = '自定义'
+    else:
+        print('必须指定 --name 或 --colors'); return
+
+    if not color_list:
+        print('色板为空'); return
     custom_color = [{'color': c, 'color1': c} for c in color_list]
 
     tmpl = load_template(args.page_id)
-    modified = 0
-    for comp in iter_all_components(tmpl):
-        if not is_chart(comp):
-            continue
-        cfg = comp.get('config', {})
-        if 'option' not in cfg:
-            cfg['option'] = {}
-        cfg['option']['customColor'] = custom_color
-        modified += 1
-        print(f'  {comp.get("componentName", "")} ({comp.get("component", "")}): 调色板 -> {color_list}')
+    chart_comps = [c for c in iter_all_components(tmpl) if is_chart(c)]
+    # 稳定排序：左上到右下
+    chart_comps.sort(key=lambda c: (c.get('y', 0), c.get('x', 0)))
 
-    if modified == 0:
+    rotate = not getattr(args, 'no_rotate', False)
+    for order, comp in enumerate(chart_comps):
+        cfg = comp.setdefault('config', {})
+        opt = cfg.setdefault('option', {})
+        k = (order % len(color_list)) if rotate else 0
+        # 单值自定义渲染组件 option.color 写 string；其余写 array（兼容已存为 string 的）
+        if comp.get('component') in STRING_COLOR_TYPES or isinstance(opt.get('color'), str):
+            opt['color'] = color_list[k]
+        else:
+            opt['color'] = color_list[k:] + color_list[:k]
+        opt['customColor'] = custom_color[k:] + custom_color[:k]
+        for s in opt.get('series', []) or []:
+            if isinstance(s, dict):
+                for style_key in ('itemStyle', 'lineStyle', 'areaStyle'):
+                    style = s.get(style_key)
+                    if isinstance(style, dict):
+                        style.pop('color', None)
+
+    if not chart_comps:
         print('未找到图表组件')
         return
     save_template(args.page_id, tmpl)
-    print(f'\n共修改 {modified} 个图表组件的调色板')
+    rotate_tip = '（按 y/x 轮转）' if rotate else '（无轮转）'
+    print(f'共修改 {len(chart_comps)} 个图表 → {src}{rotate_tip}: {color_list}')
+
+
+def cmd_list_palettes(args):
+    """列出所有命名色板"""
+    for name, colors in NAMED_PALETTES.items():
+        print(f'{name:4}  ' + ' '.join(colors))
 
 
 def cmd_set_font_size(args):
@@ -443,7 +531,7 @@ def main():
     # set-grid-color
     p_grid = subparsers.add_parser('set-grid-color', help='设置所有图表的网格线颜色')
     add_common(p_grid)
-    p_grid.add_argument('--color', required=True, help='颜色值，如 "rgba(255,255,255,0.1)"')
+    p_grid.add_argument('--color', required=True, help='颜色值，如 "#FFFFFF1A"（8 位 hex 含 alpha）')
 
     # set-legend-color
     p_legend = subparsers.add_parser('set-legend-color', help='设置所有图表的图例文字颜色')
@@ -451,9 +539,17 @@ def main():
     p_legend.add_argument('--color', required=True, help='颜色值，如 "#ffffff"')
 
     # set-palette
-    p_palette = subparsers.add_parser('set-palette', help='设置所有图表的调色板')
+    p_palette = subparsers.add_parser('set-palette', help='设置所有图表的调色板（命名或自定义）')
     add_common(p_palette)
-    p_palette.add_argument('--colors', required=True, help='逗号分隔的颜色列表，如 "#5470C6,#91CC75,#FAC858"')
+    p_palette.add_argument('--name', default=None,
+                           help='命名色板（16 种，见 list-palettes）：默认/复古/淡雅/未来/渐变/简洁/商务/柔和/科技/明亮/经典/清新/活力/火红/轻快/灵动')
+    p_palette.add_argument('--colors', default=None,
+                           help='自定义色板，逗号分隔，如 "#5470C6,#91CC75,#FAC858"')
+    p_palette.add_argument('--no-rotate', action='store_true',
+                           help='不按 y/x 轮转，所有图表从 color[0] 开始')
+
+    # list-palettes
+    p_list_pal = subparsers.add_parser('list-palettes', help='列出所有命名色板（无需 API/token）')
 
     # set-font-size
     p_font = subparsers.add_parser('set-font-size', help='设置所有图表的标题字号')
@@ -476,6 +572,11 @@ def main():
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
+        return
+
+    # list-palettes 不需要 API，提前处理
+    if args.command == 'list-palettes':
+        cmd_list_palettes(args)
         return
 
     init_api(args.api_base, args.token)

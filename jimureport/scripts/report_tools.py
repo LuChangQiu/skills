@@ -199,10 +199,8 @@ def update_label(session, report_id, label_config, chart_index=0):
 def upload_image(session, file_path):
     """上传图片，返回服务端路径。"""
     with open(file_path, "rb") as f:
-        resp = session._s.post(f"{session.base_url}/upload/image",
-                               files={"file": (os.path.basename(file_path), f)})
-    resp.raise_for_status()
-    result = resp.json()
+        result = session.upload("/upload/image",
+                                files={"file": (os.path.basename(file_path), f)})
     if result.get("success"):
         path = result["result"]
         print(f"上传成功: {path}")

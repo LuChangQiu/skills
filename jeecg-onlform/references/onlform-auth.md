@@ -322,8 +322,9 @@ POST /online/cgform/api/roleDataAuth/{roleId}/{cgformId}
 ### 按部门授权（authMode=depart）
 
 ```bash
-# 查部门ID
-GET /sys/sysDepart/queryTreeList
+# 查部门ID（推荐：关键词模糊搜索，取返回列表第一条的 id）
+GET /sys/sysDepart/searchBy?keyWord={URL编码关键词}&orgCategory=1,2,3,4
+# 注意：queryTreeList / queryDepartTreeSync 只返回有限层级，关键词不完全匹配时会漏掉目标部门，不推荐用于按名称查 ID
 
 # 字段权限：入职日期仅表单可见+可编辑（不含列表可见）
 POST /online/cgform/api/roleColumnAuth/{departId}/{cgformId}

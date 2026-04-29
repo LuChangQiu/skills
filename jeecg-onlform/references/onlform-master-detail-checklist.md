@@ -13,19 +13,24 @@
 }
 ```
 
-### 2. 子表 head 设置 relationType + tabOrderNum
+### 2. 子表 head 设置 relationType + tabOrderNum + **mainTable + mainField**
 ```json
 {
   "tableName": "xxx_sub1",
   "tableType": 3,
   "relationType": 0,
-  "tabOrderNum": 1
+  "tabOrderNum": 1,
+  "mainTable": "xxx_main",
+  "mainField": "id"
 }
 ```
 - `relationType`: 0=一对多, 1=一对一
 - `tabOrderNum`: 子表排序号（从1开始）
+- **`mainTable`/`mainField`：必须填**，`onlform_creator.py` 靠它们来自动注入外键字段（`{mainTable}_id`）。若缺失，外键字段不会被注入，主子表完全无法关联。
 
-### 3. 子表必须包含外键字段
+> ⚠️ 注意：head 层的 mainTable/mainField 不会被 JeecgBoot 持久化（queryById 查出来是 null），但 **onlform_creator.py 在创建时读取它们做外键注入**，所以 config JSON 里必须带上。
+
+### 3. 子表必须包含外键字段（onlform_creator.py 自动注入，前提是 mainTable 已填）
 ```json
 {
   "dbFieldName": "main_id",

@@ -61,7 +61,7 @@ def resolve_head_id(api_base: str, token: str, config: dict) -> str:
     result = api_request(api_base, token,
                          f'/online/cgform/head/list?tableName={table_name}&copyType=0&pageNo=1&pageSize=1',
                          method='GET')
-    records = result.get('result', {}).get('records', [])
+    records = (result.get('result') or {}).get('records', [])
     if not records:
         print(f'错误: 表 {table_name} 不存在')
         sys.exit(1)
@@ -277,7 +277,7 @@ def action_query(api_base: str, token: str, config: dict) -> None:
         btn_result = api_request(api_base, token,
                                  f'/online/cgform/button/list?headId={head_id}&pageNo=1&pageSize=100',
                                  method='GET')
-        buttons = btn_result.get('result', {}).get('records', [])
+        buttons = (btn_result.get('result') or {}).get('records', [])
         if not buttons:
             print('  (无)')
         else:

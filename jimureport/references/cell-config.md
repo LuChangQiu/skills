@@ -282,6 +282,7 @@ cell = {
 | `noHalfUp` | 不四舍五入 | `true`=小数截断而非四舍五入，**仅在设置了 `decimalPlaces` 时有效**，默认不设置 |
 | `dynamicApi` | 动态接口数据 | `true`=启用，单元格 `text` 填写 API 地址，**必须同时设置 `dynamicDataType: "api"`** |
 | `dynamicDataType` | 动态数据类型 | `"api"`=接口数据，配合 `dynamicApi: true` 使用 |
+| `dynamicMerge` | 动态合并格 | `1`=启用，跟随相邻 group 列行数自动合并。完整用法见 `references/misc-config.md` §动态合并 |
 
 ---
 
@@ -422,7 +423,7 @@ JSON 字符串，数组格式：
 
 ### 2. cell 对象：completeBlankStatus + completeBlankRow
 
-在需要补全的数据行**每个**单元格上设置：
+> **只需在数据行第一个单元格（col1）上设置**，其余列不需要。
 
 ```json
 {

@@ -61,7 +61,7 @@ def resolve_head_id(api_base: str, token: str, config: dict) -> str:
     result = api_request(api_base, token,
                          f'/online/cgform/head/list?tableName={table_name}&copyType=0&pageNo=1&pageSize=1',
                          method='GET')
-    records = result.get('result', {}).get('records', [])
+    records = (result.get('result') or {}).get('records', [])
     if not records:
         print(f'错误: 表 {table_name} 不存在')
         sys.exit(1)
@@ -162,7 +162,7 @@ def setup_button_auth(api_base: str, token: str, config: dict) -> None:
         r = api_request(api_base, token,
                         f'/online/cgform/api/authButton/{cgform_id}?pageNo=1&pageSize=50',
                         method='GET')
-        for btn in r.get('result', {}).get('authList', []):
+        for btn in (r.get('result') or {}).get('authList', []):
             existing_codes.add(btn.get('code'))
     except Exception:
         pass

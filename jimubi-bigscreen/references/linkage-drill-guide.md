@@ -23,6 +23,38 @@ cfg['linkageConfig'] = [
 ]
 ```
 
+### ⚠️ UI 可见性前置：源组件必须有 `fieldOption`
+
+联动 `linkageConfig` 写入数据库成功 ≠ 界面能看到配置。**UI 联动配置面板依赖源组件 `cfg.fieldOption` 填充「源字段」下拉**。缺失/为空时：
+
+- 数据已持久化（`linkage_ops.py show` 能打出）
+- 但界面上**打开联动配置弹窗字段选择器空白**，外观等同"联动未配置" —— 最容易误判为保存失败
+
+**典型踩坑场景**：用 `spec_builder.py` 一键生成组件后直接配联动。spec_builder 写了 `dataMapping` 但没写 `fieldOption`，联动 UI 就"看不见"。
+
+**修复**（已被 `linkage_ops.py add-linkage / add-drill` 自动处理，手写脚本需自行补）：
+
+```python
+# fieldOption 格式：[{show:'Y', label, text, value}]
+# value 取自组件数据来源的字段名，按类型优先级反推：
+#   A   cfg.dataMapping[*].mapping           ← 绝大多数图表
+#   B.1 cfg.option.fieldMap values           ← JStatsSummary
+#   B.7 cfg.option.header[*].key             ← JScrollBoard
+#   B.4/B.5/B.6 option.*FieldMapping[*].key  ← JCardScroll / JScrollList / JListProgress
+#   B.2 option.titleMapping/valueMapping     ← JSemiGauge
+#   B.3 option.field.dateField/valueField    ← JPermanentCalendar
+cfg['fieldOption'] = [
+    {'show':'Y','label':'name','text':'name','value':'name'},
+    {'show':'Y','label':'value','text':'value','value':'value'},
+]
+```
+
+复用脚本反推工具（推荐）：
+```python
+from linkage_ops import ensure_field_option
+ensure_field_option(cfg, comp_label='源组件')   # 幂等：已有 fieldOption 不覆盖
+```
+
 ### source 可用字段
 
 | source 值 | 含义 | 示例 |
@@ -30,6 +62,8 @@ cfg['linkageConfig'] = [
 | `name` | 类目/标签名（维度） | 饼图扇区名、柱子 x 轴标签 |
 | `value` | 数值 | 饼图扇区值、柱子高度 |
 | `type` | 多系列图表的系列名 | "系列A"、"手机品牌" |
+
+> `source` 取值 **必须在源组件的 `fieldOption.value` 列表内**，否则 UI 下拉选不到、配置看不见。
 
 ### 目标组件要求
 
@@ -85,6 +119,89 @@ cfg['linkageConfig'] = [
 → SQL 拼接: ... and name like '%张三%'
 → 柱形图刷新
 ```
+
+---
+
+## 目标数据集三种数据源下如何接收参数
+
+点击源组件后，`target` 会被当作 query 参数塞给目标组件的数据集。**目标数据集必须声明对应参数**并让数据源按参数返回不同数据，否则刷新的仍是老数据。
+
+| 数据源 | 参数传递载体 | 数据分支手段 |
+|--------|-------------|-------------|
+| SQL | `datasetParamList` + FreeMarker `${paramName}` / `<#if isNotEmpty(x)>` | SQL 里条件判断 |
+| **API（YApi mock）** | `datasetParamList` + URL 末尾 `?paramName=${paramName}` | **YApi 高级 Mock 脚本**按 `params.xxx` 分支 |
+| 自写 Java API | `datasetParamList` + URL 末尾占位符 | Controller 内按 `@RequestParam` 分支 |
+
+### API 数据集联动（YApi Mock advmock 实战，6 步）
+
+**场景**：点击 JBar 的品牌柱 → JScrollBoard 城市销量按品牌过滤。
+
+**Step 1 — 创建带参 mock + 启用高级脚本（一条命令搞定）**
+```bash
+py yapi_ops.py create-mock https://api.jeecg.com EMAIL PWD \
+  --title "城市销量-按品牌过滤" \
+  --path "/city_sales_by_brand" \
+  --body '[{"name":"深圳","value":100}]' \
+  --advmock-file /tmp/city_adv.js
+```
+`/tmp/city_adv.js`：
+```js
+if (params.brand === '比亚迪') {
+    mockJson = {"data":[{"name":"深圳","value":380},{"name":"上海","value":320}]}
+} else if (params.brand === '特斯拉') {
+    mockJson = {"data":[{"name":"上海","value":280},{"name":"北京","value":240}]}
+} else {
+    mockJson = {"data":[{"name":"深圳","value":150},{"name":"上海","value":140}]}  // 兜底
+}
+```
+规则：用 `params.xxx` 读参；用 `mockJson = {...}` 赋值（**不是 return**）；**必须写兜底 else** 保证无参数时仍有数据。
+
+**Step 2 — 创建 API 数据集并声明参数**
+```bash
+py dataset_ops.py create-api <API> <TOKEN> \
+  --name "城市销量-联动" --code "city_sales_link" \
+  --url "https://api.jeecg.com/mock/57/claude/city_sales_by_brand?brand=\${brand}" \
+  --fields "name:String,value:Integer" \
+  --params "brand:品牌"
+```
+⚠️ `--url` 末尾**必须带 `${brand}` 占位符**（不带则联动参数传不到 YApi）。脚本会自动提示补全格式。多参数用 `&` 连接：`?brand=${brand}&province=${province}`。
+
+**Step 3 — 绑定目标组件**
+```bash
+py dataset_ops.py bind <API> <TOKEN> \
+  --page <PAGE_ID> --comp-name "城市销量排行榜" \
+  --dataset-id <上一步返回的ID> --dataset-name "城市销量-联动" --dataset-type api
+```
+
+**Step 4 — 源组件同样创建带参数据集**（例如品牌销量 JBar），字段至少要有 `name`（即点击时透传的值）。
+
+**Step 5 — 配置联动**
+```bash
+py linkage_ops.py add-linkage <API> <TOKEN> <PAGE_ID> \
+  --source "品牌销量 TOP 8" --target "城市销量排行榜" \
+  --mapping "name=brand"
+```
+
+**Step 6 — 完成**。打开大屏点品牌柱 → 目标组件 URL 变为 `?brand=比亚迪` → advmock 脚本命中分支 → 返回该品牌的城市数据。
+
+### 只给已有接口补挂高级脚本
+```bash
+py yapi_ops.py set-advmock https://api.jeecg.com EMAIL PWD \
+  --iface-id 6011 --script-file /tmp/adv.js
+```
+
+### 钻取（drillData）同样适用
+钻取参数也走同一套机制——目标组件 = 自身，数据集声明 `paramName`，URL 带占位符，advmock 脚本按参数分支。单参数多级下钻时用编码值方案（禁用多条 drillData）。
+
+### 高级 Mock 脚本常见踩坑
+
+| 症状 | 原因 |
+|------|------|
+| 点击源组件后目标组件数据不变 | URL 没带 `${paramName}` 占位符 → 参数被前端丢弃 |
+| mock 接口返回 500 / 空 | 脚本漏写兜底 else，params 为空时 `mockJson` 未赋值 |
+| 字段对不上 | mockJson 里的字段名与图表 dataMapping.mapping / fieldMap 不一致 |
+| 写了 `script` 字段 /api/interface/up 不生效 | 必须用 `/api/plugin/advmock/save`（本脚本已内置） |
+| Chinese 参数值没匹配分支 | advmock 脚本里的中文字面量要和传参一致（大小写、繁简） |
 
 ---
 

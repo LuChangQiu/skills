@@ -312,3 +312,5 @@ jsonStr 顶层需要两个属性：
 | `paginationLocation` | 页码位置：left/middle/right |
 | `headerFooterShow` | 是否显示页眉页脚 |
 | `printFootorFixBottom` | 页脚是否固定在底部 |
+
+> 需要在分组列旁加静态标签列（动态合并格），见 `references/misc-config.md` §动态合并单元格配置。

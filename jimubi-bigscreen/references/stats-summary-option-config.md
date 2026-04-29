@@ -64,6 +64,8 @@
 | 边框颜色 | `option.card.borderColor` | `#1890ff` |
 | 垂直内边距 | `option.card.padding.vertical` | `12` |
 | 水平内边距 | `option.card.padding.horizontal` | `16` |
+| 垂直外边距 | `option.card.margin.vertical` | `0` |
+| 垂直边距 | `option.card.padding.horizontal` | `16` |
 | 阴影 | `option.card.shadow` | `false` |
 | 模糊半径 | `option.card.blur` | `4` |
 

@@ -682,48 +682,140 @@ export const formSchema: FormSchema[] = [
   // },
 
   // --- 图片上传 ---
+  // fileMax: 上传数量限制，默认已是 1（即单张）；多张时显式设置，如 fileMax: 3；0 表示不限
   // {
   //   label: '图片',
   //   field: 'imageField',
   //   component: 'JImageUpload',
+  //   componentProps: { fileMax: 1 },  // 限1张（默认值，可省略）
   // },
 
   // --- 文件上传 ---
+  // maxCount: 上传数量限制，默认 0（不限）；限单文件用 maxCount: 1
   // {
   //   label: '附件',
   //   field: 'fileField',
   //   component: 'JUpload',
+  //   componentProps: { maxCount: 1 },  // 限1个文件
   // },
 
   // --- 用户选择 ---
+  // 单选：isRadioSelection: true（内部通过 useSelectBiz.ts 控制 rowSelection.type='radio'）
+  // 多选：不传 isRadioSelection（默认 checkbox）
   // {
   //   label: '负责人',
   //   field: 'userId',
   //   component: 'JSelectUserByDept',
-  //   componentProps: { labelKey: 'realname' },
+  //   componentProps: { labelKey: 'realname', isRadioSelection: true },  // 单选
+  // },
+  // {
+  //   label: '负责人（多选）',
+  //   field: 'userId',
+  //   component: 'JSelectUserByDept',
+  //   componentProps: { labelKey: 'realname' },  // 多选（默认）
   // },
 
   // --- 部门选择 ---
+  // multiple: bool，默认 true（多选）；单选必须显式传 multiple: false
   // {
   //   label: '部门',
   //   field: 'deptId',
   //   component: 'JSelectDept',
+  //   componentProps: { multiple: false },   // 单选
+  // },
+  // {
+  //   label: '部门（多选）',
+  //   field: 'deptId',
+  //   component: 'JSelectDept',              // 多选（默认，不传即可）
   // },
 
   // --- 分类树选择 ---
+  // pcode: 分类顶级编码（必填）；multiple: 默认 false（单选），true 为多选
   // {
   //   label: '分类',
   //   field: 'categoryField',
   //   component: 'JCategorySelect',
-  //   componentProps: { pcode: 'categoryDictCode' },
+  //   componentProps: { pcode: 'B03' },                  // 单选（默认）
+  // },
+  // {
+  //   label: '分类（多选）',
+  //   field: 'categoryField',
+  //   component: 'JCategorySelect',
+  //   componentProps: { pcode: 'B03', multiple: true },  // 多选
+  // },
+
+  // --- 自定义树选择（JTreeSelect）---
+  // multiple: 默认 false（单选）；dict: '表名,显示字段,值字段'
+  // {
+  //   label: '树选择',
+  //   field: 'treeField',
+  //   component: 'JTreeSelect',
+  //   componentProps: { dict: 'sys_category,name,id', pidField: 'pid', pidValue: '0', multiple: false },
   // },
 
   // --- 搜索选择 ---
+  // dict: '表名,显示字段,值字段'；async: false（同步加载），true 为远程搜索
   // {
   //   label: '搜索',
   //   field: 'searchField',
   //   component: 'JSearchSelect',
   //   componentProps: { dict: 'tableName,textField,codeField', placeholder: '请选择' },
+  // },
+
+  // --- 字典多选（JCheckbox）---
+  // {
+  //   label: '多选字段',
+  //   field: 'checkboxField',
+  //   component: 'JCheckbox',
+  //   componentProps: { dictCode: 'dict_code' },
+  // },
+
+  // --- 下拉多选（JSelectMultiple）---
+  // triggerChange: 默认 true（必须保留）；dictCode 格式同 JDictSelectTag
+  // {
+  //   label: '下拉多选',
+  //   field: 'multiField',
+  //   component: 'JSelectMultiple',
+  //   componentProps: { dictCode: 'dict_code', triggerChange: true },
+  // },
+
+  // --- Popup弹窗（JPopup）---
+  // multi: bool，默认 false（单选），true 为多选
+  // fieldConfig: [{source: '报表字段名', target: '表单字段名'}] 支持多组回填
+  // setFieldsValue: 必须从 formActionType 获取，否则选中后不回显
+  // {
+  //   label: 'Popup',
+  //   field: 'popupField',
+  //   component: 'JPopup',
+  //   componentProps: ({ formActionType }) => {
+  //     const { setFieldsValue } = formActionType;
+  //     return {
+  //       setFieldsValue,
+  //       code: 'report_user',
+  //       fieldConfig: [
+  //         { source: 'username', target: 'popupField' },
+  //         { source: 'realname', target: 'popupBackField' },  // 回填字段
+  //       ],
+  //       multi: false,   // 单选；多选用 true
+  //     };
+  //   },
+  // },
+  // // Popup回填字段（disabled Input，不可手动编辑）
+  // {
+  //   label: 'Popup回填',
+  //   field: 'popupBackField',
+  //   component: 'Input',
+  //   componentProps: { disabled: true, placeholder: '由Popup自动回填' },
+  // },
+
+  // --- Popup字典（JPopupDict）---
+  // multi: bool，默认 false（单选），true 为多选
+  // dictCode: '报表code,显示字段,值字段'（三段用逗号分隔）
+  // {
+  //   label: 'Popup字典',
+  //   field: 'popDictField',
+  //   component: 'JPopupDict',
+  //   componentProps: { dictCode: 'report_user,realname,id', multi: false },  // 单选
   // },
 ];
 
@@ -1087,7 +1179,7 @@ export const superQuerySchema = {
 
 ```vue
 <template>
-  <div>
+  <div class="p-2">
     <!--引用表格-->
     <BasicTable @register="registerTable" :rowSelection="rowSelection">
       <!--插槽:table标题-->
@@ -1235,6 +1327,219 @@ export const superQuerySchema = {
     width: 100%;
   }
 </style>
+```
+
+---
+
+### A9N-1. 查询面板 - vue3Native 原生风格（当字段需要查询时必须添加）
+
+**规则：** vue3Native 风格的查询区直接写在 `<template>` 里，放在 `<BasicTable>` 上方，绑定到 `queryParam`。
+禁止使用 `useSearchForm: true` + `formConfig.schemas`（那是封装风格）。
+
+**排除不参与查询的字段类型：** 密码框、多行文本、富文本、Markdown、图片上传、文件上传、Popup回填/他表字段（disabled Input）。
+
+**⚠️ 外层结构必须使用 `jeecg-basic-table-form-container` + 水平布局。禁止用 `table-page-search-wrapper` 或 `layout="inline"`，否则 label 与 input 错位，与 BasicTable 对齐基准不一致。**
+
+**模板结构（在 `<BasicTable>` 上方插入，外层包裹 `<div class="p-2">`）：**
+
+```html
+<!-- 查询条件 -->
+<div class="jeecg-basic-table-form-container">
+  <a-form ref="formRef" @keyup.enter.native="searchQuery" :model="queryParam" :label-col="labelCol" :wrapper-col="wrapperCol">
+    <a-row :gutter="24">
+      <!-- Input 文本框 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <a-input v-model:value="queryParam.{{fieldName}}" placeholder="请输入{{label}}" allow-clear />
+        </a-form-item>
+      </a-col>
+      <!-- InputNumber 整数/金额 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <a-input-number v-model:value="queryParam.{{fieldName}}" placeholder="请输入{{label}}" style="width:100%" />
+        </a-form-item>
+      </a-col>
+      <!-- JDictSelectTag 系统字典 / 表字典 / 开关(yn) / 字典单选(去掉 type=radio) -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JDictSelectTag v-model:value="queryParam.{{fieldName}}" dictCode="{{dictCode}}" placeholder="请选择" />
+        </a-form-item>
+      </a-col>
+      <!-- JSelectMultiple 字典多选(JCheckbox) / 表字典下拉多选 查询时统一用下拉多选 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JSelectMultiple v-model:value="queryParam.{{fieldName}}" dictCode="{{dictCode}}" :triggerChange="true" />
+        </a-form-item>
+      </a-col>
+      <!-- JSearchSelect 搜索下拉 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JSearchSelect v-model:value="queryParam.{{fieldName}}" dict="{{table}},{{text}},{{code}}" placeholder="请搜索" />
+        </a-form-item>
+      </a-col>
+      <!-- JSelectUserByDept 用户选择 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JSelectUserByDept v-model:value="queryParam.{{fieldName}}" />
+        </a-form-item>
+      </a-col>
+      <!-- JSelectDept 部门选择 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JSelectDept v-model:value="queryParam.{{fieldName}}" />
+        </a-form-item>
+      </a-col>
+      <!-- JTreeSelect 自定义树 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JTreeSelect v-model:value="queryParam.{{fieldName}}" dict="{{table}},{{text}},{{code}}" pidField="pid" pidValue="0" :multiple="false" />
+        </a-form-item>
+      </a-col>
+      <!-- JCategorySelect 分类字典 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JCategorySelect v-model:value="queryParam.{{fieldName}}" pcode="{{pcode}}" />
+        </a-form-item>
+      </a-col>
+      <!-- DatePicker 日期 → 范围查询，用独立 ref + a-range-picker，searchQuery 里拆分为 _begin/_end -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <a-range-picker v-model:value="{{fieldName}}Range" valueFormat="YYYY-MM-DD" style="width:100%" />
+        </a-form-item>
+      </a-col>
+      <!-- DatePicker showTime 日期时间 → 精确查询直接绑定 queryParam -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <a-date-picker v-model:value="queryParam.{{fieldName}}" :showTime="true" valueFormat="YYYY-MM-DD HH:mm:ss" placeholder="请选择" style="width:100%" />
+        </a-form-item>
+      </a-col>
+      <!-- TimePicker 时间 → 范围查询，用独立 ref + a-time-range-picker，searchQuery 里拆分 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <a-time-range-picker v-model:value="{{fieldName}}Range" valueFormat="HH:mm:ss" style="width:100%" />
+        </a-form-item>
+      </a-col>
+      <!-- DatePicker picker=quarter/year/month/week → 直接绑定 queryParam，searchQuery 里调 getDateByPicker 转换 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <a-date-picker v-model:value="queryParam.{{fieldName}}" picker="{{quarter|year|month|week}}" valueFormat="YYYY-MM-DD" placeholder="请选择" style="width:100%" />
+        </a-form-item>
+      </a-col>
+      <!-- JPopup / 关联记录 → setSearchFieldValue 回填 queryParam（替代 formActionType） -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JPopup v-model:value="queryParam.{{fieldName}}" code="{{reportCode}}"
+            :fieldConfig="[{source:'{{sourceField}}',target:'{{fieldName}}'}]"
+            :setFieldsValue="setSearchFieldValue" :multi="false" />
+        </a-form-item>
+      </a-col>
+      <!-- JPopupDict -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JPopupDict v-model:value="queryParam.{{fieldName}}" dictCode="{{reportCode}},{{text}},{{code}}" :multi="false" />
+        </a-form-item>
+      </a-col>
+      <!-- JAreaLinkage 省市区 → 必须加 saveCode="region" -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <a-form-item name="{{fieldName}}" label="{{label}}">
+          <JAreaLinkage v-model:value="queryParam.{{fieldName}}" saveCode="region" />
+        </a-form-item>
+      </a-col>
+      <!-- 查询/重置按钮，始终放最后一个 a-col，用 table-page-search-submitButtons 包裹 -->
+      <a-col :xl="6" :lg="7" :md="8" :sm="24">
+        <span style="float: left; overflow: hidden" class="table-page-search-submitButtons">
+          <a-button type="primary" preIcon="ant-design:search-outlined" @click="searchQuery">查询</a-button>
+          <a-button preIcon="ant-design:reload-outlined" @click="searchReset" style="margin-left: 8px">重置</a-button>
+        </span>
+      </a-col>
+    </a-row>
+  </a-form>
+</div>
+```
+
+**script 新增部分（在 A9N 骨架基础上追加）：**
+
+```typescript
+// 查询面板必需：formRef + labelCol + wrapperCol
+const formRef = ref();
+const labelCol = reactive({ xs: 24, sm: 4, xl: 6, xxl: 4 });
+const wrapperCol = reactive({ xs: 24, sm: 20 });
+
+// 导入查询面板用到的组件（按实际字段类型按需引入）
+import { getDateByPicker } from '/@/utils';
+import JDictSelectTag from '/@/components/Form/src/jeecg/components/JDictSelectTag.vue';
+import JSelectMultiple from '/@/components/Form/src/jeecg/components/JSelectMultiple.vue';
+import JSearchSelect from '/@/components/Form/src/jeecg/components/JSearchSelect.vue';
+import JSelectUserByDept from '/@/components/Form/src/jeecg/components/JSelectUserByDept.vue';
+import JSelectDept from '/@/components/Form/src/jeecg/components/JSelectDept.vue';
+import JTreeSelect from '/@/components/Form/src/jeecg/components/JTreeSelect.vue';
+import JCategorySelect from '/@/components/Form/src/jeecg/components/JCategorySelect.vue';
+import JPopup from '/@/components/Form/src/jeecg/components/JPopup.vue';
+import JPopupDict from '/@/components/Form/src/jeecg/components/JPopupDict.vue';
+import JAreaLinkage from '/@/components/Form/src/jeecg/components/JAreaLinkage.vue';
+
+// 日期范围 / 时间范围字段的独立 ref（每个范围字段各一个）
+const {{fieldName}}Range = ref<any[]>([]);   // DatePicker 日期字段
+const {{fieldName}}Range = ref<any[]>([]);   // TimePicker 时间字段
+
+// JPopup setFieldsValue 替代（回填 queryParam）
+function setSearchFieldValue(values: Record<string, any>) {
+  Object.assign(queryParam, values);
+}
+
+function searchQuery() {
+  // 日期范围拆分（每个日期范围字段重复此块）
+  if ({{fieldName}}Range.value?.length === 2) {
+    queryParam.{{fieldName}}_begin = {{fieldName}}Range.value[0];
+    queryParam.{{fieldName}}_end   = {{fieldName}}Range.value[1];
+  } else {
+    delete queryParam.{{fieldName}}_begin;
+    delete queryParam.{{fieldName}}_end;
+  }
+  // 时间范围拆分（同上）
+  if ({{fieldName}}Range.value?.length === 2) {
+    queryParam.{{fieldName}}_begin = {{fieldName}}Range.value[0];
+    queryParam.{{fieldName}}_end   = {{fieldName}}Range.value[1];
+  } else {
+    delete queryParam.{{fieldName}}_begin;
+    delete queryParam.{{fieldName}}_end;
+  }
+  // 季度/年/月/周转换（有哪些 picker 字段就写哪些）
+  const fieldPickers: Record<string, string> = {
+    {{fieldName}}: 'quarter',   // picker="quarter" 的字段
+    {{fieldName}}: 'year',
+    {{fieldName}}: 'month',
+    {{fieldName}}: 'week',
+  };
+  for (const key in fieldPickers) {
+    if (queryParam[key]) {
+      queryParam[key] = getDateByPicker(queryParam[key], fieldPickers[key]);
+    }
+  }
+  reload();
+}
+
+function searchReset() {
+  formRef.value?.resetFields();
+  {{fieldName}}Range.value = [];   // 重置每个范围 ref
+  Object.keys(queryParam).forEach((key) => delete queryParam[key]);
+  selectedRowKeys.value = [];
+  reload();
+}
+```
+
+**style 追加（与 A9N 原有 style 合并）：**
+
+```less
+.jeecg-basic-table-form-container {
+  padding: 0;
+  .table-page-search-submitButtons {
+    display: block;
+    margin-bottom: 24px;
+    white-space: nowrap;
+  }
+}
+}
 ```
 
 ---
@@ -1424,6 +1729,28 @@ export const superQuerySchema = {
                 <JSearchSelect v-model:value="formData.searchField" dict="tableName,textField,codeField" placeholder="请选择" />
               </a-form-item>
             </a-col> -->
+
+            <!-- === 自定义树（sys_category，必须加 pidValue="0"） === -->
+            <!-- <a-col :span="24">
+              <a-form-item label="分类" v-bind="validateInfos.treeField" id="{{entityName}}Form-treeField" name="treeField">
+                <JTreeSelect v-model:value="formData.treeField" dict="sys_category,name,id" pidField="pid" pidValue="0" :multiple="false" />
+              </a-form-item>
+            </a-col> -->
+
+            <!-- === JPopup 弹窗（source=报表字段名，target=表单字段名，默认 report_user）=== -->
+            <!-- <a-col :span="24">
+              <a-form-item label="弹窗选择" v-bind="validateInfos.popupField" id="{{entityName}}Form-popupField" name="popupField">
+                <JPopup v-model:value="formData.popupField" code="report_user"
+                  :fieldConfig="[{source:'username',target:'popupField'},{source:'realname',target:'popupFieldBack'}]"
+                  :setFieldsValue="setFormFieldValue" :multi="false" />
+              </a-form-item>
+            </a-col> -->
+            <!-- 他表字段（由 JPopup 自动回填，disabled） -->
+            <!-- <a-col :span="24">
+              <a-form-item label="回填字段" id="{{entityName}}Form-popupFieldBack" name="popupFieldBack">
+                <a-input v-model:value="formData.popupFieldBack" :disabled="true" placeholder="由弹窗自动回填" />
+              </a-form-item>
+            </a-col> -->
           </a-row>
         </a-form>
       </template>
@@ -1442,10 +1769,13 @@ export const superQuerySchema = {
   // import JDictSelectTag from '/@/components/Form/src/jeecg/components/JDictSelectTag.vue';
   // import JSearchSelect from '/@/components/Form/src/jeecg/components/JSearchSelect.vue';
   // import JImageUpload from '/@/components/Form/src/jeecg/components/JImageUpload.vue';
-  // import JUpload from '/@/components/Form/src/jeecg/components/JUpload.vue';
+  // import JUpload from '/@/components/Form/src/jeecg/components/JUpload/JUpload.vue';
   // import JEditor from '/@/components/Form/src/jeecg/components/JEditor.vue';
   // import JSelectUserByDept from '/@/components/Form/src/jeecg/components/JSelectUserByDept.vue';
   // import JSelectDept from '/@/components/Form/src/jeecg/components/JSelectDept.vue';
+  // import JTreeSelect from '/@/components/Form/src/jeecg/components/JTreeSelect.vue';
+  // import JPopup from '/@/components/Form/src/jeecg/components/JPopup.vue';
+  // import JPopupDict from '/@/components/Form/src/jeecg/components/JPopupDict.vue';
 
   const props = defineProps({
     formDisabled: { type: Boolean, default: false },
@@ -1582,6 +1912,7 @@ export const superQuerySchema = {
 -- 如果你想更改到其他目录，请修改sql中component字段对应的值
 
 -- 主菜单
+-- ⚠️ is_leaf 必须为 0（第15个值）：有按钮子级时 is_leaf=1 会导致按钮在权限树中不可见
 INSERT INTO sys_permission(id, parent_id, name, url, component, component_name, redirect, menu_type, perms, perms_type, sort_no, always_show, icon, is_route, is_leaf, keep_alive, hidden, hide_tab, description, status, del_flag, rule_flag, create_by, create_time, update_by, update_time, internal_or_external)
 VALUES ('{{timestamp}}01', NULL, '{{description}}', '/{{entityPackagePath}}/{{entityName_uncap}}List', '{{viewDir}}/{{entityName}}List', NULL, NULL, 0, NULL, '1', 0.00, 0, NULL, 1, 0, 0, 0, 0, NULL, '1', 0, 0, 'admin', '{{today}} 00:00:00', NULL, NULL, 0);
 
@@ -3636,6 +3967,255 @@ async function getSubList(params) {
 
 ---
 
+### C11-Native. ERP vue3Native 风格差异（⚠️ 与 C11 vue3封装风格完全不同）
+
+> **必读**：当前端风格为 `vue3Native` 时，ERP 风格的子表架构与 C11 vue3封装风格**完全不同**。以下5条规则必须全部遵守，任何一条违反都会导致运行报错或子表空白。
+>
+> **根据模板路径**: `erp/onetomany/.../vue3Native/` 系列文件（`${entityName}List.vuei`、`[1-n]List.vuei`、`[1-n]Modal.vuei`、`[1-n]Form.vuei`）
+
+#### ❗规则1：provide/inject key 固定用 `mainId`，不能用实体字段名
+
+```typescript
+// ✅ 正确 — 主表 List.vue
+const mainId = computed(() =>
+  unref(selectedRowKeys).length > 0 ? String(unref(selectedRowKeys)[0]) : ''
+);
+provide('mainId', mainId);
+
+// ✅ 正确 — 子表 List.vue / Form.vue
+const mainId = inject('mainId') || '';
+```
+
+```typescript
+// ❌ 错误（已踩坑）— 不能用实体名作为 key
+provide('bizVehicleId', bizVehicleId);
+inject('bizVehicleId');   // inject 拿到 undefined，子表永远空白
+```
+
+**Why:** 模板 `${entityName}List.vuei` 硬编码 `provide('mainId', mainId)`，子表用 `inject('mainId')`，key 不匹配则注入失败。
+
+---
+
+#### ❗规则2：子表 Modal 必须用 JModal + Form.vue 委托模式，禁止 BasicModal + useModalInner
+
+**子表 Modal.vue（正确）：**
+```vue
+<template>
+  <j-modal :title="title" :visible="visible" @ok="handleOk" @cancel="handleCancel"
+           :okButtonProps="{ class: { 'jee-hidden': disableSubmit } }" cancelText="关闭">
+    <XxxForm ref="registerForm" @ok="submitCallback" :formDisabled="disableSubmit" :formBpm="false" />
+  </j-modal>
+</template>
+
+<script lang="ts" setup>
+  import { ref, nextTick, defineExpose } from 'vue';
+  import XxxForm from './XxxForm.vue';
+  import JModal from '/@/components/Modal/src/JModal/JModal.vue';
+
+  const visible = ref(false);
+  const disableSubmit = ref(false);
+  const registerForm = ref();
+  const emit = defineEmits(['register', 'success']);
+
+  function add() { visible.value = true; nextTick(() => registerForm.value.add()); }
+  function edit(record) { visible.value = true; nextTick(() => registerForm.value.edit(record)); }
+  function handleOk() { registerForm.value.submitForm(); }
+  function submitCallback() { handleCancel(); emit('success'); }
+  function handleCancel() { visible.value = false; }
+
+  defineExpose({ add, edit, disableSubmit });
+</script>
+```
+
+**子表 List.vue 打开方式（正确）：**
+```typescript
+const registerModal = ref();   // ✅ ref，不是 useModal()
+
+function handleAdd() {
+  registerModal.value.disableSubmit = false;
+  registerModal.value.add();
+}
+function handleEdit(record) {
+  registerModal.value.disableSubmit = false;
+  registerModal.value.edit(record);
+}
+```
+
+**模板中 Modal 引用方式：**
+```html
+<XxxModal ref="registerModal" @success="handleSuccess" />  <!-- ✅ ref -->
+```
+
+```typescript
+// ❌ 错误（已踩坑）— vue3封装风格，vue3Native不适用
+const [registerModal, { openModal }] = useModal();
+openModal(true, { isUpdate: false, showFooter: true });
+```
+
+---
+
+#### ❗规则3：子表 List 必须用 useListPage + beforeFetch + queryParam watch 联动
+
+```typescript
+// ✅ 正确
+const queryParam: Record<string, any> = {};
+
+const { tableContext } = useListPage({
+  tableProps: {
+    api: xxxList,          // API 函数须在空 mainId 时返回 Promise.resolve({})
+    columns: xxxColumns,
+    useSearchForm: false,
+    beforeFetch: (params) => Object.assign(params, queryParam),
+  },
+  exportConfig: { name: '...', url: '' },
+  importConfig: { url: () => '' },
+});
+const [registerTable, { reload }, { rowSelection, selectedRowKeys }] = tableContext;
+
+watch(mainId, () => {
+  queryParam['{{mainEntityName_uncap}}Id'] = unref(mainId);
+  reload();
+});
+```
+
+**API 函数必须有空 mainId 守卫：**
+```typescript
+export const xxxList = (params) => {
+  if (params['{{mainEntityName_uncap}}Id']) {
+    return defHttp.get({ url: Api.xxxList, params });
+  }
+  return Promise.resolve({});   // ✅ 空 mainId 时返回空，防止无效请求
+};
+```
+
+```typescript
+// ❌ 错误（已踩坑）— 直接用 useTable + :searchInfo
+const [registerTable, { reload }] = useTable({ api: getXxxList, ... });
+// :searchInfo="searchInfo" 绑定方式不可靠
+```
+
+---
+
+#### ❗规则4：第2个及之后的 tab-pane 必须加 forceRender
+
+```html
+<!-- 主表 List.vue 中子表 tabs -->
+<a-tabs>
+  <a-tab-pane tab="第一个子表" key="sub1">          <!-- 第1个：不加 -->
+    <Sub1List />
+  </a-tab-pane>
+  <a-tab-pane tab="第二个子表" key="sub2" forceRender>  <!-- 第2个起：必须加 -->
+    <Sub2List />
+  </a-tab-pane>
+</a-tabs>
+```
+
+**Why:** 不加 `forceRender` 时，非初始 tab 的组件不会挂载，`watch(mainId)` 不会注册。用户先选主表行再切 tab，watch 不触发，子表永远空白。模板 `${entityName}List.vuei` 第173行：`<#if sub_seq gt 1>forceRender</#if>`。
+
+---
+
+#### ❗规则5：子表 Form 字段默认单列（span=24），不是双列
+
+```html
+<!-- ✅ 正确 — 子表 Form.vue 默认单列 -->
+<a-col :span="24">
+  <a-form-item label="字段名">...</a-form-item>
+</a-col>
+```
+
+**Why:** 模板 `[1-n]Form.vuei` 默认 `form_span=24`（单列），只有 `tableVo.fieldRowNum==2` 时才改双列。子表 Form 未经用户明确要求"双列"，不得擅自使用 `:span="12"`。
+
+---
+
+#### vue3Native ERP 子表 Form.vue 完整结构
+
+```vue
+<template>
+  <a-spin :spinning="confirmLoading">
+    <JFormContainer :disabled="disabled">
+      <template #detail>
+        <a-form class="antd-modal-form" v-bind="formItemLayout" ref="formRef">
+          <a-row>
+            <a-col :span="24">  <!-- 默认单列 -->
+              <a-form-item label="字段名" v-bind="validateInfos.fieldName">
+                <a-input v-model:value="formData.fieldName" />
+              </a-form-item>
+            </a-col>
+          </a-row>
+        </a-form>
+      </template>
+    </JFormContainer>
+  </a-spin>
+</template>
+
+<script lang="ts" setup>
+  import { ref, reactive, computed, unref, inject, nextTick } from 'vue';
+  import { Form } from 'ant-design-vue';
+  import JFormContainer from '/@/components/Form/src/container/JFormContainer.vue';
+  import { xxxSaveOrUpdate } from '../Xxx.api';
+  import { useMessage } from '/@/hooks/web/useMessage';
+
+  const mainId = inject('mainId');
+  const formRef = ref();
+  const emit = defineEmits(['register', 'ok']);
+  const { createMessage } = useMessage();
+  const confirmLoading = ref(false);
+
+  const props = defineProps({
+    formDisabled: { type: Boolean, default: false },
+    formBpm: { type: Boolean, default: false },
+  });
+  const disabled = computed(() => props.formDisabled);
+
+  const formData = reactive<Record<string, any>>({
+    id: '',
+    {{mainEntityName_uncap}}Id: '',
+    // ... 业务字段
+  });
+
+  const { resetFields, validate, validateInfos } = Form.useForm(formData, reactive({}), { immediate: false });
+
+  function add() { edit({}); }
+
+  function edit(record) {
+    nextTick(() => {
+      resetFields();
+      const tmpData: Record<string, any> = {};
+      Object.keys(formData).forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(record, key)) tmpData[key] = record[key];
+      });
+      Object.assign(formData, tmpData);
+    });
+  }
+
+  async function submitForm() {
+    try { await validate(); } catch ({ errorFields }: any) { return Promise.reject(errorFields); }
+    confirmLoading.value = true;
+    const isUpdate = !!formData.id;
+    if (unref(mainId)) formData['{{mainEntityName_uncap}}Id'] = unref(mainId);
+    await xxxSaveOrUpdate(formData, isUpdate)
+      .then((res: any) => {
+        if (res.success) { createMessage.success(res.message); emit('ok'); }
+        else { createMessage.warning(res.message); }
+      })
+      .finally(() => { confirmLoading.value = false; });
+  }
+
+  defineExpose({ add, edit, submitForm });
+</script>
+```
+
+**api.ts 中子表 SaveOrUpdate 必须加 `isTransformResponse: false`（Form 中需要检查 res.success）：**
+```typescript
+export const xxxSaveOrUpdate = (params, isUpdate) =>
+  defHttp.post(
+    { url: isUpdate ? Api.xxxEdit : Api.xxxSave, params },
+    { isTransformResponse: false }   // ✅ 必须加，否则 res.success 取不到
+  );
+```
+
+---
+
 ### C12. 内嵌子表风格（expandedRowRender + Tab-in-Modal）
 
 内嵌子表风格是 Tab-in-Modal 的增强版：**Modal 内编辑子表数据**（与 C9 相同），同时在**列表页通过行展开（expandedRowRender）直接查看子表数据**，无需打开 Modal。
@@ -4700,9 +5280,10 @@ function handleDetail(record) {
 | 长文本/备注 | text | String | - | InputTextArea | a-textarea | - |
 | 富文本 | text | String | - | JEditor | JEditor | - |
 | Markdown | text | String | - | JMarkdownEditor | JMarkdownEditor | - |
-| 图片 | varchar(1000) | String | - | JImageUpload | JImageUpload | - |
-| 文件/附件 | varchar(1000) | String | - | JUpload | JUpload | - |
-| 用户选择 | varchar(32) | String | dictTable=sys_user | JSelectUserByDept | JSelectUserByDept | - |
+| 图片 | varchar(1000) | String | - | JImageUpload（fileMax控制张数，默认1） | JImageUpload | - |
+| 文件/附件 | varchar(1000) | String | - | JUpload（maxCount控制个数，默认0不限） | JUpload | - |
+| 用户选择(单选) | varchar(32) | String | dictTable=sys_user | JSelectUserByDept + isRadioSelection:true | JSelectUserByDept + isRadioSelection:true | - |
+| 用户选择(多选) | varchar(32) | String | dictTable=sys_user | JSelectUserByDept（默认） | JSelectUserByDept（默认） | - |
 | 部门选择 | varchar(32) | String | dictTable=sys_depart | JSelectDept | JSelectDept | - |
 | 分类树 | varchar(64) | String | - | JCategorySelect | JCategorySelect | JCategorySelect |
 | 搜索选择 | varchar(32) | String | dictTable | JSearchSelect | JSearchSelect | JSearchSelect |

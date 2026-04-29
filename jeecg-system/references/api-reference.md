@@ -179,7 +179,7 @@
 
 | 方法 | 路径 | 说明 | 参数 |
 |------|------|------|------|
-| GET | `/sys/sysDepart/searchBy` | 关键词模糊搜索部门 | Query: `keyWord`, `myDeptSearch`, `orgCategory`, `departIds` |
+| GET | `/sys/sysDepart/searchBy` | **按名称查部门 ID（推荐）**，支持模糊搜索，取返回列表第一条 | Query: `keyWord`(URL编码), `orgCategory`(1,2,3,4), `myDeptSearch`, `departIds` |
 | GET | `/sys/sysDepart/listAll` | 所有部门列表（扁平） | Query: `id`（可选） |
 | GET | `/sys/sysDepart/queryByIds` | 批量按ID查询 | Query: `deptIds`（逗号分隔） |
 | GET | `/sys/sysDepart/queryAllParentId` | 某部门所有父级ID | Query: `departId` 或 `orgCode` |

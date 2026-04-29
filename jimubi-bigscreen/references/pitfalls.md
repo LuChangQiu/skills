@@ -1,23 +1,41 @@
 # API 踩坑记录（大屏常见问题速查）
 
-## 饼图类严禁 xAxis/yAxis（实测 2026-04-22）
+## 🚨 多组件绑定数据集禁止 shell 并行调 `dataset_ops.py bind`（实测 2026-04-27）
 
-JPie / JRing / JRotatePie / JRose / JActiveRing 的 `option` 中**严禁包含 `xAxis` 或 `yAxis` 字段**。
-前端检测到这两个字段会按笛卡尔坐标系处理，跳过饼图渲染，组件完全空白。
+**触发场景**：一次给 ≥2 个组件分别绑数据集时，AI 倾向于在多个 Bash 调用里并行执行 `dataset_ops.py bind`。
 
-**错误根源**：将 `ax()` 辅助函数（用于给折线/柱形图加轴样式）误用于饼图 opt_ov。
+**根因**：每次 `bind` 流程是「`query_page` → 改自己 target 的 config → `save_page` 整页提交」。并发多次 save 时各进程用各自的快照覆盖整张表，互相 clobber，**非 target 组件的 option 会被脏写到不可解释的中间值**——实测 5 个 bind 并行后 JRingProgress 的 `option.valueFontSize` 被改为 `38`、`option.lineHeight` 被改为 `0`，KPI 数值整体被压出可视区，"86%" 不显示。单次 `bind` 重做即可恢复正常值（22/24），即可证明并发是唯一变量。
 
-**正确做法**：饼图只用 `{'title':..., 'legend':..., 'tooltip':..., 'customColor':...}`，不调用 `ax()`：
-```python
-# 正确
-add('JPie', ..., opt_ov={'title':{'show':False},'legend':{'textStyle':{'color':BL}},
-    'tooltip':{'backgroundColor':TBG,'textStyle':{'color':TTC}}, 'customColor':[...]})
+**正确做法**：≥2 个组件统一走 `dataset_ops.py bind-batch --batch-file <items.json>`：一次 `query_page` → 内存里改 N 个 target → 一次 `save_page` 提交，从机制上规避竞争。`batch-file` 每项 `{comp_name, dataset_id, dataset_name, dataset_type, mapping?|field_map?|header_keys?}`。
 
-# 错误（ax() 会带入 xAxis/yAxis）
-add('JPie', ..., opt_ov=dm(ax(), {...}))
-```
+**禁止**：在 shell 里并行起多个 `dataset_ops.py bind` 子进程（即使每条命令本身能跑通也不行，副作用只在并发时显现）。
 
 ---
+
+
+
+> **spec_builder 用户无需关注本文件**。本文件记录**手写 bi_utils 脚本 / 直接调 comp_ops.py** 场景下的踩坑。
+> spec_builder 自动规避的坑（饼图 xAxis/yAxis、JDragBorder 剥离、chartData 序列化、透明 bg、pie 变体后缀、compareState、ECharts 轴样式、颜色合法性）不再列于此。
+> 已修复的历史问题（JStackBar series:[]、comp_ops.py delete 报成功未删、高级组件 `__ref:`、queryFieldBy* 自动调用）已从本文件移除，不再单列。
+> SKILL.md "Top 8" 已覆盖的条目本文件不再重复叙述，只保留额外技术细节。
+
+## 目录（按场景跳读）
+
+| 如果你遇到这类问题 | 跳到 |
+|-------------------|------|
+| 组件名/类型匹配错误 | §组件类型匹配踩坑 / §组件名称匹配踩坑 |
+| 地图类组件不渲染 / 空白 | `references/map-guide.md`（完整地图踩坑已下沉） |
+| 数据源/数据集创建失败 | §数据源相关 / §数据集相关 |
+| 文件/WebSocket/FILES 数据集 | §文件数据集相关 / §完整工作流：YApi Mock |
+| 组件渲染但没数据 / option 结构错 | §组件相关 / §Online 表单 / 设计器表单图表渲染异常 |
+| 模板复制/覆盖异常 | §模板相关 |
+| 脚本参数 / bi_utils API 用法 | §脚本参数相关 / §bi_utils 内部结构相关 |
+| Windows 编码 / Git Bash 路径 | §环境相关 |
+| 自写 Java 接口 → API 数据集 → 批量图表 | §完整工作流：自写API接口 + API数据集 + 批量图表 |
+| 页面背景/水印/分辨率 | §页面配置相关 |
+| YApi Mock 完整流程 | §完整工作流：YApi Mock |
+| 弹窗/联动/钻取场景特殊坑 | §弹窗场景：bi_utils.save_page + query_page |
+| SQL 表名来源 / dataset_ops.py edit | §SQL数据集表名必须来自真实数据库 / §dataset_ops.py edit 不写入字段列表 |
 
 ## 组件类型匹配踩坑
 
@@ -26,28 +44,6 @@ add('JPie', ..., opt_ov=dm(ax(), {...}))
 | 表格 | JScrollList | JScrollTable | 「表格」应映射到 JScrollTable（滚动表格），JScrollList 是「滚动列表」 |
 | 轮播表 | JScrollTable | JScrollBoard | 「轮播表」是 JScrollBoard，不是 JScrollTable（滚动表格） |
 | 发展历程 | JLine | JDevHistory | 「发展历程」有专用组件 JDevHistory，不要用折线图替代 |
-
-## 🚨 边框组件 component 字段必须统一为 JDragBorder（2026-04-21 实测）
-
-**问题**：批量添加边框1~13时，将 `component` 字段分别设为 `JDragBorder_边框2`、`JDragBorder_边框3` 等，导致边框2~13全部不显示，只有边框1（`JDragBorder`）正常渲染。
-
-**根本原因**：前端组件注册名只有 `JDragBorder`，边框样式由 `option.type`（值 "1"~"13"）区分。`JDragBorder_边框X` 是 `default_configs.json` 中的查询键名，**不是** 合法的前端组件类型。
-
-**正确做法**：
-```python
-# 所有13个边框，component 统一为 'JDragBorder'，option.type 区分样式
-bi_utils.add_component(
-    page_id   = PAGE_ID,
-    component = 'JDragBorder',   # 固定，不能用 JDragBorder_边框2
-    title     = '边框2',
-    config    = {'option': {'type': '2', ...}, ...},
-)
-```
-
-**规律**：凡是 `default_configs.json` 中带下划线后缀的键（如 `JDragBorder_边框X`、`JStatsSummary_1`），其真实 `component` 字段的规则：
-- `JDragBorder_边框X` → `component = 'JDragBorder'`，`option.type = 'X'`
-- `JStatsSummary_1/2/3` → `component = 'JStatsSummary_1'`（数字后缀保留，这类是合法变体）
-- `JScrollList_1/2/3`、`JCardScroll_1/2/3` → 同上，数字后缀保留
 
 ## 组件名称匹配踩坑（按名称查找已有组件时）
 
@@ -79,7 +75,7 @@ bi_utils.add_component(
 | `POST /drag/page/edit` 乐观锁 | 必须传 `updateCount`（当前数据库值） |
 | **chartData 必须是 JSON 字符串** | `config.chartData` 的值必须是 `json.dumps(...)` 后的字符串 |
 | **dataMapping 的 filed 拼写** | 系统中 `filed` 不是 `field`（少一个 d） |
-| **严禁使用 `rgba(0,0,0,0)` 作为背景色** | Ant Design 颜色选择器将其解析为红色。必须用 `#FFFFFF00` |
+| **所有颜色字段统一用 hex（含 8 位 alpha 写法），禁止 rgba()** | 平台颜色选择器（Ant Design ColorPicker）以 hex 为存取格式：rgba 字符串可能解析失败或被替换为默认色（最早暴露案例：`rgba(0,0,0,0)` 被解析成红色，必须改写为 `#FFFFFF00`）。带透明度时使用 `#RRGGBBAA`（如半透明黑 `#00000080`、10% 白线 `#FFFFFF1A`、80% 深蓝 `#000259CC`、全透明 `#FFFFFF00`）。alpha 转换：`alpha_hex = round(alpha * 255)` 转两位 16 进制。覆盖场景：组件 background、ECharts option 内 backgroundColor / shadowColor / itemStyle.color / lineStyle.color / axisLine.color / splitLine.color / 表格 header_bg / body_bg / 滚动表格 border 等所有颜色位置。 |
 | **background 字段位置** | `config` 的顶层字段（与 `option` 同级），不是在 `option` 内部 |
 | **图表标题去重** | `option.card.title` 必须为空字符串，标题仅通过 `option.title.text` 显示 |
 | **图层顺序由数组索引决定** | `template` 数组索引 0=最顶层，`orderNum` 不控制 z-index |
@@ -97,6 +93,8 @@ bi_utils.add_component(
 | **⚠️ 创建SQL数据集前必须询问用户选择数据源** | 即使刚创建了数据源，也不能自动使用，必须：①`datasource_ops.py list` 列出所有数据源 ②`AskUserQuestion` 让用户选择 ③用选中的 ID 执行 `comp_ops.py add --create-sql --db-source <ID>` |
 
 ## 数据集相关
+
+> **字段映射机制（类型 A/B/D/无映射、filed 语义键、option 下 6 种子位置等）请直接读 `references/data-binding-mapping.md`**。本节只保留**该文档未覆盖**的零散 API 坑（参数格式、返回值兼容、限流、权限等）。
 
 | 问题 | 说明 |
 |------|------|
@@ -116,7 +114,6 @@ bi_utils.add_component(
 | **数据集创建返回值二义性** | `POST /drag/onlDragDatasetHead/add` 的 `result` 可能是包含 `id` 的对象，也可能直接是 ID 字符串。**必须同时兼容两种格式**：`DS_ID = result.get('id') if isinstance(result, dict) else result` |
 | **数据源创建返回值是 string** | `result` 直接是数据源 ID 字符串 |
 | **`onlDragDatasetItemList` 是创建时的正确字段名** | `POST /drag/onlDragDatasetHead/add` payload 中用 `onlDragDatasetItemList`（不是 `datasetItemList`）传字段列表；但 `queryAllById` 返回的字段名也是 `onlDragDatasetItemList` |
-| **⚠️ 创建数据集后必须调用查询解析API（强制流程）** | 创建数据集后，**必须**调用对应的查询解析API，这是前端"查询解析"按钮的逻辑。**【2026-04-03 已修复】** comp_ops.py 和 dataset_ops.py 已内置自动调用。<br><br>**SQL数据集**：调用 `POST /drag/onlDragDatasetHead/queryFieldBySql`，data: `{'sql': SQL, 'dbCode': 数据源ID, 'paramArray': '[]'}`<br>**API数据集**：调用 `POST /drag/onlDragDatasetHead/queryFieldByApi`，data: `{'api': URL, 'method': 'get/post', 'paramArray': '[]'}`<br>**JSON数据集**：直接解析JSON字符串提取字段名（无需API调用）<br>**FILES/文件数据集**：调用 `POST /drag/onlDragDatasetHead/queryFileFieldBySql` <br><br>**正确流程**：① `POST /add` 创建数据集 → ② 调用对应 queryFieldBy* 解析字段 → ③ `POST /edit` 保存字段到数据集。**注意**：字段保存到 `datasetItemList`（不是 `onlDragDatasetItemList`）。已修复记录在 comp_ops.py 和 dataset_ops.py 中。 |
 | **⚠️ SQL 数据集创建后字段为空（手动点查询解析才出现字段）** | 调 `/add` 时未传 `onlDragDatasetItemList`，系统不会自动解析 SQL 字段。**修复①（推荐，add 时一并传入）**：在 add 请求体中加 `"onlDragDatasetItemList": [{"fieldName":"name","fieldTxt":"日期","fieldType":"String","izShow":"Y","sort":0}, {"fieldName":"value","fieldTxt":"数量","fieldType":"Integer","izShow":"Y","sort":1}]`。**修复②（事后补救，通过 edit 回写）**：先 `getAllChartData` 拿第一行数据 → 推断字段类型（int/float→Integer，其余→String）→ `queryById` 获取完整数据集实体 → 将 `onlDragDatasetItemList` 填入实体 → `edit` 保存。代码：`items=[{'fieldName':k,'fieldTxt':k,'fieldType':'Integer' if isinstance(v,(int,float)) else 'String','izShow':'Y','sort':i} for i,(k,v) in enumerate(test_data[0].items())]; ds=bi_utils._request('GET','/drag/onlDragDatasetHead/queryById',params={'id':ds_id})['result']; ds['onlDragDatasetItemList']=items; bi_utils._request('POST','/drag/onlDragDatasetHead/edit',data=ds)` |
 | **⚠️ 直接调 `/drag/onlDragDataSource/add` 时 result 是字符串 ID** | 响应体 `result` 直接是字符串（如 `"1199640199413063680"`），非包含 `id` 字段的对象。直接用 `DS_ID = add_resp.get('result')` 即可。**禁止用 `getOptions` 按名称查找**（同名重复时会取到旧数据源，返回错误 ID）。MySQL 8.x 的 `dbType` 填 `MYSQL8`（不是 `MYSQL5.7`） |
 | **queryAllById 返回 result=null** | 权限或数据隔离问题，不要依赖此接口 |
@@ -157,10 +154,9 @@ bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=payload)
 | **⚠️ 数据集字典绑定在 datasetItemList 中** | 字典翻译通过 `datasetItemList[].dictCode` 绑定（如 `'dictCode': 'sex'`），不是在组件 config 中手动构建 `dictOptions`。绑定后 `getAllChartData` 会自动返回 `dictOptions` |
 | **⚠️ 组件 dictOptions 必须从 getAllChartData 获取** | 创建组件时，先调 `getAllChartData` 获取数据集的 `dictOptions`，再写入组件 `config.dictOptions`。手动构建 dictOptions 容易遗漏格式（需包含 value/text/color/label/title 等字段） |
 | **⚠️ 批量绑定数据集：API 端点错误** | 获取数据集字段不能用 `GET /drag/view/getAllChartData`（该接口返回格式不同，`result` 为 None 导致报错）。**必须用 `POST /drag/onlDragDatasetHead/getAllChartData`**，data 传 `{'id': DS_ID}`，从 `result.data[0]` 的 key 推断字段列表 |
-| **⚠️ 批量绑定数据集：dataMapping 格式错误** | `dataMapping` 的 `filed` 字段是**语义槽位标签**（如 `"维度"/"数值"/"分组"`），不是字段名本身。字段名放在 `mapping` 键中。错误：`{"filed":"name","mappingField":"name"}`。正确：`{"filed":"维度","mapping":"name"}` |
-| **🚨 dataMapping 只能用于 default_configs.json 中已有该字段的组件** | 绑定数据集时，**必须先查 `default_configs.json` 确认该组件默认配置中存在 `dataMapping` 字段**，才能写入。若默认配置无此字段，则该组件有自己的映射机制（见 skill.md「组件字段映射机制三分类」章节）。**且槽位标签（filed）必须与 default_configs.json 中完全一致，禁止自行命名**（2026-04-21 实测） |
 | **🚨 JTabToggle 仅支持静态数据，禁止绑定数据集** | 导航切换组件虽有 `dataMapping` 字段，但组件本身**不支持动态数据集**，只能使用静态 `chartData`。绑定数据集不生效（2026-04-21 明确） |
 | **⚠️ 批量绑定数据集：缺少 fieldOption** | 不设 `fieldOption` 会导致前端字段选项面板为空，用户无法在设计器中修改字段映射。格式：`[{"label":"name","text":"name","type":"String","value":"name","show":"Y"},...]` |
+| **✅ 已修 · `dataset_ops.py bind/bind-batch` 自动注入 fieldOption + JCommonTable.option.columns + 清空静态 chartData（2026-04-27）** | 旧版 `_apply_binding` 只写 `dataType/dataSetId/dataMapping/dataSetApi/dataSetMethod`，**漏写 `fieldOption`/`paramOption`/`dataSetIzAgent`，且未清空 `chartData`，对 JCommonTable 还漏写 `option.columns`**。**JCommonTable 渲染列的真相源是 `option.columns`（每项 `{izShow, dataIndex, title}`）**——不是 dataMapping 也不是 fieldOption。手动 UI 拖入并绑数据集时前端 watcher 会自动按 fieldOption 填 columns，脚本路径不走该 watcher 故必须显式写。已修复：bind 时优先从 `fetch_dataset_detail` 取 `datasetItemList`，缺失则回退到 `getAllChartData` 第一行 keys 推断字段；构造 fieldOption + 当 `comp_type=='JCommonTable'` 时按字段拼 `option.columns`；同时把 `cfg['chartData']='[]'`。验收：reset 后 `bind-batch` 一次成功，前端表格正常渲染 API 字段。 |
 | **⚠️ 数据集分组：用 `parentId`，不是 `groupCode`** | 分组节点的特征：`dataType=null`（无 dbSource/querySql）。创建数据集时 `parentId = 分组id`。**正确查询流程**：①`GET /drag/onlDragDatasetHead/getAllGroup`（⚠️ 不是 `/drag/onlDragDatasetGroup/getAllGroup`，后者 404）②该接口返回所有记录，**必须过滤 `dataType=None` 才是分组节点** ③从分组节点中找 `name='示例数据集'` 取其 `id` ④不存在则 `POST /drag/onlDragDatasetHead/addGroup` 创建再重查。`示例数据集` 固定 id = `1516743332632494082` |
 | **⚠️ `getAllGroup` 只返回部分分组（非全量）** | `GET /drag/onlDragDatasetHead/getAllGroup` 无分页但有内部过滤（按租户/权限），可能不返回已存在的分组。不要因为 getAllGroup 里没有就重复 addGroup——否则唯一约束报错。正确：先查，再 addGroup（失败时说明已存在），再通过 `getAllGroup?groupName=xxx` 反查同组数据集的 parentId |
 | **⚠️ SQL 数据集必须在创建后立即测试** | 创建 SQL 数据集后，**必须立即**调 `POST /drag/onlDragDatasetHead/getAllChartData`（data: `{'id': DS_ID}`）验证 SQL 可执行。若返回 `success=false` 或 `message` 含 `bad SQL grammar`，立刻停止生成图表并报错，否则所有绑定该数据集的图表都会显示"暂无数据" |
@@ -169,14 +165,15 @@ bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=payload)
 | **⚠️ API 数据集 onlDragDatasetItemList 已在 /add 时传入，禁止再 queryById + edit 回写（浪费 4 个请求）** | 创建 API 数据集时 `/add` 请求体已包含 `onlDragDatasetItemList`，字段已一次性保存到数据库。**禁止**再做 `queryById` → 填 `onlDragDatasetItemList` → `edit` 这三步回写——这是完全多余的操作，浪费 4 个 HTTP 请求（2个数据集 × 2次请求），且在后端未重启时还会因 getAllChartData 返回空而得到无意义的字段列表。正确做法：`/add` 时一次性传字段，随后只做 `getAllChartData`（try/except 包裹）即可 |
 | **⚠️ JeecgBoot 大屏记录表名是 `jmreport_big_screen`，不是 `drag_page`** | `drag_page` 表在默认 jeecgbootsy 库中不存在。统计大屏创建情况时正确表名为 `jmreport_big_screen`（字段含 `screen_name`、`create_time`、`type` 等）。另：`onl_drag_page` 是 drag 模块的新页面表（存在，216+条记录），两个表用途不同 |
 | **⚠️ 批量绑定数据集：缺少必要字段** | 完整绑定配置除 `dataType/dataSetId/dataMapping/fieldOption` 外，还需要：`dataSetName`（设计器显示用）、`dataSetType`（`"sql"`）、`dataSetApi`（querySql）、`dataSetMethod`（`"get"`）、`dataSetIzAgent`（`"1"`）、`paramOption`（`[]`）、`viewLoading`（`True`）、`chartData`（`"[]"`）。缺少任一字段均可能导致绑定在设计器中显示异常 |
-| **⚠️ dataMapping 槽位标签必须从项目源码获取** | `dataMapping.filed` 的值必须是**项目源码中定义的语义槽位标签**，严禁自行创建不存在的标签（如 `"数值2"`、`"分组2"`）。源码位置：`references/core-configs/data.ts`。常见正确标签：`维度`、`数值`、`分组`、`总计`、`已用`、`名称`、`起点名称`、`终点名称`、`内容`、`数值1`、`数值2`、`总量`、`当前`。具体映射规则见下方「组件 dataMapping 槽位配置速查表」 |
 | **⚠️ 双轴图（DoubleLineBar）的 slot_labels 是 `['分组','维度','数值']`** | 经源码验证，DoubleLineBar 的 dataMapping 是 `['分组','维度','数值']`（不是 `['维度','数值','数值2']`）。数据中 type 字段映射到"分组"，name 映射到"维度"，value 映射到"数值" |
-| **⚠️ 不同图表类型有不同的 slot_labels** | 批量生成全组件时，每个组件类型的 dataMapping 槽位数量和标签不同。单系列图表（维度+数值）≠ 多系列图表（分组+维度+数值）。**必须为每个组件单独设置 dataMapping**，禁止全局统一配置 |
-| **组件 dataMapping 槽位配置速查表** | 源码文件：`packages/dragEngine/components/bigScreenComponents/data.ts`。单系列（2槽位）：`['维度','数值']` → JBar/JPie/JLine/JArea/JSmoothLine/JStepLine/JFunnel/JRadar/JRing 等；多系列（3槽位）：`['分组','维度','数值']` → JStackBar/JMultipleBar/JNegativeBar/JPercentBar/JMixLineBar/JMultipleLine/DoubleLineBar/JBubble/JBarGroup3d；仪表盘：`['总计','已用']` → JGauge/JColorGauge/JAntvGauge/JSemiGauge；表格列表：`['名称','数值']` → JScrollBoard/JScrollTable/JCommonTable/JList/JScrollRankingBoard；翻牌器：`['数值']` → JCountTo；颜色块：`['数值']` → JColorBlock |
 | **⚠️ `dataset_ops.py create-api` 必填 `--code`** | 文档未提及，但 `--code` 是必填参数（数据集唯一编码，如 `mock_monthly_orders`），漏传直接报 usage 错误 |
 | **⚠️ `dataset_ops.py create-api` 不支持 `--data-path`** | 该命令无 `--data-path` 参数，无法配置 JSON 提取路径。若接口返回包装格式 `{"code":200,"result":[...]}` 则 `dataset test` 显示 `data: null` |
 | **⚠️ API 数据集接口必须返回裸数组** | API 接口应直接返回 JSON 数组（如 `[{"name":"1月","value":320},...]`），**不要包装成** `{"code":200,"result":[...]}` 格式。包装格式需要配置 data-path 才能解析，而该工具不支持此参数。Java 接口返回类型写 `String`，直接 `return "[{...}]"` 最简单 |
+| **⚠️ API 数据集 `datasetItemList` 初始 payload 会被后端丢弃，必须二次 edit 回写** | `POST /drag/onlDragDatasetHead/add` 传 `datasetItemList` 后端不落库（queryById 返回空数组）。运行时不影响（组件只看 `dataMapping`/`option.fieldMap` 等），但 BI 设计器里数据集详情看不到字段。**正确做法**：add 后立即调 `POST /drag/onlDragDatasetHead/queryFieldByApi` 解析接口响应，再 `queryById` → 填 `datasetItemList` → `edit` 回写。`dataset_ops.py cmd_create_api` 已内置；自写脚本可复用公共 helper `_refresh_api_dataset_fields(ds_id, url, method)`。**该条覆盖"线 150 禁止 queryById+edit 回写"的旧描述**——实测 2026-04-23：不回写 datasetItemList 始终为空 |
+| **⚠️ 批量建 API 数据集推荐用 `dataset_ops.py create-api-batch`（并发回写字段）** | 10 个数据集：逐个调 create-api 串行耗时 ~7.3s；新增子命令并发（workers=10）~4.6s（本地代理环境下约 37% 提速）。用法：`py dataset_ops.py create-api-batch $API $TOKEN --batch-file items.json --out-file results.json --workers 10`。batch-file 每项：`{name, code, url, method?, fields, agent?}`。**/add 保持串行**（后端对 code 唯一性检查并发易撞），**只并发 queryFieldByApi + edit 回写**。瓶颈是本地代理对外网 HTTPS 的并发吞吐——无代理环境可接近 5× 提速 |
 | **⚠️ `datasource_ops.py create` 示例命令必须含 `--code`** | pitfalls.md 有记录但 SKILL.md 示例未展示，实际运行时必须提供。完整示例：`py datasource_ops.py create $API_BASE $TOKEN --name "名称" --code "唯一编码" --db-type MYSQL5.7 --host 127.0.0.1 --port 3306 --db dbname --user root --password root` |
+| **✅ 已修 · `bi_utils._request` 自动签名（2026-04-24）** | 新版大屏后端给 `queryFieldBySql / queryFileFieldBySql / queryAllById / getDictByCodes / getMapDataByCode / getDataForDesign / getTotalData / getTotalDataByCompId / generate*Sse / page/addVisitsNumber` 等接口加了 `@SignatureValidation`，无签名头直接 500 "签名验证失败:X-TIMESTAMP为空"。**已在 `bi_utils._request` 内置白名单 `_SIGNED_PATHS` + `_compute_signature_headers`**（签名算法见 `signing-datasource-guide.md`），命中路径自动附加 `X-TIMESTAMP / X-Sign / V-Sign`。现象：早前 `dataset_ops.py create-sql` 创建后"查询解析异常: 500"，现在正常输出 `查询解析成功: N 个字段`。调用方无需改动，已有 `_request` 调用全部自动受益。若后端后续再加 `@SignatureValidation` 接口，扩充 `_SIGNED_PATHS` 即可。 |
+| **✅ 已修 · `dataset_ops.py` 自动建组 parentId 兼容 dict 返回（2026-04-24）** | `/drag/onlDragDatasetHead/addGroup` 的 `result` 在当前版本是**整个分组对象**（含 id/name/code/parentId），老脚本直接 `gid = resp.get('result')` 再塞进后续 `/add` 的 `parentId` 字段，被 Jackson 拒绝："Cannot deserialize value of type String from Object value" (HTTP 400)。**已在 `_resolve_group_id` 兼容**：`if isinstance(gid, dict): gid = gid.get('id')`。现象：早前 `create-sql --group "新名"` 首次调用（分组不存在需新建）必失败；现在一次成功。已回归：`--parent-id` 显式传参分支不受影响。 |
 
 ## 文件数据集相关（singleFile / FILES）
 
@@ -212,8 +209,7 @@ bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=payload)
 | **添加组件必须用 comp_ops.py add** | comp_ops.py 在 cmd_add 中会先 `load_template` 再赋值 `_page_components`，安全保留已有组件。直接调 bi_utils 函数是危险操作 |
 | **新增组件不显示** | config 不完整或被背景图遮挡，将新组件 `insert(0, ...)` 到数组开头 |
 | **comp_ops.py add 渲染失败** | 缺少 `default_configs.json`，使用 add 时必须同时复制 |
-| **⚠️ 高级组件添加后无渲染（已修复）** | 胶囊图、列表进度图、圆形进度图、半圆仪表盘、日历、卡片轮播、统计概览、滚动列表等非 ECharts 组件，其 default_configs.json 中的 chartData/option 原先是 `__ref:` 占位符，`_clean_ref_values()` 将其替换为 None 导致数据丢失。**已修复**：所有 `__ref:` 已内联为实际 JSON 数据 |
-| **⚠️ 自定义脚本添加图表必须从 default_configs.json 加载默认 config** | 手写 option/series/legend 等配置容易遗漏字段导致渲染异常。正确做法：`json.loads(json.dumps(defaults['JPie']))` 深拷贝默认配置，再覆盖动态数据字段（dataType/dataSetId/dataMapping 等） |
+| **⚠️ 自定义脚本添加图表必须从 `defaults/CompType.json` 加载默认 config** | 手写 option/series/legend 等配置容易遗漏字段导致渲染异常。正确做法：`d = json.load(open('defaults/JPie.json'))` 读单文件（返回新 dict，无需 deepcopy），再覆盖 chartData/option 等字段 |
 | **JGroup 子组件存储位置** | 在 `comp.props.elements` 中 |
 | **JGroup 子组件缺少 groupStyle** | 必须按百分比计算 |
 | **联动必须设 linkType** | 必须同时设置 `linkType: 'comp'` 和 `linkageConfig` |
@@ -223,6 +219,11 @@ bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=payload)
 | **⚠️ 替换图表类型时共通配置未继承** | delete+add 替换图表类型时，仅继承数据集绑定字段（dataSetId/dataMapping 等）是不够的。用户在旧图表中定制的 `option` 字段（标题文字、坐标轴显隐、图例位置、配色等）也必须合并到新图表。使用 `merge_common_option()` 辅助函数，见下方「图表类型替换」章节 |
 | **⚠️ JBar 柱体颜色：`option.color[0]` 不生效，必须同时改 `series[0].itemStyle.color`** | ECharts 中 `series[0].itemStyle.color` 的优先级高于 `option.color` 数组。JBar 默认配置中 `itemStyle.color` 硬编码了蓝色（`#64b5f6`），仅设置 `option.color[0]` 无法覆盖柱体颜色。**正确做法**：必须同时设置两个字段：`--set "option.color[0]=目标色" --set "option.series[0].itemStyle.color=目标色"`（2026-04-09 实测） |
 | **⚠️ 以下组件颜色必须通过 `option.customColor` 设置，`option.color` 无效** | 组件列表：`JRadioButton / JRadialBar / JActiveRing / JRing / JPyramidFunnel / JFunnel / JBubble / DoubleLineBar / JMultipleLine / JArea / JLine / JRotatePie / JRose / JPie / JMixLineBar / JPercentBar / JMultipleBar / JCapsuleChart / JStackBar / JQuadrant`。**正确格式**：`option.customColor = [{"color1":"#FF0000","color":"#FF0000"},...]`（`color1` 与 `color` 值相同）。`option.color` 对这些组件无效。配色规范（含系统默认9色）见 skill.md「图表配色规范」章节 |
+| **⚠️ 散点家族（JBubble / JQuadrant）defaults.series 为空，禁止注入 `[{type:"bar"}]`** | JBubble / JQuadrant / JBarGroup3d / JDynamicBar / JGender / JMixLineBar / JNegativeBar / JPictorial / JPictorialBar / JStackBar / DoubleLineBar 等 11 个组件 defaults.option.series 为 `[]`，平台前端按 componentName 自行推断渲染（散点 / 多柱 / 堆叠等）。spec_builder 旧版 `_apply_series_shortcuts` 强制把 series 升级为 `[{type:'bar'}]`，导致 JBubble / JQuadrant 渲染成柱形而非散点。**正确策略**：defaults.series 为空且用户未显式给 series 级覆盖（barWidth/smooth/gradient/color）时直接 return，让平台自治；用户给了 color 时按 comp_type 选 chart_type（scatter 家族 → `'scatter'` 而非 `'bar'`）。已在 spec_builder.handle_cartesian + _apply_series_shortcuts 修复 |
+| **⚠️ JScatter / JBubble 默认 xAxis.splitLine.show 缺失，会被 ECharts 默认 `show=true` 渲染纵向网格** | JBubble / JScatter defaults.xAxis 不含 splitLine 配置（仅 axisLabel.color），但 ECharts 对 `value` 类型轴的 splitLine 默认 show=true，导致散点图出现密集纵向网格线，与平台拖拽渲染不一致。JQuadrant defaults 已显式 `splitLine:{show:false}` 不受影响。**修复**：spec_builder.handle_cartesian 末尾对 `comp_type in ('JScatter','JBubble')` 注入 `xAxis.splitLine.show=False`（用 setdefault，不覆盖用户显式配置） |
+| **⚠️ JScrollRankingBoard：rowNum = data_count → 永远不滚动（实测 2026-04-28）** | 组件将容器等分为 rowNum 行渲染，`data_count > rowNum` 才触发轮播。若两者相等（如数据10条、rowNum=10），所有行一次展示完毕、没有剩余行可滚。**rowNum 推荐公式**：`rowNum = floor(h / 40)`（每行约 40-50px 视觉舒适）— 实测 h=195 → rowNum=4，h=300 → rowNum=7。**数据条数**建议 ≥ rowNum + 3，确保滚动明显。写 spec 时"默认 rowNum=10"与"数据也给了10条"是最常见的不滚陷阱 |
+| **⚠️ JRingProgress / JLiquid 等单值组件 `option.color` 必须是 string，写 array 直接 fallback 默认色** | 这些组件是自定义渲染（不是 ECharts），渲染器把 `option.color` 当颜色值读，期望 `"#RRGGBB"`。但色板逻辑（style_ops set-palette / spec_builder palette）按 ECharts 习惯写 `option.color = [c1,c2,...]` 数组，导致这些组件颜色失效（前端 silent fallback 到深色 / 默认色，没有报错）。判断依据：`defaults/<Type>.json` 中 `option.color` 默认就是 string。**修复**：style_ops.STRING_COLOR_TYPES 集合 + 写入前类型分支（spec_builder._apply_named_palette / cmd_set_palette 已修），新增此类组件直接加进集合即可 |
+| **⚠️ JLiquid 水波纹不显示 / 渲染异常 — config.w/h 与外层 comp.w/h 不一致** | defaults/<Type>.json 顶层有 `w/h`（JLiquid 默认 450×300），bi_utils.add_component 通过 `_deep_merge` 把它们合到 config 里，但外层 comp.w/h 用的是用户 spec 给的尺寸（如 560×440）。多数组件不读 config.w/h 不影响，但 **JLiquid 渲染器用 config.w/h 算水波动画路径**（length=128, count=4 等是基于 config 内尺寸的相对值），内外不一致时水纹画在视野外、肉眼看不到。**修复**：bi_utils.add_component 末尾强制 `default_config['w'] = px_w / 'h' = px_h / 'size' = {width:px_w, height:px_h}`，确保 config 内层尺寸始终等于外层 |
 
 ### 图表类型替换（更换图表种类时保留共通配置）
 
@@ -366,13 +367,15 @@ line_cfg['option'] = merge_common_option(old_opt, new_opt)
 **关键规则（强制）：**
 - 返回类型必须是 `String`，直接返回裸 JSON 数组字符串
 - **严禁包装格式**（不要 `{"code":200,"result":[...]}`，API 数据集无法配置 data-path）
-- 必须加 `@JimuNoLoginRequired` 注解，否则大屏预览时被鉴权拦截 401
+- 必须免鉴权，否则大屏预览时被拦截 401。**免鉴权方式因项目而异**：
+  - **有 `@JimuNoLoginRequired`（积木平台自带控制器）**：加该注解
+  - **普通 JeecgBoot 项目（无 `@JimuNoLoginRequired`）**：加 `@IgnoreAuth`（`org.jeecg.config.shiro.IgnoreAuth`），该注解通过 `InMemoryIgnoreAuth` 被 `JwtFilter` 识别放行；同时在 `ShiroConfig.filterChainDefinitionMap` 加 anon 条目（双保险）。**不要只加 anon 不加 @IgnoreAuth**——JwtFilter 走自己的白名单，不读 filterChainDefinitionMap
 - 写完接口后**必须重启后端**，API 数据集才能拿到数据
 
 **单系列模板**（适用：折线图/柱形图/饼图/面积图等）：
 ```java
 // 数据字段：name=维度, value=数值
-@JimuNoLoginRequired
+@IgnoreAuth  // JeecgBoot 普通项目用这个；有 @JimuNoLoginRequired 的平台控制器用那个
 @RequestMapping(value = "/xxxFlow", method = RequestMethod.GET)
 public String getXxxFlow() {
     return "[{\"name\":\"1月\",\"value\":1280},{\"name\":\"2月\",\"value\":1050},...{\"name\":\"12月\",\"value\":3120}]";
@@ -581,17 +584,6 @@ print("="*60)
 | **desJson 是 JSON 字符串** | 修改前 `json.loads()`，修改后 `json.dumps()` |
 | **水印在 desJson.waterMark 中** | 不是页面顶层字段 |
 | **数据集绑定必须设 dataSetName** | 缺少导致设计器中数据集下拉框显示为空 |
-
-## 地图相关
-
-| 问题 | 说明 |
-|------|------|
-| **地图空白** | 后端没有对应 adcode 的地图数据 |
-| **addMapData 的 name 格式** | 存储 adcode（`"650000"`），不是中文名 |
-| **china 地图不走后端** | 前端内置，不需要上传 |
-| **area.value 是数组** | `["650000"]`，取最后一个元素 |
-| **🚨 地图组件 config 禁止手工构造，必须从 default_configs.json 深拷贝（2026-04-10 严重事故）** | 手工构造 option/commonOption/dataMapping 会导致所有地图组件全部报错不渲染。根本原因：地图组件的 option 结构（geo/area/visualMap/series/timeline 等字段）和 commonOption（barSize/barColor/areaColor/inRange/breadcrumb/heat 等字段）极为复杂，各组件差异大，手写必然遗漏或填错字段。**强制做法：** `cfg = copy.deepcopy(defaults['JAreaMap']); cfg.pop('w',None); cfg.pop('h',None); cfg['chartData'] = json.dumps(data, ensure_ascii=False)` — 只替换 chartData 和标题文字，其余全部保持默认值不动。 |
-| **🚨 地图 chartData 格式各不相同，禁止跨组件套用（2026-04-10 严重事故）** | 每种地图组件的 chartData 格式完全不同，混用导致全部渲染失败。各组件正确格式如下：<br>• **JAreaMap / JBubbleMap / JBarMap**：`[{"name":"省名","value":数字}]` — 只有 name+value，系统内置地理坐标库自动匹配<br>• **JHeatMap**：`[{"name":"城市名","value":数字}]` — 同上，只需 name+value<br>• **JFlyLineMap**：`[{"fromName":"城市","toName":"城市","fromLng":数字,"fromLat":数字,"toLng":数字,"toLat":数字,"value":数字}]` — 必须用 `fromLng/fromLat/toLng/toLat` 四个独立字段，**禁止用 `coords:[[lng,lat],[lng,lat]]` 数组格式**<br>• **JTotalFlyLineMap**：同 JFlyLineMap 格式 + `"group":"分组名"` 字段（**禁止用 `type` 替代 `group`**）<br>• **JTotalBarMap**：`[{"name":"地区","lng":数字,"lat":数字,"value":数字,"group":"分类"}]` — 必须用 `lng/lat` 独立字段（**禁止用 `coords:[lng,lat]` 数组**），分组用 `group`（**禁止用 `type`**） |
 
 ## 完整工作流：YApi Mock 系统创建 API 数据集（标准流程）
 
@@ -1033,57 +1025,6 @@ def get_fields(comp_type, NAME_FIELD, VALUE_FIELD):
 
 ---
 
-## ⚠️ comp_ops.py delete 报成功但实际未删除（已修复 2026-04-08）
-
-**现象**：`comp_ops.py delete --name "XXX"` 输出"删除成功"，但刷新大屏后组件仍存在。
-
-**根因（已定位）**：`bi_utils.save_page` 第 303 行的 `if not components:` 是罪魁祸首：删除所有组件后 `_page_components[page_id] = []`，而 `if not []:` 为 True，导致 `save_page` 从服务端重新拉取旧模板并覆盖，等效于删除从未发生。（次要问题：save_page 内部额外调一次 `query_page` 增加延迟；payload 未含 `desJson` 可能导致页面宽高丢失。）
-
-**已修复**（`bi_utils.py`，2026-04-08）：
-- `if not components:` → `if page_id not in _page_components:`（区分"主动清空"与"未设置"）
-- 移除 `save_page` 内部的多余 `query_page` 调用，节省 1 次 API 往返
-- `query_page` 同步缓存 `desJson`；`save_page` payload 新增 `desJson` 字段回传
-
-**当前版本 `comp_ops.py delete/edit/move` 均可直接使用，无需自定义脚本。**
-
-历史应急方案（升级后不再需要，留档备查）：删除组件时用自定义脚本，一次 `queryById` 取到最新 `updateCount`，直接调 `edit` 保存：
-
-```python
-import json
-import bi_utils
-
-bi_utils.API_BASE = 'http://...'
-bi_utils.TOKEN = '...'
-PAGE_ID = '...'
-
-# 1. 一次性获取完整页面实体（含 updateCount）
-raw = bi_utils._request('GET', '/drag/page/queryById', params={'id': PAGE_ID})
-page_entity = (raw.get('result') or {})
-update_count = page_entity.get('updateCount', 1)
-
-# 2. 解析 template
-tmpl_raw = page_entity.get('template') or '[]'
-tmpl = json.loads(tmpl_raw) if isinstance(tmpl_raw, str) else (tmpl_raw or [])
-
-# 3. 按 componentName 删除
-target_name = '目标组件名'
-tmpl = [c for c in tmpl if c.get('componentName') != target_name]
-
-# 4. 直接调 edit 保存（使用同一次 queryById 拿到的 updateCount，无二次请求）
-payload = {
-    'id': PAGE_ID,
-    'name': page_entity.get('name', ''),
-    'template': json.dumps(tmpl, ensure_ascii=False),
-    'updateCount': update_count,
-    'style': page_entity.get('style', 'bigScreen'),
-    'theme': page_entity.get('theme', 'dark'),
-    'backgroundImage': page_entity.get('backgroundImage', ''),
-    'designType': page_entity.get('designType', 100),
-    'desJson': page_entity.get('desJson', ''),
-}
-bi_utils._request('POST', '/drag/page/edit', data=payload)
-```
-
 ## 自定义脚本文件写入踩坑（2026-04-09 新增）
 
 > 当需要在工作流中动态写入 Python 脚本文件时，常见以下问题。
@@ -1139,6 +1080,7 @@ bi_utils._request('POST', '/drag/page/edit', data=payload)
 | **⚠️ JFunnel（基础漏斗图）** | 错误地使用 yAxis/xAxis 的通用 base_option → 渲染完全异常，漏斗消失 | 必须使用漏斗专属 option：`reversal`/`legend`/funnel `series`（含 `type:'funnel'`, `sort:'descending'`, `label`, `labelLine`, `itemStyle`, `emphasis`），`tooltip.trigger='item'`，`formatter='{a} <br/>{b} : {c}%'`。**绝对不能有 yAxis/xAxis** |
 | **⚠️ JPyramidFunnel（金字塔漏斗图）** | 同 JFunnel，错误注入 yAxis/xAxis | 同上，但 `series[0].sort='ascending'`（从小到大，呈金字塔形） |
 | **⚠️ JRing（基础环形图）** | `option.series:[]`（空数组）→ ECharts 无法识别环形图，渲染空白 | series 必须预填充完整环形配置：`[{type:'pie', radius:['40%','70%'], avoidLabelOverlap:False, label:{show:False, position:'center'}, labelLine:{show:False}, emphasis:{label:{show:True, fontSize:14, fontWeight:'bold'}}, data:[]}]`，**不能留空 []** |
+| **⚠️ JRing 环形图尺寸：`outRadius`/`innerRadius` 像素值优先于 `series[0].radius` 百分比** | 通过 API 修改 `series[0].radius`（如 `["28%","48%"]`）对已渲染页面无效——Vue 组件优先读 `option.outRadius`/`option.innerRadius`（像素整数）；一旦 UI 交互过，这两个字段会被写入并永久覆盖百分比路径 | **通过 API 调整 JRing 大小必须用像素字段**：`option.outRadius`（外径像素）/ `option.innerRadius`（内径像素）。defaults JSON 只记录初始百分比，不记录这两个运行时字段——无法从 `--schema --full` 发现。**诊断方法**：UI 改一次尺寸后 query_page，看 `outRadius`/`innerRadius` 实际值，再用脚本对应修改这两个字段。（实测 2026-04-28） |
 | **⚠️ DoubleLineBar（双轴图）** | ①`nameFields:[]`（维度字段缺失）→ X 轴无法渲染；②缺少 `seriesType` 字段 → 系列类型无法识别 | nameFields 必须含维度字段（name/category 类字段）；必须设置 `seriesType:[]`（即使为空数组，不能完全缺失字段）；assistYFields 必须与 valueFields 相同；assistTypeFields 必须与 typeFields 相同 |
 
 ### DoubleLineBar Online 表单完整字段结构
@@ -1366,4 +1308,55 @@ ds['datasetItemList'] = [
     {'fieldName': 'value', 'fieldTxt': '数量', 'fieldType': 'Integer', 'izShow': 'Y', 'orderNum': 1},
 ]
 bi_utils._request('POST', '/drag/onlDragDatasetHead/edit', data=ds)
+```
+
+---
+
+## 🚨 JRing 不显示：缺少 `series[0].type:"pie"`（实测 2026-04-28）
+
+### 问题描述
+
+用 spec_builder 生成的 JRing（环形图）完全不渲染，UI 手动拖入的 JRing 正常显示。
+
+### 根因
+
+**直接原因**：`option.series[0].type:"pie"` 缺失。ECharts 靠 `type` 判断图表类型，没有 `type` 时什么都不渲染。
+
+UI 拖入的组件默认 JSON 里带 `series[0].type:"pie"`；spec_builder 早期生成的没有 → 渲染失败。
+
+**次要发现（理解 ring.vue 行为，非 bug）**：
+
+ring.vue 在初始化时会**硬覆盖** ECharts 的 series 属性：
+```js
+// ring.vue line 98 — 从 option.grid.left/top 计算中心（百分比）
+chartOption.series[0].center = [(option?.grid?.left || 50) + '%', (option?.grid?.top || 50) + '%']
+// ring.vue line 102 — 从 option.outRadius/innerRadius 计算半径（像素值）
+chartOption.series[0].radius = [option?.innerRadius || 60, option?.outRadius || 100]
+```
+
+因此：
+- `series[0].radius/center` 写百分比无效，实际由 `option.outRadius`/`option.innerRadius`（px）和 `option.grid.left/top`（数字视为百分比）控制
+- 默认 `outRadius=100` 在矮容器（h≤200）中会撑满容器，被 title 覆盖显得"消失"
+
+### spec_builder 已内置的规则（fix 2026-04-28）
+
+短容器 h<260：
+- `series[0].type = "pie"`（必须）
+- `outRadius = max(20, int(h*0.55)-37)`，`innerRadius = outRadius*0.55`
+- `grid.left = 38`（图例右置时环心左移），`grid.top = 50`
+- `legend.orient = "vertical"`，`legend.right = "2%"`
+
+正常容器 h≥260：
+- `series[0].type = "pie"`（必须）
+- `outRadius = max(30, int(h*0.35))`，`innerRadius = outRadius*0.6`
+- `grid.left = 50`，`grid.top = 46`
+
+### 手动修复已有组件
+
+```python
+opt['series'] = [{"type": "pie", "label": {"show": False}, "labelLine": {"show": False}}]
+opt['outRadius'] = 73    # max(20, int(h*0.55)-37)，h=200 时
+opt['innerRadius'] = 40  # max(10, int(73*0.55))
+opt['legend'] = {"orient": "vertical", "right": "2%", "top": "middle", "left": "auto"}
+opt.setdefault('grid', {}).update({'left': 38, 'top': 50})
 ```

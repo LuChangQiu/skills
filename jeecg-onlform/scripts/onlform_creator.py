@@ -71,7 +71,7 @@ def resolve_head_id(api_base, token, edit_config):
         result = api_request(api_base, token,
                              f'/online/cgform/head/list?copyType=0&pageNo=1&pageSize=1&id={head_id}',
                              method='GET')
-        records = result.get('result', {}).get('records', [])
+        records = (result.get('result') or {}).get('records', [])
         if not records:
             # fallback: queryById
             qr = api_request(api_base, token, f'/online/cgform/head/queryById?id={head_id}', method='GET')
@@ -81,7 +81,7 @@ def resolve_head_id(api_base, token, edit_config):
         result = api_request(api_base, token,
                              f'/online/cgform/head/list?tableName={table_name}&copyType=0&pageNo=1&pageSize=1',
                              method='GET')
-        records = result.get('result', {}).get('records', [])
+        records = (result.get('result') or {}).get('records', [])
         if not records:
             print(f'错误: 表 {table_name} 不存在')
             sys.exit(1)
@@ -142,13 +142,13 @@ def _query_fields(api_base, token, head_id):
         r = api_request(api_base, token,
                         f'/online/cgform/field/list?headId={head_id}&pageNo={page}&pageSize=500',
                         method='GET')
-        records = r.get('result', {}).get('records', [])
+        records = (r.get('result') or {}).get('records', [])
         if not records:
             break
         for f in records:
             if f.get('cgformHeadId') == head_id:
                 all_fields.append(f)
-        total = r.get('result', {}).get('total', 0)
+        total = (r.get('result') or {}).get('total', 0)
         if page * 500 >= total:
             break
         page += 1
@@ -535,7 +535,20 @@ def edit_table(api_base, token, edit_config):
     print(f'编辑表单: headId={head_id}')
     print(f'{"=" * 50}')
 
-    # Step 2: 查询完整配置（getByHead → fallback 链，复用 head_record 减少请求）
+    # Step 2a: 处理 headFields（直接用 /online/cgform/head/edit，无需查 fields）
+    head_field_updates = edit_config.get('headFields', {})
+    if head_field_updates:
+        head = head_record or {}
+        for k, v in head_field_updates.items():
+            head[k] = v
+            print(f'  修改head字段: {k} = {v}')
+        result = api_request(api_base, token, '/online/cgform/head/edit', head, method='PUT')
+        print(f'head修改结果: success={result.get("success")}, message={result.get("message")}')
+        # 若无字段变更，直接返回
+        if not edit_config.get('addFields') and not edit_config.get('deleteFields') and not edit_config.get('modifyFields'):
+            return head_id
+
+    # Step 2b: 查询完整配置（getByHead → fallback 链，复用 head_record 减少请求）
     head, fields, indexs = get_head_and_fields(api_base, token, head_id, head_record)
     if not fields:
         print('错误: 无法获取现有字段列表')
@@ -599,6 +612,74 @@ def edit_table(api_base, token, edit_config):
     return head_id
 
 
+def _addall_table(api_base, token, table_config):
+    """执行 addAll 创建表，返回 (table_name, success)，不查 headId、不同步。"""
+    table_name = table_config['tableName']
+    print(f'\n{"=" * 50}')
+    print(f'创建表: {table_name} ({table_config.get("tableTxt", "")})')
+    print(f'{"=" * 50}')
+
+    fields = build_fields_from_config(table_config.get('fields', []))
+
+    if table_config.get('tableType') == 3:
+        main_table = table_config.get('mainTable', '')
+        main_field = table_config.get('mainField', 'id')
+        if main_table:
+            has_fk = any(f.get('mainTable') == main_table for f in table_config.get('fields', []))
+            if not has_fk:
+                fk_name = f'{main_table}_id'
+                fk = make_field(order=1, db_name=fk_name, db_txt='主表ID',
+                                show_type='text', db_type='string', db_length=36,
+                                is_show_form='0', is_show_list='0',
+                                main_table=main_table, main_field=main_field)
+                fields.insert(0, fk)
+                print(f'  [自动] 注入外键字段 {fk_name}（主表={main_table}, 主字段={main_field}）')
+
+    if table_config.get('bpmForm', False):
+        fields.append({
+            "dbFieldName": "bpm_status", "dbFieldTxt": "流程状态",
+            "fieldShowType": "list", "dbType": "string", "dbLength": 32,
+            "fieldMustInput": "0", "isQuery": "0",
+            "isShowForm": "0", "isShowList": "1", "dictField": "bpm_status"
+        })
+        print('  [自动] 添加 bpm_status 字段（流程状态）')
+
+    head = build_head(table_config)
+    indexs = build_indexs(table_config.get('indexs'))
+    form_data = {"head": head, "fields": fields, "indexs": indexs,
+                 "deleteFieldIds": [], "deleteIndexIds": []}
+
+    result = api_request(api_base, token, '/online/cgform/api/addAll', form_data)
+    ok = result.get('success', False)
+    print(f'创建结果: success={ok}, message={result.get("message")}')
+    return table_name, ok
+
+
+def _get_head_id_task(args):
+    """并行任务：查询单个表的 headId，返回 (table_name, head_id)。"""
+    api_base, token, table_name = args
+    r = api_request(api_base, token,
+                    f'/online/cgform/head/list?tableName={table_name}&copyType=0&pageNo=1&pageSize=1',
+                    method='GET')
+    records = (r.get('result') or {}).get('records', [])
+    hid = records[0]['id'] if records else None
+    if hid:
+        print(f'  headId({table_name}): {hid}')
+    else:
+        print(f'  headId({table_name}): 查询失败')
+    return table_name, hid
+
+
+def _sync_task(args):
+    """并行任务：同步单个表到数据库，返回 (table_name, success)。"""
+    api_base, token, table_name, head_id = args
+    sync = api_request(api_base, token,
+                       f'/online/cgform/api/doDbSynch/{head_id}/normal', method='POST')
+    ok = sync.get('success', False)
+    print(f'  同步({table_name}): success={ok}, message={sync.get("message")}')
+    return table_name, ok
+
+
 def print_menu_sql(head_id, table_txt):
     """输出菜单SQL"""
     menu_id = head_id.replace('-', '')[:32]
@@ -623,17 +704,56 @@ def main():
     action = config.get('action', 'create')
 
     if action == 'create':
-        # 创建表单（支持单表、主子表、树表）
+        # 创建表单（支持单表、主子表、树表）—— 并行优化版
         tables = config.get('tables', [])
         if not tables:
             print('错误: 配置文件中没有 tables 定义')
             sys.exit(1)
 
+        # 分组：非子表（主表/单表）必须先创建，子表可并行
+        non_sub = [t for t in tables if t.get('tableType') != 3]
+        sub_only = [t for t in tables if t.get('tableType') == 3]
+
+        created_names = []
+
+        # Step 1: 顺序创建主表/单表（子表依赖主表已写入 onl_cgform_head）
+        for t in non_sub:
+            name, ok = _addall_table(args.api_base, args.token, t)
+            if ok:
+                created_names.append(name)
+
+        # Step 2: 并行创建子表
+        if sub_only:
+            print(f'\n[并行] 创建 {len(sub_only)} 个子表...')
+            with ThreadPoolExecutor(max_workers=min(4, len(sub_only))) as pool:
+                futures = [pool.submit(_addall_table, args.api_base, args.token, t)
+                           for t in sub_only]
+                for fut in as_completed(futures):
+                    name, ok = fut.result()
+                    if ok:
+                        created_names.append(name)
+
+        if not created_names:
+            print('没有表创建成功，退出。')
+            sys.exit(1)
+
+        # Step 3: 并行查询所有 headId
+        print(f'\n[并行] 查询 {len(created_names)} 个表的 headId...')
         head_ids = {}
-        for table_config in tables:
-            head_id = create_table(args.api_base, args.token, table_config)
-            if head_id:
-                head_ids[table_config['tableName']] = head_id
+        with ThreadPoolExecutor(max_workers=min(8, len(created_names))) as pool:
+            for name, hid in pool.map(
+                    _get_head_id_task,
+                    [(args.api_base, args.token, n) for n in created_names]):
+                if hid:
+                    head_ids[name] = hid
+
+        # Step 4: 并行同步数据库
+        print(f'\n[并行] 同步 {len(head_ids)} 个表到数据库...')
+        with ThreadPoolExecutor(max_workers=min(8, len(head_ids))) as pool:
+            list(pool.map(
+                _sync_task,
+                [(args.api_base, args.token, name, hid)
+                 for name, hid in head_ids.items()]))
 
         # 输出汇总
         print(f'\n{"=" * 50}')
@@ -642,11 +762,11 @@ def main():
         for tname, hid in head_ids.items():
             print(f'  {tname} -> headId: {hid}')
 
-        # 为主表输出菜单SQL
-        main_table = tables[0]
-        main_head_id = head_ids.get(main_table['tableName'])
+        # 为主表（tables[0]）输出菜单SQL
+        first_name = tables[0]['tableName']
+        main_head_id = head_ids.get(first_name)
         if main_head_id:
-            print_menu_sql(main_head_id, main_table['tableTxt'])
+            print_menu_sql(main_head_id, tables[0]['tableTxt'])
 
     elif action == 'edit':
         head_id = edit_table(args.api_base, args.token, config)

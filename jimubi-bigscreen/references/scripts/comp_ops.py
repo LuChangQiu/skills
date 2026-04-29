@@ -8,10 +8,15 @@
   # 查看页面所有组件
   py comp_ops.py list <API_BASE> <TOKEN> <PAGE_ID>
 
-  # 删除组件（按名称或类型）
+  # 删除组件（按名称或类型，单值）
   py comp_ops.py delete <API_BASE> <TOKEN> <PAGE_ID> --name "组件名"
   py comp_ops.py delete <API_BASE> <TOKEN> <PAGE_ID> --type "JAreaMap"
   py comp_ops.py delete <API_BASE> <TOKEN> <PAGE_ID> --id "组件i值"
+
+  # 批量删除（逗号分隔，一次 query+save；替代多次 --type 串行）
+  py comp_ops.py delete <API_BASE> <TOKEN> <PAGE_ID> --types "JPie,JRing,JAntvGauge"
+  py comp_ops.py delete <API_BASE> <TOKEN> <PAGE_ID> --names "饼图1,柱图2"
+  py comp_ops.py delete <API_BASE> <TOKEN> <PAGE_ID> --ids "id1,id2,id3"
 
   # 编辑组件属性（JSON path 赋值）
   py comp_ops.py edit <API_BASE> <TOKEN> <PAGE_ID> --name "基础柱形图" --set "option.series[0].itemStyle.color=#FFD700"
@@ -298,6 +303,12 @@ def cmd_edit(args):
                     print(f'无效的 --set 参数（需要 key=value 格式）: {s}')
                     continue
                 path, value = s.split('=', 1)
+                # 防呆：用户若误写 "config.xxx" 前缀，自动剥离并提示
+                # （--set 路径默认从 config 起算，加 config. 会落到 config.config.xxx）
+                if path.startswith('config.'):
+                    stripped = path[len('config.'):]
+                    print(f'  [提示] --set 路径自动从 config 起算，已剥离前缀: {path} -> {stripped}')
+                    path = stripped
                 if path in TOP_LEVEL_FIELDS:
                     target[path] = value
                     print(f'  设置 {target.get("componentName","")}: {path} = {value}')
@@ -314,11 +325,27 @@ def cmd_edit(args):
     print(f'共编辑 {edited} 个组件')
 
 
-def _load_default_configs():
-    """从 default_configs.json 加载组件默认配置"""
+def _load_default_configs(comp_key=None):
+    """
+    加载组件默认配置。
+    - 传入 comp_key：优先从 defaults/ 目录按需加载单个组件文件（快），
+      找不到时回退到完整 default_configs.json。
+    - 不传 comp_key：加载完整 default_configs.json（兼容旧调用）。
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    if comp_key:
+        # 按需加载：只读一个组件文件
+        fname = comp_key.replace('/', '_').replace(' ', '_') + '.json'
+        defaults_dir = os.path.join(script_dir, 'defaults')
+        single_path = os.path.join(defaults_dir, fname)
+        if os.path.exists(single_path):
+            with open(single_path, 'r', encoding='utf-8') as f:
+                return {comp_key: json.load(f)}
+        # 找不到单文件时回退到完整文件
     candidates = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'default_configs.json'),
-        os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts', 'default_configs.json')),
+        os.path.join(script_dir, 'default_configs.json'),
+        os.path.normpath(os.path.join(script_dir, '..', 'scripts', 'default_configs.json')),
     ]
     for p in candidates:
         if os.path.exists(p):
@@ -353,26 +380,9 @@ def _deep_merge_config(base, override):
     return result
 
 
-def _query_dataset_by_name(name):
-    """按名称查询数据集，返回第一条匹配记录或 None"""
-    resp = bi_utils._request('GET', '/drag/onlDragDatasetHead/list',
-                             params={'pageNo': 1, 'pageSize': 10, 'name': name})
-    records = resp.get('result', {}).get('records', [])
-    for r in records:
-        if r.get('name', '') == name:
-            return r
-    return records[0] if records else None
-
-
-def _fetch_dataset_detail(dataset_id):
-    """获取数据集完整详情（含字段列表）"""
-    resp = bi_utils._request('GET', '/drag/onlDragDatasetHead/list',
-                             params={'pageNo': 1, 'pageSize': 10, 'id': dataset_id})
-    records = resp.get('result', {}).get('records', [])
-    for r in records:
-        if r.get('id') == dataset_id:
-            return r
-    return records[0] if records else None
+# 数据集查询委托给 bi_utils，避免多个脚本重复实现
+_query_dataset_by_name = bi_utils.find_dataset_by_name
+_fetch_dataset_detail = bi_utils.fetch_dataset_detail
 
 
 def _build_dataset_config(ds, base_data_mapping=None):
@@ -646,8 +656,8 @@ def cmd_add(args):
     tmpl = load_template(args.page_id)
     bi_utils._page_components[args.page_id] = tmpl
 
-    # 1. 加载 data.ts 默认配置作为基础
-    all_defaults = _load_default_configs()
+    # 1. 按需加载目标组件的默认配置（只读一个文件，比加载全量快）
+    all_defaults = _load_default_configs(comp_key=args.comp)
     base_config = all_defaults.get(args.comp, {})
     base_config = _clean_ref_values(base_config) or {}
     if base_config:
@@ -814,13 +824,32 @@ def cmd_move(args):
     print(f'共移动 {moved} 个组件')
 
 
+def _split_csv(val):
+    """逗号分隔字符串 → 去空白的非空元素集合"""
+    if not val:
+        return set()
+    return {x.strip() for x in val.split(',') if x.strip()}
+
+
 def _match_comp(comp, args):
-    """检查组件是否匹配筛选条件"""
+    """检查组件是否匹配筛选条件。
+
+    单值 (--id/--name/--type) 与批量 (--ids/--names/--types) 共存，
+    匹配任一条件即视为命中（OR 逻辑）。
+    """
+    # 单值匹配（向后兼容）
     if hasattr(args, 'id') and args.id and comp.get('i') == args.id:
         return True
     if hasattr(args, 'name') and args.name and comp.get('componentName', '') == args.name:
         return True
     if hasattr(args, 'type') and args.type and comp.get('component') == args.type:
+        return True
+    # 批量匹配
+    if hasattr(args, 'ids') and args.ids and comp.get('i') in _split_csv(args.ids):
+        return True
+    if hasattr(args, 'names') and args.names and comp.get('componentName', '') in _split_csv(args.names):
+        return True
+    if hasattr(args, 'types') and args.types and comp.get('component') in _split_csv(args.types):
         return True
     return False
 
@@ -839,9 +868,12 @@ def main():
         sub.add_argument('page_id', help='页面 ID')
 
     def add_filter(sub):
-        sub.add_argument('--name', help='按组件名称匹配')
-        sub.add_argument('--type', help='按组件类型匹配（如 JBar）')
-        sub.add_argument('--id', help='按组件 ID 匹配')
+        sub.add_argument('--name', help='按组件名称匹配（单值）')
+        sub.add_argument('--type', help='按组件类型匹配（单值，如 JBar）')
+        sub.add_argument('--id', help='按组件 ID 匹配（单值）')
+        sub.add_argument('--names', help='按组件名称批量匹配（逗号分隔，如 "饼图1,柱图2"）')
+        sub.add_argument('--types', help='按组件类型批量匹配（逗号分隔，如 "JPie,JRing,JAntvGauge"）')
+        sub.add_argument('--ids', help='按组件 ID 批量匹配（逗号分隔）')
 
     # list
     p_list = subparsers.add_parser('list', help='列出所有组件')
@@ -857,7 +889,9 @@ def main():
     add_common(p_edit)
     add_filter(p_edit)
     p_edit.add_argument('--set', action='append', required=True,
-                        help='设置属性，格式: path=value（可多次使用）')
+                        help='设置属性，格式: path=value（可多次使用）。⚠️ path 自动从 config 起算，'
+                             '写 dataType=2 / option.field.dateField=cal_day，禁止加 config. 前缀'
+                             '（误加会自动剥离并提示）。x/y/w/h/componentName 等组件顶层字段除外。')
 
     # add
     p_add = subparsers.add_parser('add', help='添加组件')

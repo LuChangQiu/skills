@@ -58,7 +58,7 @@ def _request(path, data=None, method=None):
 
 
 # ── 登录 ──────────────────────────────────────────────────────
-def init_yapi(email='jeecgdev@jeecg.org', password='123123@'):
+def init_yapi(email='', password=''):
     """登录 YApi，获取 Cookie 供后续请求使用"""
     global _cookie
     url = f'{_YAPI_BASE}/api/user/login'
@@ -177,7 +177,7 @@ def delete_mock(iface_id):
 
 def list_mocks():
     """列出项目下所有接口"""
-    r = _request(f'/api/interface/list?project_id={_PROJECT_ID}&page=1&limit=50', method='GET')
+    r = _request(f'/api/interface/list?project_id={_PROJECT_ID}&page=1&limit=200', method='GET')
     if r.get('errcode') != 0:
         raise RuntimeError(f'查询失败: {r.get("errmsg")}')
     items = r['data']['list']
@@ -185,6 +185,27 @@ def list_mocks():
     for item in items:
         print(f'  [{item["_id"]}] {item["title"]}  path={_BASEPATH}{item["path"]}')
     return items
+
+
+def set_advmock(iface_id: str, script: str, enable: bool = True):
+    """
+    启用高级 Mock 脚本（正确 API: /api/plugin/advmock/save）。
+
+    Args:
+        iface_id: 接口 ID（字符串）
+        script:   JavaScript mock 脚本，用 mockJson = {...} 赋值返回数据
+        enable:   True=启用，False=禁用
+    """
+    r = _request('/api/plugin/advmock/save', {
+        'project_id':   _PROJECT_ID,
+        'interface_id': str(iface_id),
+        'mock_script':  script,
+        'enable':       enable,
+    })
+    if r.get('errcode') != 0:
+        raise RuntimeError(f'高级 Mock 脚本写入失败: {r.get("errmsg")} | {r}')
+    print(f'✓ 高级 Mock 脚本已{"启用" if enable else "禁用"}，interface_id={iface_id}')
+    return r['data']
 
 
 def mock_url(path):

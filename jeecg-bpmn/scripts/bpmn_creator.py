@@ -60,7 +60,9 @@ SUBPROCESS_HQ_LISTENERS = '''    <bpmn2:extensionElements>
     </bpmn2:extensionElements>'''
 
 # 布局常量（垂直模式 — 条件分支/顺序审批）
-CENTER_X = 218
+# CENTER_X 需要足够大，使并行分支最左列不被设计器左侧工具栏遮挡。
+# 3 分支时 total_w≈460，leftmost x = CENTER_X - 230；4 分支 total_w≈640，leftmost x = CENTER_X - 320。
+CENTER_X = 400
 START_Y = 30
 VERTICAL_GAP = 40
 NODE_SIZES = {
@@ -900,37 +902,161 @@ def gen_sequence_flow(flow):
 
 # ====== 布局计算 ======
 
-def calc_layout(nodes):
-    """计算所有节点的位置"""
+def _get_node_size(node):
+    """获取节点的宽高（统一处理 subProcess 动态尺寸）。"""
+    ntype = node['type']
+    if ntype == 'subProcess':
+        sub_nodes_list = node.get('subNodes', [])
+        sub_w = max(660, len(sub_nodes_list) * 160 + 100)
+        return {'w': sub_w, 'h': 200}
+    return NODE_SIZES.get(ntype, {'w': 100, 'h': 60})
+
+
+def _make_pos(x, y, w, h, cx=None):
+    cx = cx if cx is not None else x + w / 2
+    return {
+        'x': x, 'y': y, 'w': w, 'h': h,
+        'cx': cx, 'cy': y + h / 2,
+        'bottom': y + h,
+    }
+
+
+def _detect_parallel_blocks(nodes, flows, node_map):
+    """检测并行/包容网关的并行块：split →[ 每条分支是一条链 ]→ join。
+
+    仅匹配简单对称模式：
+    - split: parallelGateway / inclusiveGateway，出度 >= 2
+    - 每条分支链由若干普通节点串联（无再次分叉）
+    - 所有分支最终汇入同一个 join gateway（parallelGateway / inclusiveGateway，入度 == split 的出度）
+    """
+    outgoing, incoming = {}, {}
+    for f in flows:
+        outgoing.setdefault(f['source'], []).append(f['target'])
+        incoming.setdefault(f['target'], []).append(f['source'])
+
+    blocks = {}
+    for nid, n in node_map.items():
+        if n['type'] not in ('parallelGateway', 'inclusiveGateway'):
+            continue
+        targets = outgoing.get(nid, [])
+        if len(targets) < 2:
+            continue
+
+        branches, joins = [], set()
+        for target in targets:
+            chain, cur, visited = [], target, set()
+            while cur in node_map and cur not in visited:
+                visited.add(cur)
+                ct = node_map[cur]['type']
+                if ct in ('parallelGateway', 'inclusiveGateway') and len(incoming.get(cur, [])) > 1:
+                    joins.add(cur)
+                    break
+                # 链中再次出现分叉则视为复杂结构，放弃识别
+                if len(outgoing.get(cur, [])) > 1:
+                    break
+                chain.append(cur)
+                nxt = outgoing.get(cur, [])
+                if not nxt:
+                    break
+                cur = nxt[0]
+            branches.append(chain)
+
+        if len(joins) != 1:
+            continue
+        join_id = next(iter(joins))
+        if len(incoming.get(join_id, [])) != len(targets):
+            continue
+        if not all(ch for ch in branches):
+            continue
+        blocks[nid] = {'join': join_id, 'branches': branches}
+    return blocks
+
+
+# 并行分支列间距（水平方向）
+PARALLEL_COL_GAP = 80
+
+
+def calc_layout(nodes, flows=None):
+    """计算所有节点的位置。
+
+    - 默认：节点按输入顺序垂直堆叠居中于 CENTER_X。
+    - 当识别到「并行/包容网关 split → 多条链 → 同一 join」的经典模式时，
+      将各条分支链在 split 下方**横向并排**，join 位于分支底部正下方。
+    """
     positions = {}
+    node_map = {n['id']: n for n in nodes}
+
+    parallel_blocks = _detect_parallel_blocks(nodes, flows, node_map) if flows else {}
+
+    # 属于并行块内部（分支链节点 + join）→ 不参与主线垂直推进
+    inner_ids = set()
+    join_ids = {blk['join'] for blk in parallel_blocks.values()}
+    for blk in parallel_blocks.values():
+        for chain in blk['branches']:
+            inner_ids.update(chain)
+
     y = START_Y
     for node in nodes:
-        ntype = node['type']
-        # 映射 gateway 类型
-        size_key = ntype
-        if ntype in ('exclusiveGateway', 'parallelGateway', 'inclusiveGateway'):
-            size_key = ntype
-        if ntype == 'subProcess':
-            # 动态计算扩展子流程尺寸：宽度按内部节点数，高度固定 200
-            sub_nodes_list = node.get('subNodes', [])
-            sub_w = max(660, len(sub_nodes_list) * 160 + 100)
-            sub_h = 200
-            size = {'w': sub_w, 'h': sub_h}
-        else:
-            size = NODE_SIZES.get(size_key, {'w': 100, 'h': 60})
+        nid = node['id']
+        if nid in positions:
+            continue
+        # 并行块内部节点会在 split 处批量分配位置
+        if nid in inner_ids or nid in join_ids:
+            continue
+
+        size = _get_node_size(node)
         x = CENTER_X - size['w'] / 2
-        pos_entry = {
-            'x': x, 'y': y,
-            'w': size['w'], 'h': size['h'],
-            'cx': CENTER_X,
-            'cy': y + size['h'] / 2,
-            'bottom': y + size['h'],
-        }
-        if ntype == 'subProcess':
-            pos_entry['_isSubProcess'] = True
-            pos_entry['_subNodes'] = node.get('subNodes', [])
-        positions[node['id']] = pos_entry
+        positions[nid] = _make_pos(x, y, size['w'], size['h'], cx=CENTER_X)
+        if node['type'] == 'subProcess':
+            positions[nid]['_isSubProcess'] = True
+            positions[nid]['_subNodes'] = node.get('subNodes', [])
+
+        if nid in parallel_blocks:
+            blk = parallel_blocks[nid]
+            branches = blk['branches']
+            join_id = blk['join']
+
+            # 每条分支列的宽度取本列最宽节点
+            col_widths = []
+            for chain in branches:
+                mw = 100
+                for cid in chain:
+                    mw = max(mw, _get_node_size(node_map[cid])['w'])
+                col_widths.append(mw)
+
+            total_w = sum(col_widths) + PARALLEL_COL_GAP * (len(branches) - 1)
+            start_x = CENTER_X - total_w / 2
+            branch_top_y = positions[nid]['bottom'] + VERTICAL_GAP
+
+            x_cursor = start_x
+            for i, chain in enumerate(branches):
+                col_cx = x_cursor + col_widths[i] / 2
+                cy = branch_top_y
+                for cid in chain:
+                    sc = _get_node_size(node_map[cid])
+                    positions[cid] = _make_pos(col_cx - sc['w'] / 2, cy, sc['w'], sc['h'], cx=col_cx)
+                    cy += sc['h'] + VERTICAL_GAP
+                x_cursor += col_widths[i] + PARALLEL_COL_GAP
+
+            # 放置 join：所有分支链底部之下，水平居中
+            join_node = node_map[join_id]
+            jsize = _get_node_size(join_node)
+            max_bottom = max(positions[cid]['bottom'] for chain in branches for cid in chain)
+            join_y = max_bottom + VERTICAL_GAP
+            positions[join_id] = _make_pos(CENTER_X - jsize['w'] / 2, join_y, jsize['w'], jsize['h'], cx=CENTER_X)
+
+            y = positions[join_id]['bottom'] + VERTICAL_GAP
+        else:
+            y += size['h'] + VERTICAL_GAP
+
+    # 兜底：如果有因特殊结构未分配位置的节点（不应发生），追加在底部
+    for node in nodes:
+        if node['id'] in positions:
+            continue
+        size = _get_node_size(node)
+        positions[node['id']] = _make_pos(CENTER_X - size['w'] / 2, y, size['w'], size['h'], cx=CENTER_X)
         y += size['h'] + VERTICAL_GAP
+
     return positions
 
 
@@ -1000,6 +1126,14 @@ def gen_edge_xml(flow, positions):
         lines.append(f'        <di:waypoint x="{src_pos["cx"] + 132}" y="{src_pos["cy"]}" />')
         lines.append(f'        <di:waypoint x="{src_pos["cx"] + 132}" y="{tgt_pos["cy"]}" />')
         lines.append(f'        <di:waypoint x="{tgt_pos["x"] + tgt_pos["w"]}" y="{tgt_pos["cy"]}" />')
+    elif abs(src_pos['cx'] - tgt_pos['cx']) > 5 and tgt_pos['y'] >= src_pos['bottom']:
+        # 源和目标有水平偏移且目标在源下方：走 L 形（水平分支）
+        # 源底部 → 水平折线 → 目标顶部
+        mid_y = src_pos['bottom'] + (tgt_pos['y'] - src_pos['bottom']) / 2
+        lines.append(f'        <di:waypoint x="{src_pos["cx"]}" y="{src_pos["bottom"]}" />')
+        lines.append(f'        <di:waypoint x="{src_pos["cx"]}" y="{mid_y}" />')
+        lines.append(f'        <di:waypoint x="{tgt_pos["cx"]}" y="{mid_y}" />')
+        lines.append(f'        <di:waypoint x="{tgt_pos["cx"]}" y="{tgt_pos["y"]}" />')
     else:
         # 直线连接：上节点底部 → 下节点顶部
         lines.append(f'        <di:waypoint x="{src_pos["cx"]}" y="{src_pos["bottom"]}" />')
@@ -1367,15 +1501,30 @@ def gen_edge_xml_manual_branch(flow, positions, config):
                 label_x = (src_right_x + tgt_left_x) / 2
                 label_y = src_cy - 17
         else:
-            # 后续分支：从源底部向下再向右（避免与第一条分支线重叠）
+            # 后续分支：避免与第一条分支线重叠
             src_cx = src_pos['cx']
+            src_top = src_pos['y']
             src_bottom = src_pos['bottom']
-            lines.append(f'        <di:waypoint x="{src_cx}" y="{src_bottom}" />')
-            lines.append(f'        <di:waypoint x="{src_cx}" y="{tgt_cy}" />')
-            lines.append(f'        <di:waypoint x="{tgt_left_x}" y="{tgt_cy}" />')
-            if has_label:
-                label_x = src_cx + 10
-                label_y = (src_bottom + tgt_cy) / 2 - 7
+            tgt_cx = tgt_pos['cx']
+            tgt_top = tgt_pos['y']
+            if tgt_cy <= src_cy:
+                # 目标与源在同一行或上方：从源顶部向上绕行
+                top_y = src_top - 80
+                lines.append(f'        <di:waypoint x="{src_cx}" y="{src_top}" />')
+                lines.append(f'        <di:waypoint x="{src_cx}" y="{top_y}" />')
+                lines.append(f'        <di:waypoint x="{tgt_cx}" y="{top_y}" />')
+                lines.append(f'        <di:waypoint x="{tgt_cx}" y="{tgt_top}" />')
+                if has_label:
+                    label_x = (src_cx + tgt_cx) / 2
+                    label_y = top_y - 17
+            else:
+                # 目标在下方：从源底部向下再向右
+                lines.append(f'        <di:waypoint x="{src_cx}" y="{src_bottom}" />')
+                lines.append(f'        <di:waypoint x="{src_cx}" y="{tgt_cy}" />')
+                lines.append(f'        <di:waypoint x="{tgt_left_x}" y="{tgt_cy}" />')
+                if has_label:
+                    label_x = src_cx + 10
+                    label_y = (src_bottom + tgt_cy) / 2 - 7
     elif flow['source'] in target_ids:
         # 单行布局：分支目标 → 结束
         branch_idx = target_ids.index(flow['source'])
@@ -1503,7 +1652,7 @@ def build_bpmn_xml(config):
     if is_manual_branch:
         positions = calc_layout_manual_branch(config)
     else:
-        positions = calc_layout(supported_nodes)
+        positions = calc_layout(supported_nodes, flows)
 
     # 生成图形 XML
     shape_xmls = []
@@ -2270,7 +2419,8 @@ def expand_config(config):
                 src_idx = node_ids.index(flow['source']) if flow['source'] in node_ids else -1
                 tgt_idx = node_ids.index(flow['target']) if flow['target'] in node_ids else -1
                 src_node = config['nodes'][src_idx] if src_idx >= 0 else None
-                if src_node and src_node['type'] in ('exclusiveGateway', 'parallelGateway', 'inclusiveGateway'):
+                # 仅排他网关需要"绕行"布局；并行/包容网关由水平分支布局 + L 形连线自动处理
+                if src_node and src_node['type'] == 'exclusiveGateway':
                     if tgt_idx >= 0 and tgt_idx != src_idx + 1:
                         flow['bypass'] = True
 

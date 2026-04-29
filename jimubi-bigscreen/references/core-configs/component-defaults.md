@@ -320,7 +320,9 @@ compConfig: {
 
 ---
 
-## 十一、装饰组件
+## 十一、UI 装饰类组件（菜单：图表 → 装饰 wrapper）
+
+> "装饰" 在源码菜单中是双层语义：wrapper（含边框/装饰条/图片/图标/图库）vs 子菜单（仅 JDragDecoration）。用户口语"装饰"默认按子菜单理解 = JDragDecoration × 12。详见 `bi-component-types.md` 第三节。
 
 ### JDragBorder（边框 1~13）
 - **尺寸**: w=450, h=300

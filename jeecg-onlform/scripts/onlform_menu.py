@@ -114,7 +114,7 @@ def get_online_form_info(api_base: str, token: str, table_name: str) -> dict:
     resp = api_request(api_base, token,
                        f'/online/cgform/head/list?tableName={table_name}&pageNo=1&pageSize=1',
                        method='GET')
-    records = resp.get('result', {}).get('records', [])
+    records = (resp.get('result') or {}).get('records', [])
     if not records:
         raise ValueError(f'未找到 Online 表: {table_name}')
     return records[0]
@@ -175,7 +175,7 @@ def get_role_by_code(api_base: str, token: str, role_code: str) -> Optional[dict
     resp = api_request(api_base, token,
                        f'/sys/role/list?roleCode={role_code}&pageNo=1&pageSize=50',
                        method='GET')
-    records = resp.get('result', {}).get('records', [])
+    records = (resp.get('result') or {}).get('records', [])
     for r in records:
         if r.get('roleCode') == role_code:
             return r

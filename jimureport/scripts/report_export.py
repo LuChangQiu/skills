@@ -4,6 +4,7 @@ report_export.py — 积木报表导出/分享/导入 合并工具
 
 用法：
   python report_export.py share --name 报表名 [--validity 1] [--lock 0]
+  python report_export.py unshare --name 报表名 --share-id 分享记录ID
   python report_export.py export <report_id> [--format pdf] [--output ./out]
   python report_export.py import-excel <xlsx_path> [--name 报表名]
 """
@@ -53,6 +54,46 @@ def share_report(base_url, token, name, validity="1", lock_status="0", lock_pwd=
         print(f"  密码: {result.get('previewLock', lock_pwd)}")
 
 
+def query_share(session, report_id):
+    """查询报表的当前分享记录，返回 result dict 或 None。"""
+    resp = session.get(f"/share/queryJurisdiction?reportId={report_id}")
+    return resp.get("result")
+
+
+def unshare_report(base_url, token, report_id=None, share_id=None, name=None):
+    """取消报表分享（status=1 禁用）。支持按名称自动查 share_id。"""
+    session = Session(base_url, token)
+
+    if name and not report_id:
+        encoded = quote(name)
+        resp = session.get(f"/query/report/folder?pageNo=1&pageSize=50&reportType=&name={encoded}&token={token}")
+        records = resp.get("result", {}).get("records", [])
+        if not records:
+            print(f"未找到包含「{name}」的报表")
+            return
+        if len(records) > 1:
+            print(f"找到 {len(records)} 个报表，请用 --report-id 指定：")
+            for r in records:
+                print(f"  {r['name']}  (ID: {r['id']})")
+            return
+        report_id = records[0]["id"]
+
+    if not share_id:
+        share = query_share(session, report_id)
+        if not share:
+            print(f"该报表暂无分享记录: reportId={report_id}")
+            return
+        share_id = share["id"]
+
+    result = session.request("/share/addAndEdit", {
+        "id": share_id, "reportId": report_id, "status": "1",
+    })
+    if result.get("success"):
+        print(f"取消分享成功: reportId={report_id}, shareId={share_id}")
+    else:
+        print(f"取消失败: {result.get('message')}")
+
+
 # ── 导出 ─────────────────────────────────────────────────────────────
 
 def export_report(base_url, token, report_id, fmt="pdf", output_dir="."):
@@ -91,9 +132,7 @@ def import_excel(base_url, token, xlsx_path, name=None):
         name = os.path.splitext(os.path.basename(xlsx_path))[0]
 
     with open(xlsx_path, "rb") as f:
-        resp = session._s.post(f"{base_url}/importExcel", files={"file": (os.path.basename(xlsx_path), f)})
-    resp.raise_for_status()
-    result = resp.json()
+        result = session.upload("/importExcel", files={"file": (os.path.basename(xlsx_path), f)})
     if not result.get("success"):
         print(f"导入失败: {result.get('message')}")
         return
@@ -126,6 +165,11 @@ def main():
     sh.add_argument("--password", default="")
     sh.add_argument("--index", type=int, default=None)
 
+    us = sub.add_parser("unshare", help="取消分享链接")
+    us.add_argument("--name", default=None, help="报表名称（自动查 report_id 和 share_id）")
+    us.add_argument("--report-id", default=None)
+    us.add_argument("--share-id", default=None)
+
     ex = sub.add_parser("export", help="导出 PDF/Excel/Word")
     ex.add_argument("report_id")
     ex.add_argument("--format", default="pdf", choices=["pdf", "excel", "word"])
@@ -138,6 +182,8 @@ def main():
     args = p.parse_args()
     if args.cmd == "share":
         share_report(args.base_url, args.token, args.name, args.validity, args.lock, args.password, index=args.index)
+    elif args.cmd == "unshare":
+        unshare_report(args.base_url, args.token, report_id=args.report_id, share_id=args.share_id, name=args.name)
     elif args.cmd == "export":
         export_report(args.base_url, args.token, args.report_id, args.format, args.output)
     elif args.cmd == "import-excel":

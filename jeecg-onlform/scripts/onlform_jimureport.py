@@ -108,7 +108,7 @@ def resolve_head_id(api_base: str, token: str, config: dict) -> tuple[str, dict]
         result = api_request(api_base, token,
                              f'/online/cgform/head/list?copyType=0&pageNo=1&pageSize=1&id={head_id}',
                              method='GET')
-        records = result.get('result', {}).get('records', [])
+        records = (result.get('result') or {}).get('records', [])
         if records:
             return head_id, records[0]
         print(f'错误: headId {head_id} 不存在')
@@ -117,7 +117,7 @@ def resolve_head_id(api_base: str, token: str, config: dict) -> tuple[str, dict]
         result = api_request(api_base, token,
                              f'/online/cgform/head/list?tableName={table_name}&copyType=0&pageNo=1&pageSize=1',
                              method='GET')
-        records = result.get('result', {}).get('records', [])
+        records = (result.get('result') or {}).get('records', [])
         if not records:
             print(f'错误: 表 {table_name} 不存在')
             sys.exit(1)
@@ -154,7 +154,7 @@ def query_online_fields(api_base: str, token: str, head_id: str) -> list[dict]:
         r = api_request(api_base, token,
                         f'/online/cgform/field/list?headId={head_id}&pageNo={page}&pageSize=500',
                         method='GET')
-        records = r.get('result', {}).get('records', [])
+        records = (r.get('result') or {}).get('records', [])
         if not records:
             break
         for f in records:
@@ -162,7 +162,7 @@ def query_online_fields(api_base: str, token: str, head_id: str) -> list[dict]:
             if db_name in system_fields:
                 continue
             all_fields.append({'fieldName': db_name, 'fieldText': f.get('dbFieldTxt', db_name)})
-        total = r.get('result', {}).get('total', 0)
+        total = (r.get('result') or {}).get('total', 0)
         if page * 500 >= total:
             break
         page += 1

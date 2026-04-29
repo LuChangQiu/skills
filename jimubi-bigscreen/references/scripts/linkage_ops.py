@@ -136,6 +136,92 @@ def parse_mappings(mapping_list):
     return result
 
 
+def infer_field_option(cfg):
+    """从组件 config 反推 fieldOption（UI 联动/钻取面板源字段下拉数据）。
+
+    联动/钻取的 UI 配置面板通过 cfg.fieldOption 填充"字段选择器"；
+    缺失/为空会导致 UI 面板字段下拉无候选，整个联动配置看起来像"未配置"。
+    本函数按优先级从 cfg 各处提取可用字段名，统一产出 UI 期望格式。
+
+    优先级（保留首次出现顺序，去重）：
+      A 顶层     cfg.dataMapping[*].mapping          ← 绝大多数图表
+      B.1/B.2    cfg.option.fieldMap values          ← JStatsSummary
+                 cfg.option.titleMapping/valueMapping ← JSemiGauge
+      B.3        cfg.option.field.dateField/valueField ← JPermanentCalendar
+      B.4/B.5    cfg.option.contentFieldMapping[*].key ← JCardScroll/Carousel
+                 cfg.option.fieldMapping[*].key      ← JScrollList/Table
+      B.6        cfg.option.beginFields/centerTopFields/endFields[*].key ← JListProgress
+      B.7        cfg.option.header[*].key            ← JScrollBoard
+
+    返回 list[{show,label,text,value}]，无可推断字段时返回空列表。
+    """
+    SKIP_LITERALS = {'1', '0', ''}  # B.1 的 positiveValue/negativeValue 是枚举值非字段
+    seen = []
+
+    def _add(f):
+        if not isinstance(f, str):
+            return
+        f = f.strip()
+        if f and f not in SKIP_LITERALS and f not in seen:
+            seen.append(f)
+
+    # A 顶层 dataMapping
+    for m in cfg.get('dataMapping') or []:
+        _add((m or {}).get('mapping'))
+
+    opt = cfg.get('option') or {}
+
+    # B.1 fieldMap values（跳过 positiveValue/negativeValue 枚举键）
+    fm = opt.get('fieldMap') or {}
+    if isinstance(fm, dict):
+        for k, v in fm.items():
+            if k in ('positiveValue', 'negativeValue'):
+                continue
+            _add(v)
+
+    # B.2 JSemiGauge
+    _add(opt.get('titleMapping'))
+    _add(opt.get('valueMapping'))
+
+    # B.3 JPermanentCalendar
+    field = opt.get('field') or {}
+    if isinstance(field, dict):
+        _add(field.get('dateField'))
+        _add(field.get('valueField'))
+
+    # B.4/B.5/B.6 各类 array-of-{key}
+    for arr_key in ('contentFieldMapping', 'fieldMapping',
+                    'beginFields', 'centerTopFields', 'endFields'):
+        for item in opt.get(arr_key) or []:
+            _add((item or {}).get('key'))
+
+    # B.7 header[*].key
+    for h in opt.get('header') or []:
+        _add((h or {}).get('key'))
+
+    return [{'show': 'Y', 'label': f, 'text': f, 'value': f} for f in seen]
+
+
+def ensure_field_option(cfg, comp_label=''):
+    """若 cfg.fieldOption 缺失/为空，则从 cfg 其他位置反推补齐。
+
+    UI 联动/钻取配置面板必须有 fieldOption 才能显示源字段下拉——
+    缺失会导致用户看不到已保存的联动配置。本函数被 add-linkage / add-drill
+    在保存前自动调用，保障 UI 可见性（幂等）。
+    """
+    existing = cfg.get('fieldOption')
+    if isinstance(existing, list) and len(existing) > 0:
+        return False
+    inferred = infer_field_option(cfg)
+    if not inferred:
+        print(f'  ⚠️ {comp_label} fieldOption 反推为空——请先完成数据集绑定（dataMapping/option）再配置联动，否则 UI 面板字段下拉无候选')
+        return False
+    cfg['fieldOption'] = inferred
+    names = [f['value'] for f in inferred]
+    print(f'  ℹ️ {comp_label} 自动补齐 fieldOption: {names}')
+    return True
+
+
 # ============================================================
 # 命令实现
 # ============================================================
@@ -244,6 +330,9 @@ def cmd_add_linkage(args):
     mapping_str = ', '.join(f'{m["source"]} -> {m["target"]}' for m in mappings)
     print(f'  字段映射: {mapping_str}')
 
+    # UI 可见性保底：源组件必须有 fieldOption，否则联动面板字段下拉空白
+    ensure_field_option(cfg, comp_label=f'源组件 [{args.source}]')
+
     save_template(args.page_id, tmpl)
     print('保存成功')
 
@@ -320,6 +409,9 @@ def cmd_add_drill(args):
     mapping_str = ', '.join(f'{m["source"]} -> {m["target"]}' for m in mappings)
     print(f'添加钻取: {args.comp}')
     print(f'  字段映射: {mapping_str}')
+
+    # UI 可见性保底：钻取源字段下拉也依赖 fieldOption
+    ensure_field_option(cfg, comp_label=f'组件 [{args.comp}]')
 
     save_template(args.page_id, tmpl)
     print('保存成功')

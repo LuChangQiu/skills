@@ -894,11 +894,18 @@ bi_utils.save_page(page_id)
 | 字段 API | `/online/cgform/field/listByHeadId` | `/desform/api/fields/{code}?subTable=true` |
 | tableName | 实际数据库表名 | desform code（= formId） |
 | config.type | 无（undefined） | `'design'` |
-| 计算字段 | 不支持 | 支持（calcFields） |
+| 计算字段 | 不支持（`ChartSetModal.vue` 模板 `v-if="formType!=='online'"` 隐藏入口） | 支持 `addCalcField/editCalcField/delCalcField` |
 | 字典翻译 | handleOnlineTranslateDict | handleTranslate |
 | 日期处理 | handleTranslateDate + formatTimestamp | handleCalcFields |
-| 聚合表 | 不支持 | 支持（type='aggregation'） |
-| 字段筛选 | dbIsKey==0 && dbIsPersist!=0 | 排除 file-upload/imgupload/date范围控件 |
+| 日期归组 | 不设 customDateType | 自动设 `customDateType:'3'`（按月归组） |
+| 字段权限 | 不查 | 调 `getFieldAuth(tableName)` 过滤 `authFieldShowResult` |
+| 公共字段 | 不附加 | 自动追加 5 个：`create_by/update_by/update_time/create_time/bpm_status` |
+| 聚合表 | 不支持 | 支持（`type='aggregation'`，走 `getAggregationFormField`） |
+| 字段筛选 | `dbIsKey==0 && dbIsPersist!=0` | 排除 `file-upload/imgupload/dates/daterange/datetimerange` |
+| 关联记录 | `link_table` 字段 dictText 切片首项 | `link-record/sub-table-design/link-field` 特殊解析 |
+| switch 字段 | 解析 `fieldExtendJson.switchOptions`（默认 `['Y','N']`） | 不处理 |
+| 省市区 | 不处理 | `area-linkage` 控件设 `customType:'china'` |
+| 虚拟字段 | 头部插 `record_count`（记录数量） | 同上 |
 
 ---
 
@@ -980,13 +987,23 @@ if (item.config.dataType == 4) {
 ```python
 'filter': {
     'queryField': 'create_time',   # 时间字段名（默认 create_time）
-    'queryRange': 'last30days',    # all/today/yesterday/last7days/last30days/week/month/year
+    'queryRange': 'last30days',    # 见下方 16 枚举
+    'customTime': null,            # queryRange='custom' 时填 [begin, end]
 }
 ```
 
-支持的 queryRange 值：
-`all`（全部）、`today`、`yesterday`、`tomorrow`、`last7days`、`last30days`、
-`week`（本周）、`preWeek`（上周）、`month`（本月）、`preMonth`（上月）、`year`（本年）
+支持的 queryRange 值（共 **16 个**，源自 `useOnlineDataBiz.ts` 的 `rangeOptions`）：
+
+| 分组 | 值 |
+|---|---|
+| 通用 | `all`（全部）/ `custom`（自定义，配 `customTime: [begin,end]`）|
+| 相对天 | `today` / `yesterday` / `tomorrow` |
+| 相对周 | `week`（本周）/ `preWeek`（上周）/ `nextWeek`（下周） |
+| 相对月 | `month`（本月）/ `preMonth`（上月）/ `nextMonth`（下月） |
+| 相对年 | `year`（本年）/ `preYear`（上年）/ `nextYear`（下年） |
+| 滚动天数 | `last7days`（近 7 天）/ `last30days`（近 30 天） |
+
+> **细粒度时间过滤** `filter.conditionFields[*].timeCondition`（按某个具体日期字段过滤，而不是整屏 `queryField`）枚举值与 `queryRange` 同一套——参见 bigscreen `references/bi-mode-online.md` §三。
 
 ### 11.5 AI 创建 Online 表单图表的完整交互流程（强制）
 
@@ -1263,3 +1280,250 @@ cfg = {
 前端弹窗逻辑（ChartSetModal.vue）：
 - `type === 'design'` → 调用 `getDesignField(formObj.value.tableName)`
 - `type === 'aggregation'` → 调用 `getAggregationFormField(formObj.value.tableName)`
+
+---
+
+## 十三、图表大类全清单（来自 `utils/constant.ts` 的 `chartConfig`）
+
+> **来源**：`packages/utils/constant.ts` 第 466 行 `export const chartConfig = (isLowApp = true) => ...`
+> **覆盖范围**：Online 表 / 设计器表 / 聚合表所有数据源都共用同一份图表清单——区别仅在 `loadField` 阶段的字段元数据。
+
+### 13.1 完整 17 大类 / 60+ 子图
+
+| 大类 (`chart.category`) | 显示名 | 子图 (`chart.subclass`) | 备注 |
+|---|---|---|---|
+| `Bar` | 柱形图 | JBar / JStackBar / JMultipleBar / JNegativeBar / JDynamicBar / JMixLineBar / JCapsuleChart / JPercentBar | 分组图 isGroup=true：JStackBar/JMultipleBar/JNegativeBar/JMixLineBar/JPercentBar |
+| `HorizontalBar` | 条形图 | JHorizontalBar / JRankingList / JTotalProgress | JTotalProgress 属"只有数值"图（无 nameFields） |
+| `WordCloud` | 文本 | JWordCloud | |
+| `Line` | 折线图 | JLine / JArea / JMultipleLine / DoubleLineBar / JStepLine | 分组：JMultipleLine/DoubleLineBar；DoubleLineBar 双轴图 |
+| `Progress` | 进度图 | JCustomProgress / JProgress / JLiquid | JLiquid 属"只有数值"图 |
+| `Pictorial` | 象形图 | JPictorialBar / JPictorial | |
+| `Pie` | 饼状图 | JPie / JRing / JRose / JRotatePie | |
+| `Funnel` | 漏斗图 | JFunnel / JPyramidFunnel | |
+| `Radar` | 雷达图 | JRadar / JCircleRadar | 分组 isGroup=true |
+| `Ring` | 环形图 | JRingProgress / JActiveRing / JRadialBar | |
+| `Rectangle` | 矩形图 | JRectangle | |
+| `threeD` | 3D 图表 | JBar3d / JBarGroup3d | JBarGroup3d 分组 |
+| `Gauge` | 仪表盘 | JColorGauge / JGauge / JAntvGauge | "只有数值"图（必须 nameFields=[]） |
+| `Number` | 数值 | JNumber | "只有数值"图 |
+| `Scatter` | 散点图 | JScatter / JBubble / JQuadrant | JBubble/JQuadrant 分组 |
+| `Table` | 表格 | JPivotTable | 透视表（分组），有专属 pivotTable 配置 |
+| `Map` | 地图 | JAreaMap / JBubbleMap / JHeatMap / JBarMap | nameField 必须为地区字段 |
+
+### 13.2 敲敲云模式（`isLowApp=true`）剔除清单
+
+`chartConfig(true)` 会递归过滤：
+
+```js
+excludeCategory = ['Progress', 'Pictorial', 'Ring', 'Rectangle', 'threeD']  // 5 个大类整体移除
+excludeComponent = ['JDynamicBar','JMixLineBar','JCapsuleChart','JPercentBar','JStepLine','JRotatePie','JQuadrant']  // 7 个子图单独移除
+```
+
+敲敲云模式实际可用 **12 大类 / 约 35 子图**。`isLowApp=false`（仪表盘 / 大屏标准模式）则全量可用。
+
+### 13.3 字段拖放区行为（`useChartBiz.ts` watch 逻辑）
+
+| 拖放区 | 触发条件 | 切换图表时清空逻辑 |
+|---|---|---|
+| `nameFields`（维度） | "只有数值"图除外 | 切到 `DoubleLineBar/JPivotTable/JScatter/JBubble` 时清空 |
+| `valueFields`（数值） | 总是必填 | 同上 |
+| `typeFields`（分组） | **仅 `selectedChart.isGroup=true`** | 切到非分组图时**自动清空** |
+| `assistYFields/assistTypeFields`（辅助 Y 轴） | 仅 `DoubleLineBar` 双轴图 | — |
+
+### 13.4 "只有数值" 图表（`onlyValueChart` computed）
+
+下列图表**必须 `nameFields=[]`**，只用 `valueFields`：
+
+```ts
+selectedChart.category in {'Gauge', 'Number'}
+  || selectedChart.subclass in {'JTotalProgress', 'JLiquid'}
+```
+
+具体清单：JGauge / JColorGauge / JAntvGauge / JNumber / JTotalProgress / JLiquid
+
+### 13.5 分组图清单（`groupChart` 常量，`isGroup=true`）
+
+```js
+['JPivotTable','JBubble','JCircleRadar','JRadar','DoubleLineBar',
+ 'JMultipleLine','JNegativeBar','JMultipleBar','JStackBar','JMixLineBar',
+ 'JPercentBar','JQuadrant','JBarGroup3d']
+```
+
+分组图必须有 `typeFields`（分组字段），否则只渲染单系列。
+
+### 13.6 地图图清单（`mapComponents` 常量）
+
+```js
+['JBarMap', 'JBubbleMap', 'JHeatMap', 'JAreaMap']
+```
+
+地图图 `option` 结构与普通图差异极大（含 `geo / area / visualMap / graphic`，无 `xAxis/yAxis`），需配套 `commonOption`。详见 §八 `_get_default_chart_option` 的 MAP 分支。
+
+### 13.7 不预览 / 不联动清单（`utils/constant.ts`）
+
+```js
+noViewChart = ['JList','JCommonTable','JRadioButton','JQuickNav','JTabs','JCustomButton',
+               'JIframe','JDragEditor','JCarousel','JCalendar','JCommon','JText',
+               'JFilterQuery','JCurrentTime','JSimpleCard','JForm','JCustomCard',
+               'JDragDecoration','JDragBorder']
+ignoreLinkComp = ['JCustomButton','JIframe','JDragEditor','JCarousel','JText',
+                  'JFilterQuery','JCurrentTime','JSimpleCard','JForm']
+noAnalysisComp = ['JTotalProgress']  // 不显示"分析"tab
+```
+
+---
+
+## 十四、ChartSetModal 三 tab 完整功能矩阵
+
+> **来源**：`packages/dragEngine/modal/chartset/ChartSetModal.vue` 及子组件 `FieldConfig.vue / CompStyleConfig.vue / CompAnalysis.vue / ConditionQuery.vue / LowDrillConfig.vue / JCalcFieldModal.vue`。
+>
+> **覆盖范围**：BI 模式（`dataType=4`）下，Online 表 / 设计器表 / 聚合表三种数据源都可通过 ChartSetModal 弹窗配置以下功能。差异仅在「计算字段 / 字段权限 / publicFields 自动追加」三项是 design 独有，其余对 online 完全可用。
+
+### 14.1 配置 tab（FieldConfig.vue）
+
+| 功能 | config 路径 | 操作 / 取值 | 适用图表 |
+|-----|-------------|-------------|---------|
+| 维度字段 | `nameFields[]` | 拖入；菜单：重命名 + 日期格式化 + 地区分组 | 全部（除"只有数值"图） |
+| 数值字段 | `valueFields[]` | 拖入；菜单：重命名 + 去重计数（仅 JNumber+`record_count`） | 全部 |
+| 分组字段 | `typeFields[]` | 拖入即可 | 13 种分组图 + JPivotTable |
+| 辅助 Y 轴数值 | `assistYFields[]` | 双轴图特有 | DoubleLineBar |
+| 辅助 Y 轴分组 | `assistTypeFields[]` | 同上 | DoubleLineBar |
+| 目标值 | `option.targetValue[fieldName]` | 数字输入 | JTotalProgress |
+| 计算字段 | `calcFields[]` | 拖拽数值字段 + 四则运算 `+ - * / ( )`（不支持函数公式） | **仅 design** |
+| 字段重命名 | 字段对象的 `fieldTxt` | 自定义中文名 | 全部 |
+| 日期格式化 | 字段对象的 `customDateType` | 见 §14.5 | nameFields/typeFields 中的日期字段 |
+| 地区分组 | 字段对象的 `customType` | 见 §14.5 | 省市区控件字段 |
+| 去重计数字段 | valueFields 中的 `groupField` | 选某字段做去重计数维度 | 仅 JNumber + `record_count` |
+| 筛选条件 | `filter.conditionFields[]` | 拖入字段，配 `condition` + `fieldValue` | 全部 |
+| 筛选条件组合 | `filter.conditionMode` | `'and'`（且）/ `'or'`（或） | 全部 |
+
+### 14.2 样式 tab（CompStyleConfig.vue）
+
+#### 14.2.1 总计（非"只有数值"图通用）
+```
+config.compStyleConfig.summary = {
+  showTotal,                    # 开关
+  showField,                    # 'all' 或具体字段名
+  totalType,                    # ⚠️ 完整 4 个值：'sum' 求和 / 'max' 最大值 / 'min' 最小值 / 'average' 平均值
+  showName,                     # 自定义显示名
+  showY,                        # 是否显示在 Y 轴（DoubleLineBar 用）
+}
+config.compStyleConfig.assist.summary = { ... }    # DoubleLineBar 辅助 Y 轴的总计
+```
+
+#### 14.2.2 数据过滤（限制显示前 N 项）
+- `config.dataFilterNum`（普通图）
+- `config.compStyleConfig.showLineCount` / `showColumnCount`（透视表行/列）
+
+#### 14.2.3 显示单位（除 JPivotTable / JWordCloud 都有）
+```
+config.compStyleConfig.showUnit = {
+  numberLevel,                  # '0' 无 / '1' 百分比 / '2' 千分比 / '3' 千 / '4' 万 / '5' 百万
+  decimal,                      # 保留小数位（数字）
+  position,                     # 'prefix' 前缀 / 'suffix' 后缀
+  unit,                         # 单位文本（自由输入）
+}
+config.compStyleConfig.assist.showUnit = { ... }   # DoubleLineBar 辅助 Y 轴单位
+```
+
+JPivotTable 每数值字段独立配单位 → `config.compStyleConfig.unitList[index]`，结构同上。
+
+#### 14.2.4 透视表 JPivotTable 专属
+
+| 配置 | 路径 |
+|------|------|
+| 行总计开关 | `pivotTable.showLineTotal` |
+| 行总计名称 | `pivotTable.lineSummary.name` |
+| 行总计每字段 | `pivotTable.lineSummary.controlList[i] = {key, show, totalType, showName}` |
+| 行总计位置 | `pivotTable.lineSummary.location`（`'1'` 上方 / `'2'` 下方） |
+| 列总计开关 | `pivotTable.showColumnTotal` |
+| 列总计每字段 | `pivotTable.columnSummary.controlList[i]` |
+| 列总计位置 | `pivotTable.columnSummary.location`（`'1'` 左 / `'2'` 右） |
+| 单行显示 | `compStyleConfig.unilineShow` |
+| 是否分页 | `compStyleConfig.izPage`（**仅 design**） |
+| 表头冻结 | `compStyleConfig.headerFreeze` + `lineFreeze` + `columnFreeze` |
+
+#### 14.2.5 进度图专属
+
+| 图表 | 关键配置 |
+|------|---------|
+| JCustomProgress | 进度色 `optionModel.progressColor` / 背景色 `backgroundColor` / 高度 `barWidth` / 内边距 `padding` / 标题色字号位置 `titleColor/titleFontSize/titlePosition`(top/middle/bottom) / 数值色字号位置 `valueColor/valueFontSize/valuePosition` |
+| JTotalProgress | `compStyleConfig.showProgressText` 开关；`progress.show/name`（显示进度+文本）；`target.show/name`（显示目标+文本）|
+| JActiveRing | `optionModel.showOriginValue/lineWidth/radius/activeRadius/textColor/textFontSize/customColor[]` |
+
+#### 14.2.6 自定义配色
+`config.option.customColor[]` —— 二维数组每项 `{color}`，按数据顺序循环
+
+#### 14.2.7 图表常规配置（按图表类型不同）
+来自 `packages/dragEngine/components/config.ts` 的 `dicOption[chart_type]`，每种图表暴露不同的 prop（颜色/字号/边距/图例位置/网格线/...）。展开折叠面板的 `optionList`，每项 prop 类型可为 `input / color / select / number / slider / areaSelect`。
+
+### 14.3 分析 tab（CompAnalysis.vue）
+
+| 折叠面板 | config 路径 | 配置 | 触发条件 |
+|---------|-------------|------|---------|
+| 数据对比 | `analysis.isCompare/compareType/trendType` | `compareType` 与昨日/上周/上月/上年相比（按当前 queryRange 自动）；`trendType='1'` 绿升红降 / `'2'` 红升绿降 | **仅 JNumber 且 `queryRange ≠ 'all'`** |
+| 查看原始数据 | `analysis.isRawData/showMode/showData/showFields` | `showMode=1` 在图表中分栏展示；`showData=1` 按权限 / `=2` 所有数据；`showFields[]` 选字段子集 | 全部 |
+| 定时刷新 | `analysis.izTimeOut/timeOut` | 开关 + 分钟数 | 排除 `noRefreshComp` 清单的图 |
+| 钻取设置 | `config.drillData[]` | 数组每项 `{source: 'name'/'type'/'value', target: 字段名}`，多级钻取 | 排除 `noDrillCompForQqy` 清单的图 |
+
+### 14.4 筛选条件 `condition` 枚举（按字段类型分桶，源自 `utils/constant.ts` 的 `conditionOptions`）
+
+筛选区域每条 `conditionFields[i]` 必填 `condition`（条件类型），加 `fieldValue`（单值）/ `beginValue+endValue`（范围）/ `timeCondition`（日期）。
+
+| 字段类型 | 可用 `condition` 值（label / value / 表达式） |
+|---------|------------------------------------------|
+| **text 字符串** | `1`=是(`=`) / `2`=不是(`!=`) / `4`=包含(`like`) / `5`=开头为(`like_begin`) / `6`=结尾为(`like_end`) / `7`=为空(`is null`) / `8`=不为空(`is not null`) |
+| **select 下拉/字典** | `3`=包含(`in`) / `4`=不包含(`not in`) / `7`=为空 / `8`=不为空 |
+| **onlineDeptUser 部门/用户** | `1`=是 / `2`=不是 / `3`=包含 / `4`=不包含 / `7`=为空 / `8`=不为空 |
+| **number 数值** | `1`==(`=`) / `2`=≠(`!=`) / `3`=>(`>`) / `4`=<(`<`) / `5`=≥(`>=`) / `6`=≤(`<=`) / `9`=在范围内(`between`) / `10`=不在范围内(`not between`) / `7`=为空 / `8`=不为空 |
+| **time/date 日期** | `1`=是 / `2`=不是 / `9`=在范围内 / `10`=不在范围内 / `7`=为空 / `8`=不为空 |
+
+> **特殊**：`condition='9'/'10'` 范围条件 → `beginValue + endValue` 替代 `fieldValue`；`condition='7'/'8'` → `fieldValue` 留空。
+>
+> **日期字段额外用 `timeCondition`**（与全局 `queryRange` 同枚举，参见 §11.4）：`element.timeCondition='month'` 表示"销售日期等于本月"等业务语义，与 `condition` 互补存在。
+
+### 14.5 日期 / 地区归组枚举
+
+**日期归组（`customDateType`）**：
+
+| 值 | 显示格式 |
+|----|---------|
+| `'1'` | 年(YYYY) |
+| `'6'` | 年月(YYYY年M月) |
+| `'2'` | 月(YYYY-MM) |
+| `'7'` | 月简(M月) |
+| `'3'` | 日(YYYY-MM-DD) |
+| `'4'` | 时(YYYY-MM-DD hh) |
+| `'5'` | 分(YYYY-MM-DD hh:mm) |
+
+> 日字段是否可选 `'3'/'4'/'5'` 取决于源字段控件类型（`type='date'` 仅日，`type='datetime'` 含时分）。
+
+**地区归组（`customType`）**：`'china'` 全国 / `'province'` 省 / `'city'` 市 / `'area'` 区。
+
+### 14.6 Online vs design 在 ChartSetModal 中的功能差异（综合）
+
+| 功能 | online | design |
+|------|:------:|:------:|
+| 维度/数值/分组 字段拖放 | ✅ | ✅ |
+| 字段重命名 | ✅ | ✅ |
+| 日期格式化 (customDateType) | ✅ | ✅ |
+| 地区分组 (customType) | ✅ | ✅ |
+| 去重计数字段（仅 JNumber+record_count） | ✅ | ✅ |
+| 总计（sum/max/min/average） | ✅ | ✅ |
+| 数据过滤（前 N 项） | ✅ | ✅ |
+| 显示单位（数量级/小数/前后缀/单位） | ✅ | ✅ |
+| 自定义配色 | ✅ | ✅ |
+| 数据对比（仅 JNumber） | ✅ | ✅ |
+| 查看原始数据（按权限/所有数据） | ✅ | ✅ |
+| 定时刷新 | ✅ | ✅ |
+| 钻取设置 | ✅ | ✅ |
+| 筛选条件（含 condition / timeCondition / and-or） | ✅ | ✅ |
+| 目标值（JTotalProgress） | ✅ | ✅ |
+| 透视表 行/列总计 + 表头冻结 + 数据过滤 | ✅ | ✅ |
+| **计算字段 (calcFields)** | ❌ | ✅ |
+| **字段权限 (authFieldShowResult)** | ❌ | ✅ |
+| **publicFields 自动追加（5 个公共字段）** | ❌ | ✅ |
+| **透视表 是否分页 (izPage)** | ❌ | ✅ |
+
+**结论**：online 数据源支持 ChartSetModal 几乎全部功能，仅缺 design 表特有的 4 项（计算字段、字段权限、publicFields、透视表分页）。
+

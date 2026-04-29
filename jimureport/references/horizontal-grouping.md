@@ -142,6 +142,20 @@
 4. 第一条数据必须完整
 5. 最多3级动态表头
 
+**⚠️ 静态列表头 merge 行数（极易踩坑）：**
+
+静态列表头（纵向分组列，如年级/班级/姓名）的 `merge=[N, 0]` 中：
+
+> **N = 横向表头行数 - 1**（只跨表头行，**不包含数据行**）
+
+| 横向表头层数 | 布局行（表头） | 正确 merge | merges 写法 |
+|------------|-------------|-----------|------------|
+| 1级（如月份） + 静态子列 | row2=groupRight, row3=子表头 | `[1, 0]` | `B2:B3` |
+| 2级（如年度+学期） + 静态子列 | row2=year, row3=semester, row4=子表头 | `[2, 0]` | `B2:B4` |
+| 3级 + 静态子列 | row2,row3,row4=groupRight, row5=子表头 | `[3, 0]` | `B2:B5` |
+
+**数据行（group/dynamic 绑定行）永远在最后，不计入 merge 范围。** 若多算1行，数据行被覆盖，所有数据列显示为空。
+
 **完整4行布局模式（带二级子列表头）：**
 
 ```
@@ -233,6 +247,108 @@ merges = [
 - `compute` 为固定关键字，支持 `+` `-` `*` `/` 四则运算
 - 作用域：当前行、当前横向分组内的计算（非跨行汇总）
 - 与 `dynamic` 并列放在数据行，随 groupRight 自动展开
+
+---
+
+#### 跟随分组扩展统计行（rightFollowExten）
+
+> **⚠️ 常见误区**：不要在 dynamic 单元格上设 `funcname:"MAX/MIN/SUM"` 来实现底部统计——那不会生成跟随横向扩展的统计行。正确做法是在数据行下方添加**独立静态行**，使用 Excel 公式 + `rightFollowExten:"follow"`。
+
+**适用场景：** 交叉表（groupRight+dynamic）底部需要跟随横向动态列展开的汇总行（最大值、最小值、合计、平均值等）。
+
+**核心属性：**
+
+| 属性 | 值 | 作用 |
+|------|-----|------|
+| `rightFollowExten` | `"follow"` | 让该单元格随 groupRight 横向扩展，公式引用自动复制到每个动态列 |
+
+**统计行写法（在数据行下方追加独立行）：**
+
+> **⚠️ rightFollowExten 设置规则：第一条统计行不设 `rightFollowExten`，从第二条统计行起才设 `rightFollowExten:"follow"`。**
+
+```python
+# 假设数据行在 row "5"（UI row 6），动态列起始于 col "6"（G列）
+"6": {   # 统计行1（第一条）：不设 rightFollowExten
+    "cells": {
+        "0": {"text": "", "style": S_NO_BORDER},
+        "1": {"text": "语文总合计：", "style": S_STAT, "merge": [0, 4]},
+        "6": {"text": "=SUM(G6)", "style": S_STAT},   # ← 无 rightFollowExten
+        "7": {"text": " ", "style": S_STAT},
+        "8": {"text": " ", "style": S_STAT},
+    }
+},
+"7": {   # 统计行2（第二条起）：设 rightFollowExten:"follow"
+    "cells": {
+        "0": {"text": "", "style": S_NO_BORDER},
+        "1": {"text": "语文最高分：", "style": S_STAT, "merge": [0, 4]},
+        "6": {"text": "=MAX(G6)", "style": S_STAT, "rightFollowExten": "follow"},
+        "7": {"text": " ", "style": S_STAT},
+        "8": {"text": " ", "style": S_STAT},
+    }
+},
+"8": {   # 统计行3：设 rightFollowExten:"follow"
+    "cells": {
+        "0": {"text": "", "style": S_NO_BORDER},
+        "1": {"text": "语文平均值：", "style": S_STAT, "merge": [0, 4]},
+        "6": {"text": "=AVERAGE(G6)", "style": S_STAT, "rightFollowExten": "follow"},
+        "7": {"text": " ", "style": S_STAT},
+        "8": {"text": " ", "style": S_STAT},
+    }
+},
+```
+
+merges 需加标签列的合并范围（UI 行号）：
+```python
+merges += ["B7:F7", "B8:F8", "B9:F9"]  # 统计行标签合并（对应 row 6/7/8 → UI 7/8/9）
+```
+
+**公式列号对应规则：**
+
+| dynamic 字段 | col 索引 | Excel 列 | 公式引用 |
+|-------------|---------|---------|---------|
+| 第1个（如 chinese） | "6" | G | `=MAX(G6)` |
+| 第2个（如 math） | "7" | H | `=MIN(H6)` |
+| 第3个（如 english） | "8" | I | `=SUM(I6)` |
+
+> 公式行号（如 `G6`）= 数据行的 UI 行号（code row + 1）。
+
+**数据行正确结构（配合统计行使用）：**
+
+```python
+# ✅ 正确：dynamic 字段不设 funcname，数据行保持干净
+"5": {
+    "cells": {
+        "1": {"text": "#{db.group(grade)}", "aggregate": "group", "subtotal": "-1", "funcname": "-1"},
+        "2": {"text": "#{db.group(className)}", "aggregate": "group"},
+        # stuName/gender/age：非分组维度用 aggregate:"select"，不用 group()
+        "3": {"text": "#{db.stuName}", "aggregate": "select", "subtotal": "-1"},
+        "4": {"text": "#{db.gender}",  "aggregate": "select", "subtotal": "-1"},
+        "5": {"text": "#{db.age}",     "aggregate": "select", "subtotal": "-1"},
+        # dynamic 字段：funcname 必须设为 "-1"（不聚合），底部统计行另用 rightFollowExten 实现
+        "6": {"text": "#{db.dynamic(chinese)}", "aggregate": "dynamic", "subtotal": "-1", "funcname": "-1"},
+        "7": {"text": "#{db.dynamic(math)}",    "subtotal": "-1", "funcname": "-1"},
+        "8": {"text": "#{db.dynamic(english)}", "subtotal": "-1", "funcname": "-1"},
+    }
+}
+# ❌ 错误：funcname 设为 "MAX"/"MIN"/"SUM" 不会生成跟随横向扩展的统计行，必须设为 "-1"
+```
+
+**groupRight 外层 merge 规则：**
+
+当数据行有 N 个 dynamic 字段时，外层 groupRight 单元格需设 `merge:[0, N-1]`，merges 数组也需补充对应合并项：
+
+```python
+# 3个动态字段（chinese/math/english），semester groupRight merge=[0,2]
+"6": {  # row "2", col "6"：groupRight(year)
+    "text": "#{db.groupRight(year)}", "merge": [0, 2],   # ← 必须设置
+    "aggregate": "group", "direction": "right"
+}
+# merges 加：
+merges += ["G3:I3"]   # year groupRight 模板列（row2→UI3，col6=G，merge3列）
+merges += ["G4:I4"]   # semester groupRight 模板列
+```
+
+**isGroup / groupField：** 交叉表使用 rightFollowExten 统计行时，**不需要**设置 `isGroup=True` 或 `groupField`，直接省略即可。
 
 ---
 

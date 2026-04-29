@@ -18,6 +18,26 @@
 
 ## 二、核心规则（易错点汇总）
 
+### ⚠️ API 数据集联动：apiUrl 必须拼参数占位符
+
+API 数据集是联动目标时，`apiUrl` **必须**在末尾加 `?paramName=${paramName}`，否则联动触发后接口收不到参数，图表不刷新。
+
+```python
+# ❌ 错误：有 paramList 但 URL 没带占位符
+save_db(session, report_id, "schoolChart", "...", "", fields,
+    [{"paramName": "leibie", "paramValue": "初中", ...}],
+    db_type="1", api_url="https://xxx/byschool")          # ← 联动无效
+
+# ✅ 正确：URL 末尾拼占位符
+save_db(session, report_id, "schoolChart", "...", "", fields,
+    [{"paramName": "leibie", "paramValue": "初中", ...}],
+    db_type="1", api_url="https://xxx/byschool?leibie=${leibie}")  # ← 正确
+```
+
+> 写完 `save_db` 后必须目视检查 `api_url` 字符串包含 `${paramName}`，多参数用 `&` 连接。
+
+---
+
 ### 联动统一用 linkType=2
 
 ```

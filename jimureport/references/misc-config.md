@@ -72,9 +72,11 @@ Content-Type: multipart/form-data
 ### 路径使用规则
 
 - 返回值中 **`message` 字段** 即为图片路径
-- `background.path` = `/jmreport/img/` + `message` 值
-  - 例：`message` = `jimureport/1_1775121842772.png`
-  - → `path` = `/jmreport/img/jimureport/1_1775121842772.png`
+- **根据 `message` 是否以 `http`/`https` 开头判断存储类型**：
+  - 本地存储（相对路径）：`background.path` = `/jmreport/img/` + `message`
+    - 例：`message` = `jimureport/1_1775121842772.png` → `path` = `/jmreport/img/jimureport/1_1775121842772.png`
+  - OSS/对象存储（完整 URL）：直接使用 `message`，**不加前缀**
+    - 例：`message` = `https://xxx.oss-cn-beijing.aliyuncs.com/jimureport/images/form_xxx.png` → `path` = `https://xxx.oss-cn-beijing.aliyuncs.com/jimureport/images/form_xxx.png`
 
 ### Python 上传示例
 
@@ -82,22 +84,24 @@ Content-Type: multipart/form-data
 import requests, os
 
 def upload_image(base_url, token, file_path):
-    """上传图片，返回 message 字段路径"""
+    """上传图片，返回 background.path 可直接使用的路径"""
     with open(file_path, 'rb') as f:
         resp = requests.post(
-            f"{base_url}/jmreport/upload",
+            f"{base_url}/upload",
             headers={"X-Access-Token": token},
             files={"file": (os.path.basename(file_path), f)}
         )
     data = resp.json()
-    if data.get("success"):
-        return data["message"]   # e.g. "jimureport/1_1775121842772.png"
-    raise Exception(f"上传失败: {data}")
+    if not data.get("success"):
+        raise Exception(f"上传失败: {data}")
+    msg = data["message"]
+    # OSS 部署返回完整 URL，本地部署返回相对路径
+    return msg if msg.startswith("http") else f"/jmreport/img/{msg}"
 
 # 构建 background 对象
-msg = upload_image(base_url, token, "/path/to/bg.png")
+bg_path = upload_image(base_url, token, "/path/to/bg.png")
 background = {
-    "path": f"/jmreport/img/{msg}",   # 加前缀
+    "path": bg_path,
     "repeat": "no-repeat",
     "width": "1920",
     "height": "1080"
@@ -309,59 +313,95 @@ rows = {
 
 ## 功能说明
 
-**功能名称**: `dynamicMerge`
+**功能名称**: `dynamicMerge: 1`（cell 级别属性）
 
-**应用场景**: 当在表格数据前需要添加一列固定内容时，使用动态合并格。
+**两种使用场景**：
 
-**效果说明**:
-- 未设置时：数据有几条记录，固定列内容就显示几次
-- 设置后：固定列内容合并显示为一条
+| 场景 | 说明 |
+|------|------|
+| **静态标签列**（主要） | 分组报表中在 group 列旁加一列固定文字（如"基本信息"），跟随相邻 group 列的行合并范围自动合并 |
+| **数据绑定列** | 将重复的数据字段值合并显示为一条 |
+
+> ⚠️ **禁止**用静态 `merge: [N, 0]` 替代——分组展开行数不固定，静态值无效。
 
 ## API 配置方法
 
-在单元格配置中添加 `dynamicMerge: 1`：
-
 ```json
-{
-  "cells": {
-    "1": {
-      "text": "固定内容标题",
-      "style": 2,
-      "dynamicMerge": 1
-    }
-  }
-}
+{"text": "基本信息", "style": 7, "dynamicMerge": 1}
 ```
 
-## 使用示例
+## 场景一：分组报表静态标签列（最常用）
 
-### 场景：订单明细表，每行显示订单号和商品，但订单号是固定的
+**列布局规则**（必须遵守）：
 
-**数据结构**:
-```json
-{
-  "data": [
-    {"order_no": "ORD001", "product": "商品A"},
-    {"order_no": "ORD001", "product": "商品B"},
-    {"order_no": "ORD001", "product": "商品C"}
-  ]
-}
-```
+| 列号 | 用途 | 说明 |
+|------|------|------|
+| col0（A） | 留白 30px | 无边框样式 |
+| **col1（B）** | **dynamicMerge 标签列** | 表头行：`" "` + 带框样式；数据行：标签文字 + `dynamicMerge:1` |
+| col2（C）起 | group 分组列 / 数据列 | 正常绑定 |
 
-**期望效果**: 订单号列合并为一条，只显示一次
+**标题合并从 col2（C）开始**，`merges` 写 `"C1:G1"`（不含 B 列）。
 
-**rows 配置**:
-```json
-{
-  "0": {"cells": {"1": {"text": "订单明细表", "style": 5, "merge": [0, 2]}}, "height": 50},
-  "1": {
-    "cells": {
-      "1": {"text": "订单号", "style": 4},
-      "2": {"text": "商品名称", "style": 4},
-      "3": {"text": "数量", "style": 4}
+**rows 完整示例**：
+```python
+D = "db_code"
+rows = {
+    "len": 100,
+    "1": {   # 标题行
+        "cells": {
+            "0": {"text": " ", "style": 18},
+            "2": {"merge": [0, 4], "style": 2, "text": "报表标题"},  # 从C列起
+        },
+        "height": 40,
     },
-    "height": 34
-  },
+    "2": {   # 表头行
+        "cells": {
+            "0": {"text": " ", "style": 18},
+            "1": {"text": " ", "style": 7},          # 标签列：空格+带框
+            "2": {"style": 15, "text": "一级分组"},
+            "3": {"style": 15, "text": "二级分组"},
+            "4": {"style": 15, "text": "明细"},
+            "5": {"style": 15, "text": "数量"},
+            "6": {"style": 15, "text": "金额"},
+        },
+        "height": 34,
+    },
+    "3": {   # 数据行
+        "cells": {
+            "0": {"text": " ", "style": 18},
+            "1": {"text": "基本信息", "style": 7, "dynamicMerge": 1},  # ← 动态合并
+            "2": {
+                "style": 17, "text": f"#{{{D}.group(field1)}}",
+                "aggregate": "group", "subtotal": "groupField",
+                "funcname": "-1", "subtotalText": "合计",
+            },
+            "3": {
+                "style": 17, "text": f"#{{{D}.group(field2)}}",
+                "aggregate": "group", "subtotal": "groupField",
+                "funcname": "-1", "subtotalText": "小计",
+            },
+            "4": {"style": 17, "text": f"#{{{D}.detail}}"},
+            "5": {"style": 17, "text": f"#{{{D}.qty}}",
+                  "aggregate": "select", "subtotal": "-1", "funcname": "SUM", "subtotalText": "小计"},
+            "6": {"style": 17, "text": f"#{{{D}.amount}}",
+                  "aggregate": "select", "subtotal": "-1", "funcname": "SUM", "subtotalText": "小计"},
+        },
+        "height": 54,
+    },
+}
+merges = ["C1:G1"]   # 标题从C列起
+
+# base_save 关键参数
+base_save(report_id, designer,
+    rows=rows, cols=cols, styles=styles, merges=merges, chartList=[],
+    isGroup=True, groupField=f"{D}.field1",
+)
+```
+
+## 场景二：数据绑定列合并重复值
+
+```json
+{
   "2": {
     "cells": {
       "1": {"text": "#{orders.order_no}", "style": 2, "dynamicMerge": 1},
@@ -372,23 +412,16 @@ rows = {
 }
 ```
 
-**关键点**:
-- `dynamicMerge: 1` 添加在需要合并的列单元格上
-- 该列必须是数据绑定列（使用 `#{db.field}`）
-- 通常配合纵向分组使用，效果更佳
+## 设计器操作
 
-## 设计器配置步骤
-
-1. 选中固定值所在列的单元格
-2. 右键 → 动态合并格 → 设定
-3. 设定完成后，单元格右上角显示红色角标
-4. 鼠标悬浮提示"动态单元格"
+1. 选中目标单元格
+2. 右键 → **动态合并格 → 设定**
+3. 单元格右上角出现红色角标，悬浮提示"动态单元格"
 
 ## 注意事项
 
-- `dynamicMerge` 是单元格级别的配置
-- 适用于需要将重复数据合并显示的场景
-- 动态合并后，该列的边框样式可能需要手动调整以保持美观
+- `dynamicMerge` 是 cell 级别属性，不影响顶层 `merges` 数组
+- 动态合并后该列的边框样式可能需要手动调整
 ---
 
 # 打印配置完整参考（printConfig）
@@ -765,9 +798,24 @@ session.request("/share/addAndEdit", {
 
 ---
 
+## 查询分享记录
+
+```
+GET /share/queryJurisdiction?reportId={reportId}
+```
+
+返回当前有效的分享记录，含 `id`（share_id）、`shareToken`、`termOfValidity`、`status` 等字段。`result` 为 `null` 表示该报表尚未创建分享。
+
+```python
+resp = session.get(f"/share/queryJurisdiction?reportId={report_id}")
+share = resp.get("result")  # None 表示无分享记录
+if share:
+    share_id = share["id"]
+```
+
 ## 取消分享
 
-同一接口，传 `status: "1"` + 分享记录 `id`：
+先用 `queryJurisdiction` 拿到 share_id，再传 `status: "1"` 取消：
 
 ```python
 session.request("/share/addAndEdit", {
@@ -798,4 +846,7 @@ python report_export.py share --name "报表名" --validity 2
 
 # 不校验token
 python report_export.py share --name "报表名" --verify 0
+
+# 取消分享（只需报表名，自动查 share_id）
+python report_export.py unshare --name "报表名"
 ```

@@ -250,7 +250,7 @@ def main():
     # ========== 第4步：节点字段权限（可选） ==========
     node_permissions = config.get('nodePermissions', {})
     if node_permissions:
-        print(f'\n[4/5] 配置节点字段权限...')
+        print(f'\n[4/6] 配置节点字段权限...')
         for node_code, field_perms in node_permissions.items():
             perm_result = bpmn_creator.set_node_field_permissions(
                 args.api_base, args.token, process_id, node_code, form_code,
@@ -262,9 +262,18 @@ def main():
                         print(f'    [警告] {err}')
             else:
                 print(f'  {node_code}: 设置失败 - {perm_result.get("errors", [])}')
-        step_label = '5/5'
+        step_label = '6/6'
     else:
-        step_label = '4/4'
+        step_label = '5/5'
+
+    # ========== 第5步：重新发布流程（节点配置修改后必须重新发布才生效） ==========
+    redeploy_step = '5/5' if not node_permissions else '5/6'
+    print(f'\n[{redeploy_step}] 重新发布流程（使节点配置生效）...')
+    redeploy_result = bpmn_creator.deploy_process(args.api_base, args.token, process_id)
+    if redeploy_result.get('success'):
+        print(f'  重新发布成功')
+    else:
+        print(f'  重新发布失败: {redeploy_result.get("message", "")}')
 
     # ========== 角色授权 ==========
     print(f'\n[{step_label}] 授权给管理员角色...')
@@ -284,7 +293,7 @@ def main():
     print(f'  应用名称: {app_name}')
     print(f'')
     print(f'  [表单] ID: {form_id} | 编码: {form_code} | 布局: {layout}')
-    print(f'  [流程] ID: {process_id} | Key: {process_key} | 已发布')
+    print(f'  [流程] ID: {process_id} | Key: {process_key} | 已发布（含节点配置）')
     print(f'  [关联] 表单已关联到流程')
     if node_permissions:
         print(f'  [权限] 已配置 {len(node_permissions)} 个节点的字段权限')

@@ -23,6 +23,9 @@
   # 重命名页面
   py page_ops.py rename <API_BASE> <TOKEN> <PAGE_ID> --name "新名称"
 
+  # 标记/取消模板
+  py page_ops.py set-template <API_BASE> <TOKEN> <PAGE_ID> --flag 1   # 1=设为模板, 0=取消
+
   # 删除页面
   py page_ops.py delete <API_BASE> <TOKEN> <PAGE_ID>
 """
@@ -258,6 +261,21 @@ def cmd_rename(args):
     print(f'页面重命名: "{old_name}" → "{args.name}"')
 
 
+def cmd_set_template(args):
+    """标记/取消页面为模板（izTemplate 字段）
+
+    后端 /drag/page/edit 是 MyBatis Plus updateById 语义，只传 {id, izTemplate}
+    就能单字段更新，无需回传 template/style/theme 等全字段。
+    """
+    result = bi_utils._request('POST', '/drag/page/edit',
+                               data={'id': args.page_id, 'izTemplate': args.flag})
+    if not result.get('success'):
+        print(f'设置失败: {result.get("message", "未知错误")}')
+        return
+    action = '设为模板' if args.flag == 1 else '取消模板'
+    print(f'{action}成功: {args.page_id} (izTemplate={args.flag})')
+
+
 def cmd_delete(args):
     """删除页面"""
     result = bi_utils._request('DELETE', '/drag/page/delete', params={'id': args.page_id})
@@ -315,6 +333,12 @@ def main():
     add_common(p_rename)
     p_rename.add_argument('--name', required=True, help='新页面名称')
 
+    # set-template
+    p_tpl = subparsers.add_parser('set-template', help='标记/取消模板')
+    add_common(p_tpl)
+    p_tpl.add_argument('--flag', type=int, required=True, choices=[0, 1],
+                       help='1=设为模板, 0=取消模板')
+
     # delete
     p_delete = subparsers.add_parser('delete', help='删除页面')
     add_common(p_delete)
@@ -338,6 +362,8 @@ def main():
         cmd_watermark(args)
     elif args.command == 'rename':
         cmd_rename(args)
+    elif args.command == 'set-template':
+        cmd_set_template(args)
     elif args.command == 'delete':
         cmd_delete(args)
 

@@ -158,3 +158,18 @@ JSON 配置格式：
 - dictField = 根节点父ID值（填 `0` 表示全部显示）
 - dictText = `ID列,父ID列,显示列,是否有子节点列`（如 `id,pid,name,has_child`）
 - **存储值 = dictText 中第1个字段（ID列）的值**
+- **使用 `sys_category` 作为数据源时，必须通过 `componentProps` 配置（而非 dictTable/dictField），格式如下：**
+```json
+{
+  "componentProps": {
+    "dict": "sys_category,name,id",
+    "pidField": "pid",
+    "pidValue": "0",
+    "multiple": false
+  }
+}
+```
+- `dict` 格式：`表名,显示列,值列`
+- `pidField`：父ID字段名
+- `pidValue: "0"`：必填，指定根节点父ID，缺少此项会导致树节点加载异常
+- `multiple`：是否多选

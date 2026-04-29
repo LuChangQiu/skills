@@ -270,7 +270,7 @@ if __name__ == '__main__':
     import sys
     if len(sys.argv) < 3:
         print('用法: python onlform_defval.py <api_base> <token>')
-        print('示例: python onlform_defval.py http://localhost:8080/jeecg-boot your-token')
+        print('示例: python onlform_defval.py <api_base> <token>')
         sys.exit(1)
 
     init_api(sys.argv[1], sys.argv[2])

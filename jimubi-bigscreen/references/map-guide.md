@@ -317,7 +317,7 @@ cfg['commonOption']['effect'] = {
 | `option.tooltip.enterable` | 鼠标可进入 tooltip | `true` |
 | `option.tooltip.textStyle.fontSize` | tooltip 字号 | `20` |
 | `option.tooltip.textStyle.color` | tooltip 文字色 | `'#fff'` |
-| `option.tooltip.backgroundColor` | tooltip 背景色 | `'rgba(0,2,89,0.8)'` |
+| `option.tooltip.backgroundColor` | tooltip 背景色 | `'#000259CC'` |
 | `option.tooltip.fieldMapping` | 字段映射 | `[]` |
 | `option.geo.aspectScale` | 地图宽高比缩放 | `0.96` |
 
@@ -326,7 +326,7 @@ cfg['commonOption']['effect'] = {
 cfg['option']['tooltip'] = {
     'show': True, 'trigger': 'item', 'enterable': True,
     'textStyle': {'fontSize': 14, 'color': '#fff'},
-    'backgroundColor': 'rgba(0,2,89,0.8)',
+    'backgroundColor': '#000259CC',
     'fieldMapping': [],
 }
 ```

@@ -5,6 +5,14 @@
 
 注意：本工具操作的是 jimu_dict（/jmreport/dict/*），不是 sys_dict（/sys/dict/*）。
 
+⚠️ dictCode 一旦用过就永久占用：
+    /jmreport/dict/delete 只做逻辑删除（del_flag=1），但 /jmreport/dict/add 的
+    唯一性校验不过滤 del_flag 也不区分 tenant——历史软删/跨租户记录都会让
+    新 add 返回 "字典编码已存在！"。所以同一个 code 删了不能再 add 回来。
+    典型表现：add → delete → add(同 code) → 400 编码已存在。
+    解决：换个新 code（如 sex → gender → gender2），或直接清库
+    `DELETE FROM jimu_dict WHERE dict_code = 'xxx'`（需 DB 权限，非本 skill 范畴）。
+
 使用方式（命令行）：
 
   # 列出所有字典
@@ -82,11 +90,18 @@ def _query_dict_by_id(dict_id):
 
 
 def _get_dict_items(dict_id):
-    """获取字典的所有字典项"""
+    """获取字典的所有字典项
+
+    /jmreport/dictItem/list 返回 IPage：result = {records, total, pageNo, ...}
+    取 result.records 才是字典项数组；老版本代码直接 `result.get('result', [])`
+    会把 IPage dict 当 list，迭代出 key 字符串，后续 item['id'] 报 TypeError。
+    """
     result = bi_utils._request('GET', '/jmreport/dictItem/list', params={
         'dictId': dict_id,
+        'pageSize': 500,
     })
-    return result.get('result', []) or []
+    page = result.get('result') or {}
+    return page.get('records', []) or []
 
 
 # ============================================================
@@ -154,11 +169,19 @@ def cmd_create(args):
         dict_id = dict_rec['id']
     else:
         # 2. 创建字典（/jmreport/dict/add 返回 result=null，需要重新查询获取 ID）
-        bi_utils._request('POST', '/jmreport/dict/add', data={
+        #    必须检查 success — 后端会在 dictCode 冲突时返回
+        #    {success:false, message:"字典编码已存在！"}。不检查会把真实错因
+        #    伪装成后续的"查询不到"，让人误判为查询侧 bug。
+        #    注意：唯一性校验不过滤 del_flag / tenant — 历史软删/跨租户记录
+        #    也会占住 code，此时需改用新 code（或清库）。
+        add_resp = bi_utils._request('POST', '/jmreport/dict/add', data={
             'dictName': args.name,
             'dictCode': args.code,
             'description': args.desc or '',
         })
+        if not add_resp.get('success'):
+            print(f'创建字典失败: {add_resp.get("message", "未知错误")}')
+            return
 
         # 重新查询获取字典 ID
         dict_rec = _query_dict_by_code(args.code)

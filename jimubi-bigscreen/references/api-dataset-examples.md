@@ -232,3 +232,19 @@ py dataset_ops.py create-api $API_BASE $TOKEN \
   - 设备异常：https://api.jeecg.com/mock/51/propertyFireFighting?type=equipmentDetails → JScrollBoard
   - 巡检任务：https://api.jeecg.com/mock/51/propertyFireFighting?type=inspectionTasksTable → JCommonTable
 ```
+
+---
+
+## 自建 mock（带参联动/钻取）
+
+本文档列的 92 条是**静态** mock——不会按查询参数返回不同数据，仅适合"纯展示"场景。
+
+若大屏需要**联动/钻取**（点击 A → B 按参数刷新），必须自建带 query 参数分支的 mock：
+
+| 步骤 | 脚本 |
+|------|------|
+| ① 建 mock + 启用高级脚本 | `yapi_ops.py create-mock --advmock-script "if(params.brand){mockJson={data:[...]}}else{mockJson={data:[...]}}"` |
+| ② 建 API 数据集并声明参数 | `dataset_ops.py create-api --params "brand:品牌" --url "https://api.jeecg.com/mock/57/claude/xxx?brand=${brand}"` |
+| ③ 绑组件 + 配置联动 | `dataset_ops.py bind` + `linkage_ops.py add-linkage --mapping "name=brand"` |
+
+**完整端到端流程 + 踩坑见 `references/linkage-drill-guide.md` §API 数据集联动实战**。

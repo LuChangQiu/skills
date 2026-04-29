@@ -11,6 +11,54 @@ JeecgBoot 大屏/仪表盘设计器 Python 工具库
     add_chart(page_id, 'JBar', '月度销售', x=50, y=280, w=860, h=380,
               categories=['1月','2月','3月'], series=[{'name':'销售额','data':[820,932,901]}])
     save_page(page_id)
+
+公共函数分类索引（快速定位）
+----------------------------------------
+【初始化 / HTTP】
+    init_api(api_base, token)                 设置 API_BASE / TOKEN
+    _request(method, path, data, params)      底层 HTTP（requests.Session，缺依赖回退 urllib）
+
+【页面 CRUD】
+    create_page(name, style, theme, ...)      新建大屏/仪表盘，返回 page_id；自动缓存 _page_components
+    query_page(page_id)                       拉完整页面（含 template），同步缓存 desJson
+    list_pages(style, page_no, page_size)     分页列表
+    save_page(page_id)                        提交组件 + desJson；_page_components 缺失时兜底查询
+    delete_page(page_id, physical)            逻辑/物理删除
+    recover_page(page_id)                     回收站恢复
+    copy_page(page_id)                        复制
+
+【数据集 Helper】
+    find_dataset_by_name(name)                按名字查第一条（精确匹配优先）
+    fetch_dataset_detail(dataset_id)          按 ID 查 list 详情
+
+【组件通用】
+    add_component(page_id, component, title, x, y, w, h, config)
+                                              底层组件注入（自动生成 UUID/key/layer）
+    update_page(page_id, new_components)      重置 template
+    add_to_existing(page_id, fn, *args)       对已有页面调组件函数（先 query_page）
+
+【数值 / 进度 / 指标】
+    add_number / add_gauge / add_liquid / add_countdown
+    add_progress / add_total_progress
+
+【图表 / 表格 / 排行】
+    add_chart(page_id, chart_type, ...)       ECharts 类（JBar/JLine/JPie/...）
+    add_table / add_scroll_table
+    add_ranking
+
+【文本 / 媒体 / 装饰】
+    add_text / add_image / add_current_time
+    add_word_cloud / add_color_block
+    add_border / add_decoration
+
+【菜单/业务工具】
+    gen_menu_sql(parent_name, children, ...)  拼菜单 SQL
+
+【内部辅助】
+    _get_mode / _make_card / _gen_key / _gen_uuid
+    _resolve_comp_type / _get_category / _deep_merge
+
+> 想查字段细节直接跳到对应 `def` — 全部函数含 docstring + 示例参数。
 """
 
 import json
@@ -19,6 +67,16 @@ import urllib.parse
 import time
 import random
 import uuid
+import hashlib
+
+# 可选：requests 提供连接池 + Keep-Alive，单脚本内多次调用显著更快。
+# 不可用时回退到 urllib，保持零依赖行为兼容（企业/离线环境）。
+try:
+    import requests as _requests  # type: ignore
+    _SESSION = _requests.Session()
+except ImportError:
+    _requests = None
+    _SESSION = None
 
 # ============================================================
 # 全局配置
@@ -40,7 +98,7 @@ _BIGSCREEN = {
     'border_color': '#FFFFFF00',
     'title_color': '#ffffff',
     'axis_color': '#ffffff',
-    'grid_color': 'rgba(255,255,255,0.1)',
+    'grid_color': '#FFFFFF1A',
     'body_color': '#ffffff',
     'suffix_color': '#ffffff',
     'legend_color': '#ffffff',
@@ -48,9 +106,9 @@ _BIGSCREEN = {
     'card': {'title': '', 'extra': '', 'rightHref': '', 'size': 'small'},
     'number_font_size': 32,
     # 表格
-    'table_header_bg': 'rgba(0,0,0,0.3)',
+    'table_header_bg': '#0000004D',
     'table_header_color': '#ffffff',
-    'table_body_bg': 'rgba(0,0,0,0.1)',
+    'table_body_bg': '#0000001A',
     'table_body_color': '#ffffff',
     'table_body_font_size': 14,
     'table_header_font_size': 14,
@@ -60,7 +118,7 @@ _BIGSCREEN = {
     'scroll_header_bg': '#0a73ff',
     'scroll_header_color': '#ffffff',
     'scroll_body_color': '#ffffff',
-    'scroll_border_color': 'rgba(255,255,255,0.1)',
+    'scroll_border_color': '#FFFFFF1A',
     # 排行榜
     'ranking_color': '#1370fb',
     'ranking_text_color': '#fff',
@@ -141,26 +199,97 @@ def init_api(api_base, token):
 # ============================================================
 # HTTP 工具
 # ============================================================
-def _request(method, path, data=None, params=None):
-    """发送 HTTP 请求"""
-    url = f'{API_BASE}{path}'
-    if params:
-        url += '?' + urllib.parse.urlencode(params)
+_SIGNATURE_SECRET = 'dd05f1c54d63749eda95f9fa6d49v442a'
+_SIGNED_PATHS = {
+    '/drag/onlDragDatasetHead/queryFieldBySql',
+    '/drag/onlDragDatasetHead/queryFileFieldBySql',
+    '/drag/onlDragDatasetHead/queryAllById',
+    '/drag/onlDragDatasetHead/getDictByCodes',
+    '/drag/onlDragDatasetHead/getMapDataByCode',
+    '/drag/onlDragDatasetHead/getDataForDesign',
+    '/drag/onlDragDatasetHead/getTotalData',
+    '/drag/onlDragDatasetHead/getTotalDataByCompId',
+    '/drag/onlDragDatasetHead/generateChartSse',
+    '/drag/onlDragDatasetHead/updateChartOptSse',
+    '/drag/onlDragDatasetHead/generateSqlSse',
+    '/drag/page/addVisitsNumber',
+}
 
+
+def _compute_signature_headers(path, params, data):
+    """为带 @SignatureValidation 的接口生成 X-TIMESTAMP/X-Sign/V-Sign 头。
+
+    算法来自 signing-datasource-guide.md（packages/utils/encryption/signMd5Utils.js 的 Python 实现）。
+    """
+    json_obj = {}
+    if '?' in path:
+        qs = path.split('?', 1)[1]
+        for kv in qs.split('&'):
+            if '=' in kv:
+                k, v = kv.split('=', 1)
+                json_obj[k] = v
+    if params:
+        for k, v in params.items():
+            if isinstance(v, (int, float)):
+                v = str(v)
+            json_obj[k] = v
+    json_obj.pop('_t', None)
+    sorted_obj = dict(sorted(json_obj.items()))
+    sign_str = json.dumps(sorted_obj, ensure_ascii=False, separators=(',', ':')) + _SIGNATURE_SECRET
+    sign = hashlib.md5(sign_str.encode('utf-8')).hexdigest().upper()
+
+    hdrs = {
+        'X-TIMESTAMP': str(int(time.time() * 1000)),
+        'X-Sign': sign,
+    }
+    if data and isinstance(data, dict):
+        vjson = dict(data)
+        vjson['sign'] = sign
+        sign_param_obj = {k: v for k, v in vjson.items() if v and isinstance(v, str)}
+        sorted_v = dict(sorted(sign_param_obj.items()))
+        vsign_str = json.dumps(sorted_v, ensure_ascii=False, separators=(',', ':')) + _SIGNATURE_SECRET
+        hdrs['V-Sign'] = hashlib.md5(vsign_str.encode('utf-8')).hexdigest().upper()
+    return hdrs
+
+
+def _request(method, path, data=None, params=None):
+    """发送 HTTP 请求。
+
+    优先走 requests.Session（连接池复用，一次 TCP 握手服务多次请求）；
+    环境缺 requests 时无缝回退到 urllib.request，保持行为不变。
+
+    带 @SignatureValidation 的接口（见 _SIGNED_PATHS）自动附加 X-TIMESTAMP/X-Sign/V-Sign。
+    """
+    url = f'{API_BASE}{path}'
     headers = {
         'Content-Type': 'application/json;charset=UTF-8',
         'X-Access-Token': TOKEN,
     }
-
+    if path in _SIGNED_PATHS:
+        headers.update(_compute_signature_headers(path, params, data))
     body = None
     if data is not None:
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
 
+    if _SESSION is not None:
+        try:
+            resp = _SESSION.request(method, url, params=params, data=body,
+                                    headers=headers, timeout=30)
+            if resp.status_code >= 400:
+                print(f'[bi_utils] HTTP {resp.status_code}: {resp.text}')
+                resp.raise_for_status()
+            return resp.json()
+        except _requests.RequestException as e:
+            print(f'[bi_utils] Request error: {e}')
+            raise
+
+    # ---- urllib 回退路径 ----
+    if params:
+        url += '?' + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode('utf-8'))
-            return result
+            return json.loads(resp.read().decode('utf-8'))
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8') if e.fp else ''
         print(f'[bi_utils] HTTP {e.code}: {error_body}')
@@ -382,12 +511,46 @@ def delete_page(page_id, physical=False):
 
 
 def recover_page(page_id):
-    """恢复回收站中的页面"""
-    result = _request('POST', '/drag/page/recoveryDelete', data={'id': page_id})
+    """恢复回收站中的页面
+
+    后端 /drag/page/recoveryDelete 用 @RequestParam 接 id，必须走 query string；
+    传 JSON body 会 400 MissingServletRequestParameterException。
+    """
+    result = _request('POST', '/drag/page/recoveryDelete', params={'id': page_id})
     if not result.get('success'):
         raise Exception(f"恢复页面失败: {result.get('message')}")
     print(f'[bi_utils] 页面恢复成功: {page_id}')
     return True
+
+
+# ============================================================
+# 数据集查询公共 Helper
+# （comp_ops.py / dataset_ops.py 及任何自写脚本都可直接复用）
+# ============================================================
+def find_dataset_by_name(name, page_size=10):
+    """按名称查数据集，返回第一条精确匹配记录；无精确匹配回退模糊首条。
+
+    调用方：comp_ops.add --dataset-name、自写脚本在 bind 前的"先查后建"。
+    同名数据集不止一条时请用 ID 绑定避免取错。
+    """
+    resp = _request('GET', '/drag/onlDragDatasetHead/list',
+                    params={'pageNo': 1, 'pageSize': page_size, 'name': name})
+    records = resp.get('result', {}).get('records', []) or []
+    for r in records:
+        if r.get('name', '') == name:
+            return r
+    return records[0] if records else None
+
+
+def fetch_dataset_detail(dataset_id, page_size=10):
+    """按 ID 查数据集详情（list 接口字段表可能为空，需要的话再调 queryById）。"""
+    resp = _request('GET', '/drag/onlDragDatasetHead/list',
+                    params={'pageNo': 1, 'pageSize': page_size, 'id': dataset_id})
+    records = resp.get('result', {}).get('records', []) or []
+    for r in records:
+        if r.get('id') == dataset_id:
+            return r
+    return records[0] if records else None
 
 
 def copy_page(page_id):
@@ -468,6 +631,14 @@ def add_component(page_id, component, title, x, y, w, h, config=None):
     # 合并用户配置
     if config:
         _deep_merge(default_config, config)
+
+    # 强制同步 config.w/h/size 与外层 px_w/px_h——defaults JSON 里的尺寸（如
+    # JLiquid 默认 450×300）会被合进来变成内层尺寸，与外层不一致时部分组件
+    # 渲染会用内层尺寸算动画路径（典型：JLiquid 水波纹画到视野外）。外层是
+    # 真相源，这里覆盖回去。
+    default_config['w'] = px_w
+    default_config['h'] = px_h
+    default_config['size'] = {'width': px_w, 'height': px_h}
 
     # DoubleLineBar 特殊处理：补充 seriesType
     if actual_component == 'DoubleLineBar' and 'seriesType' not in default_config:
@@ -630,7 +801,7 @@ def add_chart(page_id, chart_type, title, x, y, w, h,
             'radius': radius,
             'data': pie_data,
             'emphasis': {'itemStyle': {'shadowBlur': 10, 'shadowOffsetX': 0,
-                                       'shadowColor': 'rgba(0,0,0,0.5)'}},
+                                       'shadowColor': '#00000080'}},
         }]
     elif categories and series:
         # 轴类图表
@@ -855,6 +1026,9 @@ def add_text(page_id, title, x, y, w, h, content='', font_size=16, color=None,
         color = mode['title_color']
 
     text_value = content or title
+    # 文本组件源码 text.vue:164-168 显式从 option.body.{color,fontSize,fontWeight,
+    # textAlign,letterSpacing,marginLeft,marginTop,fontStyle,fontFamily} 取值；
+    # 写在 option 顶层会被忽略，fallback 到 #000000/14px。
     config = {
         'dataType': 1,
         'chartData': {'value': text_value},
@@ -863,12 +1037,12 @@ def add_text(page_id, title, x, y, w, h, content='', font_size=16, color=None,
                 'color': color,
                 'fontSize': font_size,
                 'fontWeight': font_weight,
+                'textAlign': text_align,
                 'letterSpacing': letter_spacing,
                 'text': '',
                 'marginTop': 0,
                 'marginLeft': 0,
             },
-            'textAlign': text_align,
             'card': {'title': '', 'extra': '', 'rightHref': '', 'size': 'default'},
             'openUrl': '',
             'isLink': False,

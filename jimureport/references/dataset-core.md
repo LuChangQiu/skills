@@ -220,6 +220,73 @@ save_db(session,
 
 > `searchFlag=0`：系统内部参数，不会显示为用户查询控件；`searchFlag=1`：显示为页面查询条件。
 
+### 3.2.2 API 数据集接收查询条件参数
+
+> **⚠️ 有 `paramList` 时必须同步处理 apiUrl，否则参数传不进去：**
+> - 联动 / 钻取传参 → **方式一**：`api_url` 末尾加 `?paramName=${paramName}`
+> - 页面查询控件 → **方式二**：`fieldList` 里对应字段设 `searchFlag=1`
+>
+> 两者任选其一，漏掉则参数无效。
+
+SQL 数据集可以在语句里写 FreeMarker 条件（`<#if isNotEmpty(x)> AND x='${x}'</#if>`）实现过滤；API 数据集没有这个机制，有以下两种方式传递查询条件参数：
+
+---
+
+**方式一：在 URL 末尾拼 `${paramName}` 占位符**（显式，适合钻取传参 / 地址栏传参）
+
+```python
+# apiUrl 和 dbDynSql 都写含占位符的完整 URL
+api_url = "https://api.example.com/list?category=${category}"
+
+save_db(session, report_id, "db_code", "数据集名称",
+        api_url, field_list,
+        [{"paramName": "category", "paramTxt": "类别", "paramValue": "",
+          "widgetType": "String", "orderNum": 1, "searchFlag": 1, "searchMode": 1}],
+        db_type="1", api_url=api_url, api_method="0",
+        is_list="1", is_page="1")
+```
+
+- 引擎请求前将 `${category}` 替换为实际值后拼入 URL
+- `paramList` 中的 `paramName` 必须与 URL 占位符名称完全一致
+- 多参数：`?a=${a}&b=${b}`，顺序不限；单引号可选（`?x='${x}'`）
+
+---
+
+**方式二：在「报表字段明细」中开启字段的「查询」checkbox**（`searchFlag=1`，适合页面查询控件过滤）
+
+在数据集设计器的 **「报表字段明细」tab** 中，将需要过滤的字段的「查询」列勾选（✓）。jimureport 会将该字段自动注册为查询条件，用户在报表预览中输入值并点击查询时，系统自动将字段值作为 query param 传入 API 请求。
+
+```python
+# URL 不需要手动拼 ${category}，设置字段 searchFlag=1 即可
+api_url = "https://api.example.com/list"
+
+field_list = [
+    ...,
+    # 在 fieldList 中将 category 字段的 searchFlag 设为 1
+    {"fieldName": "category", "fieldText": "类别", "widgetType": "String",
+     "orderNum": 4, "tableIndex": 0, "extJson": "", "dictCode": "",
+     "searchFlag": 1, "searchMode": 1},   # ← 开启查询，等价于勾选「查询」checkbox
+]
+
+save_db(session, report_id, "db_code", "数据集名称",
+        api_url, field_list,
+        db_type="1", api_url=api_url, api_method="0",
+        is_list="1", is_page="1")
+```
+
+---
+
+**两种方式对比：**
+
+| | 方式一（URL 拼参） | 方式二（字段开启查询） |
+|--|--|--|
+| 适用场景 | 钻取传参、地址栏传参、固定过滤 | 报表页面查询控件 |
+| URL 写法 | 需手动拼 `?key=${key}` | URL 保持原样 |
+| 代码位置 | `apiUrl` / `dbDynSql` | `fieldList[i].searchFlag=1` |
+| API 实际收到 | URL query param | URL query param（自动拼接） |
+
+> **YApi mock 不根据 query param 过滤数据**，参数会传入但返回完整数组；真实后端需自行解析 query param 并过滤。
+
 ```python
 
 # 错误：只设 dbDynSql，设计器 UI 显示空白

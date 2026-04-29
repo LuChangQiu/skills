@@ -69,7 +69,7 @@ def resolve_head_id(api_base: str, token: str, config: dict) -> str:
     result = api_request(api_base, token,
                          f'/online/cgform/head/list?tableName={table_name}&copyType=0&pageNo=1&pageSize=1',
                          method='GET')
-    records = result.get('result', {}).get('records', [])
+    records = (result.get('result') or {}).get('records', [])
     if not records:
         print(f'错误: 表 {table_name} 不存在')
         sys.exit(1)
@@ -140,7 +140,7 @@ def _insert_tree_node(api_base: str, token: str, head_id: str,
         print(f'{indent}插入失败 [{name}]: {result.get("message")}')
         return 0
 
-    new_id = result.get('result', {}).get('id', '')
+    new_id = (result.get('result') or {}).get('id', '')
     name = node_data.get('name', node_data.get('title', '未知'))
     print(f'{indent}插入成功 [{name}], id={new_id}, pid={pid or "(root)"}')
 

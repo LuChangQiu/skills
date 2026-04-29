@@ -1,6 +1,36 @@
 # 大屏组件配置修改参考
 
 修改大屏组件样式时，根据组件类型和修改目标，使用对应的配置路径。
+
+## 专文索引（这些组件配置有独立详细文档，必须跳转过去看）
+
+| compType | 专文路径 |
+|---|---|
+| `JBreakRing` | `references/break-ring-option-config.md` |
+| `JCardScroll` | `references/card-scroll-option-config.md` |
+| `JGaoDeMap` | `references/gaode-map-option-config.md` |
+| `JListProgress` | `references/list-progress-option-config.md` |
+| `JOrbitRing` | `references/orbit-ring-option-config.md` |
+| `JPermanentCalendar` | `references/permanent-calendar-option-config.md` |
+| `JScrollList` | `references/scroll-list-option-config.md` |
+| `JSemiGauge` | `references/semi-gauge-option-config.md` |
+| `JStatsSummary` | `references/stats-summary-option-config.md` |
+| `JTabToggle` | `references/tab-toggle-option-config.md` |
+
+> 这 10 个有专文的组件本文件**也**有简表（保持入口一致），但完整属性以专文为准。其他 86 个组件全部在本文件中（含末尾"补充：原本未文档化的 11 个组件"小节）。
+
+## 目录（按需跳读）
+
+- §修改输出格式 / §颜色修改规则 / §通用规则 — 调用约定、着色与共性
+- §基础配置 / §标题设置 / §X轴 / §Y轴 / §图例 / §柱体 / §折线 / §饼图 / §坐标轴边距 / §数值设置 — ECharts 通用面板字段
+- §文本设置（JText/JCurrentTime/JNumber）/ §翻牌器（JCountTo）/ §进度条 / §列表进度图 / §水波图 / §象形图系列 — 指标/装饰类组件
+- §仪表盘系列 / §环形图系列 / §玉珏 / §矩形图 / §颜色块 / §字符云 / §闪光云 — 仪表/云图
+- §轮播表格 / §表格/数据表/列表 / §滚动/历程/排名/气泡排名 / §滚动列表（JScrollList）— 表格与排名板
+- §3D 金字塔/漏斗 / §圆形进度图 / §图片/图标/轮播图 / §边框装饰 / §播放器 / §Iframe / §按钮 / §天气 — 交互/媒体组件
+- §环形/南丁格尔/胶囊/百分比柱状/ECharts 进度条 — 小图表补充
+- §地图系列（地图设置/配色/视觉映射/散点/热力/柱体/飞线）— 地图专属字段
+- §组件数据格式（chartData）/ §组件与设置面板映射表 / §ECharts 与非 ECharts 组件区分 — 数据结构与关联关系
+
 ## 修改输出格式
 
 只返回需要修改的属性，不包含未修改的配置：
@@ -1025,6 +1055,8 @@ JStatsSummary
 ### 其他组件
 | 组件 | 设置面板 |
 |------|---------|
+| JCommon | BasicOption（**用 `config.customOption` 写 JS 代码生成 option**；与 JCustomEchart 区分：JCustomEchart 用 chartData=JSON option，JCommon 用 customOption=JS 字符串） |
+| JCustomEchart | BasicOption（chartData = 完整 ECharts option JSON；详见末尾"补充"节） |
 | JWordCloud | BasicOption, WordCloudOption, CustomColorOption |
 | JImgWordCloud | BasicOption, WordCloudOption |
 | JFlashCloud | BasicOption, FlashCloudOption |
@@ -1044,6 +1076,146 @@ JStatsSummary
 | JDragBorder | BasicOption, BorderDecorationStyle |
 | JDragDecoration | BasicOption, BorderDecorationStyle |
 | JRoundProgress | BasicOption, RoundProgressOption |
+
+---
+
+## 补充：原本未文档化的 11 个组件
+
+> 以下从源码补提取，每条都标注了源码位置便于核对。
+
+### JCustomEchart 自定义 ECharts
+- **实现**: `packages/components/echarts/CustomEchart/customEchart.vue`
+- **关键字段**:
+  - `config.chartData`: **完整 ECharts option JSON**（不是普通 `[{name,value}]`），组件直接拿来渲染
+  - `config.option`: 与 chartData deepMerge，可覆盖任意字段
+- **限制**:
+  - 写 API 数据时不能把 chartData 当普通数据数组传——它就是 option 本体
+  - LinearGradient 需用 `{"__type":"LinearGradient","__raw":"..."}` 序列化
+  - 在 `noJsConfig` 列表，不支持 JS 增强配置
+
+### JTotalProgress 统计进度图
+- **实现**: `packages/components/echarts/totalProgress/progress.vue`
+- **关键字段**:
+  - `option.targetValue`: `{[fieldName]: number}` 目标值映射，**key 必须等于 `valueFields[0].fieldName`**
+  - `option.compStyleConfig.showProgressText` / `progress.{show,name}` / `target.{show,name}`: 进度/目标标签
+  - `valueFields[0].fieldTxt`: 进度条标题（取首项 fieldTxt）
+- **chartData**: `[{value: 50}, ...]`，每条渲染一个进度条；进度 = value / targetValue[fieldName]
+- **限制**:
+  - `targetValue` key 不匹配 fieldName 时进度恒为 0
+  - value 为 NaN/null 自动归零
+  - `noLinkageComp`：不支持联动
+
+### JPivotTable 透视表
+- **实现**: `packages/components/pivotTable/Table.vue` + `useTableBiz.ts:126-133`
+- **关键字段**:
+  - `config.nameFields`: 行维度数组（首项为分组轴）
+  - `config.typeFields`: 列维度数组（决定表头层数，每层 48px）
+  - `config.compStyleConfig.izPage` / `columnFreeze`: 分页 / 固定列
+- **chartData**: 二维 JSON 数组，字段名对应 nameFields/typeFields/valueFields
+- **限制**:
+  - **必须 `dataType=4`**——dataType=1 静态数据时 dataSource 直接置空，不渲染
+  - `noLinkageComp`：不支持联动
+  - 滚动高度 = 总高 - 24 - 40 - typeFields.length × 48 - 卡片头高，列层数多时正文很小
+
+### JRankingList 排行榜（自定义）
+- **实现**: `packages/components/rankingList/RankingList.vue`
+- **关键字段**:
+  - `option.compStyleConfig.summary`: `{showTotal, showName, totalType:'sum'|'max'|'min'|'average'}` 顶部总计行
+  - `option.compStyleConfig.showUnit`: `{numberLevel, decimal, position:'prefix'|'suffix', unit}` 数值单位
+  - `config.dataFilterNum`: 截取前 N 条
+- **chartData**: `[{name:'Java', value:369}, ...]`，**渲染前自动按 value 降序**；前 3 名显示金/银/铜奖杯 SVG，第 4 名起显示数字
+- **限制**:
+  - value 必须是数值（字符串会按字符串排序）
+  - 在 `noProperties`、`noEventComp`、`noScreenEventComp` 列表：属性面板无配置项、不支持点击/大屏事件
+
+### JCardCarousel 卡片轮播
+- **实现**: `packages/components/cardCarousel/CardCarousel.vue`
+- **关键字段**:
+  - `option.titleFieldMapping`: `{key, show, position:'top'|'bottom'|'left'|'right', direction, offset:{x,y}, textStyle}`
+  - `option.contentFieldMapping`: `[{key, name, nameStyle, valueStyle, nameCompose:{enabled,prefix,suffix,...}, valueCompose:{...}}]`
+  - `option.autoScrollEnabled` / `autoScrollDirection:'to-left'|'to-right'` / `autoScrollSpeed`（px/s，默认 100）
+  - `option.cardStyle`: `{backgroundColor, minWidth, borderRadius, padding*, margin*, backgroundImage, borderEnabled, borderWidth, borderStyle, borderColor}`
+  - `option.contentLineHeight` / `contentLineAlign:'space-between'|'start'|'center'`
+- **chartData**: `[{title:'销售汇总', orderNum:1247, orderAmount:28475000}, ...]`
+- **限制**:
+  - 自动滚动**仅当内容总宽 > 容器宽**时生效
+  - `nameCompose`/`valueCompose` 的 `enabled:false` 时 prefix/suffix 配置完全忽略
+
+### JCircleRadar 圆形雷达图
+- **实现**: `packages/components/echarts/CircleRadar/radar.vue`
+- **关键字段**:
+  - `option.radar[0].indicator`: 雷达轴定义（**由 chartData 的 `name` 字段自动生成**）
+  - `option.grid:{left, top}`: 控制雷达中心坐标，`center=[left%, top%]`
+  - `option.customColor`: 各系列颜色数组
+- **chartData**: `[{name:'得分', value:75, type:'NBA', max:100}]`；name=轴标签，type=系列名（同 type 一条线），value=该轴值
+- **限制**:
+  - **`max` 字段在 chartData 中无效**——构建 indicator 时只读 name；如要设 max 必须在 `option.radar[0].indicator` 里手动写
+  - type 为空时图表不渲染
+  - `dataFilterNum` 限制雷达轴数量（slice 前 N 条）
+
+### JBar3d 3D 柱形图（实为 ECharts pictorialBar 模拟）
+- **实现**: `packages/components/echarts3d/Bar3d/bar3d.vue`
+- **关键字段**:
+  - `option.graphic.children[0].style.fill`: 底座地面色（默认 `#3f4867`），同时应用到 children[0/1]
+  - `option.extraInfo`: `{enabledGradient, direction:'to bottom'|'to top', startColor, endColor}`
+  - `option.series[id='barColor'].color`: 柱体主色；`barTopColor` / `barBottomColor` 控制顶/底面
+- **chartData**: `[{name:'苹果', value:1000}, ...]`；阴影柱高自动 = max × 1.2
+- **限制**:
+  - **目录名带 echarts3d 但实际是 ECharts pictorialBar 模拟，不是 Three.js**
+  - `option.graphic.children` 必须至少 1 项且含 `style.fill`，否则地面色不生效
+  - `option.series` 用 id 匹配：`barTopColor` / `barBottomColor` / `barColor` / `shadowColor` / `shadowTopColor`
+
+### JBarGroup3d 3D 分组柱形图（同 JBar3d，分组版）
+- **实现**: `packages/components/echarts3d/BarGroup3d/BarGroup3d.vue`
+- **关键字段**:
+  - `option.seriesCustom`: `{barTopColor:[], barBottomColor:[], barColor:[], shadowColor:[], shadowTopColor:[]}` 各分组颜色（**10 色循环**）
+  - `option.graphic.children[0].style.fill`: 底座色
+- **chartData**: `[{name:'1991销量', value:13000, type:'小米'}, ...]`；**必须含 `type` 字段**作为分组维；同 name 下不同 type 并排
+- **限制**:
+  - 无 `type` 字段时 series 为空，不渲染
+  - 同 JBar3d，本质是 pictorialBar 不是 Three.js
+  - 分组数 > 10 时颜色循环复用
+
+### JDragEditor 富文本（TinyMCE）
+- **实现**: `packages/components/editor/JDragEditor.vue`
+- **关键字段**: 无特有 option；内容存 `config.chartData`，支持 3 种格式：字符串 / `{value:html}` / `[{value:html}]`（取 [0]）
+- **限制**:
+  - 编辑器修改直接写回 `config.chartData`，依赖整体页面保存
+  - 在 `noProperties`、`noEventComp`、`noRefreshComp` 列表：无属性面板、无事件、不自动刷新
+  - 高度 = `size.height - 20px`，组件本身 25px 上边距，小尺寸时编辑区被压缩
+
+### JForm 查询表单（联动驱动器）
+- **实现**: `packages/components/form/Form.vue`
+- **关键字段**:
+  - `option.fields`: `[{fieldName, fieldTxt, widgetType:'input'|'select'|'date', dictCode, searchMode:'single'|'range'|'multi', dateFormat, defaultValue, izSearch}]`
+  - `option.showSubmitBtn` / `showResetBtn` / `mode:'dark'|null`
+  - `config.showBtn`: false 时实时联动（无需点击查询）
+  - `config.linkageConfig`: `[{linkageId, linkage:[{source, target}]}]`
+- **chartData**: 无（表单不显示图表，数据通过联动推送给其他组件）
+- **限制**:
+  - `noStaticData`：不支持静态数据，必须走联动或数据集
+  - `showBtn=false` 时 watch 是 `{deep:true, immediate:true}`，**挂载即触发一次联动**；后续 model 变化触发 debounce 查询
+  - 日期 defaultValue 支持 `=dateStr(format, offset)` 动态表达式；range 模式用 `|` 分隔两端
+
+### JVideoJs RTMP 播放器（Video.js）
+- **实现**: `packages/components/video/js/videoJs.vue`
+- **关键字段**: `option.url`：mp4 / webm / ogg / flv / m3u8；RTMP/RTSP **会自动转换为 HTTP-FLV** 尝试播放
+- **chartData**: 无，所有配置在 option 中；默认 `{url: "http://vjs.zencdn.net/v/oceans.mp4"}`
+- **限制**:
+  - **RTMP/RTSP 浏览器原生不支持**；自动转换为 `http://host/path.flv` 后能否播放取决于服务端是否部署流媒体转发
+  - HLS.js 支持代码已注释，**m3u8 当前仅 Safari 原生支持**
+  - `noEventComp`/`noScreenEventComp`：不支持点击联动
+  - 设计器预览有黑色半透明蒙层（z-index:33）覆盖视频，防误操作
+
+---
+
+## 顺手发现的隐藏限制（未在专章节说明，作为补遗）
+
+- **JBarGroup3d**: 颜色数组超 10 个时按取模循环；`option.seriesCustom` 可整体覆盖颜色（`BarGroup3d.vue:132`）
+- **JCircleRadar**: chartData 中 `max` 字段被忽略，构建 indicator 时只读 name（`radar.vue:78`）
+- **JPivotTable**: `dataType=1` 完全无效，dataSource 强制置空（`useTableBiz.ts:126-133`）
+- **JForm**: `showBtn=false` 时挂载立即触发一次联动查询（`Form.vue:240`）
+- **JVideoJs**: 设计器中蒙层 z-index:33 防误操作（`videoJs.vue:3-4`）
 
 ---
 

@@ -280,7 +280,7 @@ def cmd_add_map(args):
                     'areaColor': '#0d2c54',
                     'borderColor': '#4ebfcf',
                     'borderWidth': 1.5,
-                    'shadowColor': 'rgba(0,0,0,0.5)',
+                    'shadowColor': '#00000080',
                     'shadowBlur': 10,
                     'shadowOffsetX': 0,
                     'shadowOffsetY': 5,

@@ -52,8 +52,26 @@
 | **关系图** | | | | |
 | 普通关系图 | 关系图 | `graph.simple` | `""` | 不绑数据集，节点+边内嵌 config；extData 只需 chartId+chartType |
 
+**API 图表轴字段选择（必须用 `pick_chart_axes`）**：
+
+```python
+from jimureport_chart import pick_chart_axes
+field_list = parse_api(session, api_url)          # 或 parse_sql
+axis_x, axis_y = pick_chart_axes(field_list)      # 语义关键词自动选轴
+# chart_entry 会在 axis_x != "name" 时自动设 isCustomPropName=True，无需手动干预
+```
+
+> ⚠️ **patch 脚本禁止硬编码 `isCustomPropName=False`**。字段名非 `name`/`value` 时必须显式设：
+> ```python
+> if axis_x != "name" or axis_y != "value":
+>     ext["isCustomPropName"] = True
+>     ext["xText"] = axis_x
+>     ext["yText"] = axis_y
+> ```
+
 **关键参数默认值：**
 - `api_status="0"`（JSON静态数据集）/ `api_status="1"`（SQL/API数据集）
+- ⚠️ **API 数据集图表必须用 `api_status="1"`**，写 `"0"` 会导致图表用静态空数据渲染，数据集绑定不生效
 - `data_type="json"` / `data_type="sql"`
 - 单系列图表 `series=""` — 多系列图表 `series="type"`
 - **API 图表字段名非 `name`/`value` 时**：必须在 `chart_entry` 返回的对象上追加：
