@@ -140,8 +140,12 @@ def _insert_tree_node(api_base: str, token: str, head_id: str,
         print(f'{indent}插入失败 [{name}]: {result.get("message")}')
         return 0
 
-    new_id = (result.get('result') or {}).get('id', '')
-    name = node_data.get('name', node_data.get('title', '未知'))
+    raw_result = result.get('result')
+    if isinstance(raw_result, dict):
+        new_id = raw_result.get('id', '')
+    else:
+        new_id = str(raw_result) if raw_result else ''
+    name = node_data.get('name', node_data.get('org_name', node_data.get('title', '未知')))
     print(f'{indent}插入成功 [{name}], id={new_id}, pid={pid or "(root)"}')
 
     count = 1

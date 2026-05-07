@@ -18,6 +18,7 @@ SIGNED_PATHS = [
     "/queryFieldBySql", "/executeSelectApi", "/loadTableData",
     "/testConnection",  "/download/image",   "/dictCodeSearch",
     "/getDataSourceByPage", "/getDataSourceById",
+    "/exportReportConfig", "/exportAllExcelStream", "/exportPdfStream", "/export/word",
 ]
 
 

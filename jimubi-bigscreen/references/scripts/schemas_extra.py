@@ -89,10 +89,18 @@ EXTRA_SCHEMAS = {
     },
     'JFlashList': {
         'category': '闪动排行列表',
-        'spec_fields': 'data:[{name,value}], option.title, titleColor, titleSize, numberColor, numberSize, itemColor, animateType',
+        'spec_fields': 'data:[{name,value}], option.title<string>, titleShow<bool>, titleColor, titleSize, numberColor, numberSize, itemColor, animateType',
         'pitfalls': [
             '数据绑定走顶层 dataMapping（A 类型）filed=[维度, 数值]',
             '带闪动动画效果，视觉聚焦',
+            '⚠️ option.title 是【字符串】（默认 "排名统计"），不是 ECharts title 对象。'
+            '误传 {show:true,text:"...",textStyle:{...}} 前端 Vue 模板直接 {{ option.title }} 输出，'
+            '把对象 JSON.stringify 后整段 {"show":true,"text":"...","textStyle":...} 当文本贴出，'
+            '溢出容器形成"漏 JSON"错觉。显隐用 option.titleShow（boolean），颜色字号用 option.titleColor / option.titleSize。',
+            '⚠️ 只渲染前 4 条数据（组件内 result.slice(0,4)，按 value 降序）。超出会被静默丢弃。',
+            '⚠️ 容器最小宽度建议 ≥240px。180-200px 时长名称（≥10 汉字如 "火灾突发-海淀清河"）'
+            '会被强制单字竖排堆叠——左侧序号块 + 右侧 numberSize 数值带走 ~80px，可用名称区 <130px 撑不下。'
+            '解决：加宽到 240+ 或把 name 简化到 6-8 字（"火灾·海淀"格式）。',
         ],
         'selection': '需要视觉聚焦的排行列表（带闪动）；常规排行用 JScrollRankingBoard；进度条样式用 JCapsuleChart',
         'passthrough': True,

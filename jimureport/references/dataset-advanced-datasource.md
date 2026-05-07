@@ -469,29 +469,43 @@ existing_params = detail.get('paramList', [])
 
 ### 修改数据源名称
 
-```python
-# 1. 按 name 查找数据源
-list_r = api_request(f'/jmreport/getDataSourceByPage?token={TOKEN}&pageNo=1&pageSize=100')
-matched = [r for r in list_r['result']['records'] if r.get('name') == '原名称']
+> **必读**：`/getDataSourceByPage` 在 `SIGNED_PATHS` 中需要签名。用封装的 `Session.request` 时**必须把分页参数作为 data dict 传入**（让签名机制生效），**不能**把参数拼在 path 里。
+> `/initDataSource` 是免签名简版，**只返回 `id+name`**——重命名/改密码场景拿不到 `dbUrl/dbUsername/dbPassword`，必须走 `/getDataSourceByPage`。
 
-# 2. 多条时取最新的（id最大）
+```python
+from jimureport_utils import Session
+session = Session(BASE_URL, TOKEN)
+
+# 1. 分页查询（必须用 method='GET' + data dict，触发签名）
+list_r = session.request('/getDataSourceByPage',
+                         {'pageNo': 1, 'pageSize': 100}, method='GET')
+records = list_r['result'].get('records') or list_r['result']
+matched = [r for r in records if r.get('name') == '原名称']
+
+# 2. 多条同名取最新的（id最大）
 target = max(matched, key=lambda x: x['id'])
 
-# 3. 获取完整详情（分页查询不含连接信息）
-detail = api_request(f'/jmreport/getDataSourceById?id={target["id"]}')['result']
-
-# 4. 修改名称并保存（传 id = 编辑模式）
-api_request('/jmreport/addDataSource', {
-    "id": detail['id'],           # 传 id → 编辑
-    "reportId": detail.get('reportId', ''),
-    "code": detail.get('code', ''),
-    "name": "新名称",              # 修改的字段
-    "dbType": detail['dbType'],
-    "dbDriver": detail['dbDriver'],
-    "dbUrl": detail['dbUrl'],
-    "dbUsername": detail['dbUsername'],
-    "dbPassword": detail['dbPassword']
+# 3. 修改名称并保存（POST /addDataSource，传 id = 编辑模式）
+session.request('/addDataSource', {
+    "id":         target['id'],                    # 传 id → 编辑
+    "reportId":   target.get('reportId', '') or '',
+    "code":       target.get('code', '') or '',
+    "name":       "新名称",                          # 修改的字段
+    "dbType":     target['dbType'],
+    "dbDriver":   target.get('dbDriver', '') or '',
+    "dbUrl":      target['dbUrl'],
+    "dbUsername": target['dbUsername'],
+    "dbPassword": target['dbPassword'],
 })
+```
+
+**禁止写法**（会反复报"签名验证失败：签名参数不存在"或 405）：
+```python
+# ❌ 把参数拼在 path 里 → Session.request data=None → 跳过签名
+session.get('/getDataSourceByPage?pageNo=1&pageSize=100')
+
+# ❌ 用 POST → 接口只支持 GET，405 Method Not Allowed
+session.request('/getDataSourceByPage', {'pageNo': 1}, method='POST')
 ```
 
 ### 删除数据源

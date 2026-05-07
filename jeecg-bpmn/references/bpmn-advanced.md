@@ -49,6 +49,26 @@
 | `fieldName` | 字段中文名 | 用于设计器显示 |
 | `expectedValue` | 比较值 | 字符串格式 |
 
+> **⚠️ fieldType 必须与 DesForm 字段类型精确匹配（实测验证）**
+> fieldType 写错时，条件表达式在 XML 中存在且运行时可能正常，但设计器「条件规则配置」面板上字段下拉框显示为空（无法反解析），导致用户无法在界面上查看和修改条件。
+
+**DesForm 字段类型 → fieldType 映射表（实测）：**
+
+| DesForm 字段 `type` | 条件 `fieldType` | 备注 |
+|---------|---------|------|
+| `money` | `"money"` | ❌ 不要用 `"number"` |
+| `integer` | `"integer"` | |
+| `number` | `"number"` | 仅纯数字类型 |
+| `input` / `textarea` | `"input"` | |
+| `select` | `"select"` | |
+| `radio` | `"radio"` | 实测验证 |
+| `checkbox` | `"checkbox"` | |
+| `date` | `"date"` | |
+| `select-user` | `"select-user"` | |
+| `select-depart` | `"select-depart"` | |
+| Online 表单整数字段 | `"integer"` | model 以 `integer_` 开头 |
+| 系统变量（`result` 等） | `"integer"` 或 `"number"` | result 为 0/1 |
+
 **多条件组合：** 支持多个条件组（数组中多个对象），也支持单个组内多个条件：
 ```json
 [{
@@ -737,3 +757,107 @@ if (amount > 1000 && type == "purchase") {
 | 广播范围 | 全局广播，所有监听者都能收到 | 点对点，指定接收者 |
 | 定义位置 | `<bpmn2:signal>` 与 process 同级 | `<bpmn2:message>` 与 process 同级 |
 | 适用场景 | 跨节点/跨流程同时通知多方 | 流程间精确单向通信 |
+
+---
+
+## 9. 手动修改已有流程 XML（增量编辑）
+
+> 适用场景：用户要求在现有流程中插入/修改节点、网关、条件，而不是重建整个流程。
+
+### 9.1 标准操作流程
+
+```python
+import json, base64, re, urllib.request, urllib.parse
+
+# Step 1: 获取当前 XML
+result = api_get(f'/act/process/extActProcess/queryById?id={PROCESS_ID}')
+info = result['result']
+xml_str = base64.b64decode(info['processXml']).decode('utf-8')
+process_key = info.get('processKey', '')   # 注意大写 K，queryById 返回驼峰
+process_name = info['processName']
+
+# Step 2: 用字符串操作修改 XML
+#   - 替换连线 targetRef / sourceRef
+#   - 修改节点 incoming/outgoing 子元素
+#   - 在 </bpmn2:process> 前插入新节点/连线
+#   - 在 </bpmndi:BPMNPlane> 前插入新 Shape/Edge
+
+# Step 3: 获取节点列表（用于 nodes 参数）
+nodes_result = api_get(f'/act/process/extActProcessNode/list?processId={PROCESS_ID}')
+node_records = nodes_result.get('result', {}).get('records', [])
+nodes_str = '@@@'.join(
+    f'id={n["processNodeCode"]}###nodeName={n["processNodeName"]}'
+    for n in node_records if n.get('processNodeCode') not in ('start', 'end')
+)
+
+# Step 4: 保存
+save_data = {
+    'processDefinitionId': PROCESS_ID,
+    'processName': process_name,
+    'processkey': process_key,     # saveProcess 请求字段全小写
+    'typeid': info.get('processType', 'oa'),
+    'lowAppId': '', 'params': '',
+    'nodes': nodes_str,
+    'processDescriptor': xml_str,  # 原始 XML，不要 base64
+    'realProcDefId': '',
+    'startType': info.get('startType', 'manual'),
+}
+save_result = api_post_form('/act/designer/api/saveProcess', save_data)
+# ⚠️ 编辑已有流程时 save_result['obj'] 可能为 null（实测）
+# 此时 saveProcess 仍成功，但不返回新 ID，直接用原 PROCESS_ID 发布
+if not save_result.get('success'):
+    raise Exception(f'saveProcess failed: {save_result}')
+new_id = save_result.get('obj') or PROCESS_ID
+
+# Step 5: 发布
+deploy_result = api_put_json('/act/process/extActProcess/deployProcess', {'id': new_id})
+```
+
+### 9.2 插入排他网关的完整模板
+
+```python
+def make_condition_expr(field_model, field_type, field_name, operator, value):
+    """构造正确的 evaluateExpression 条件表达式（用于原始 XML）"""
+    cond_json = [{"logic": "and", "conditions": [{
+        "operator": operator,
+        "field": field_model,
+        "fieldType": field_type,    # 必须匹配 DesForm 字段类型，见映射表
+        "fieldName": field_name,
+        "expectedValue": str(value)  # 注意是 expectedValue，不是 value
+    }]}]
+    b64 = base64.b64encode(json.dumps(cond_json, ensure_ascii=False).encode()).decode()
+    # &#39; 转义单引号（在 XML 元素内容中合法）
+    return "${flowUtil.evaluateExpression(execution,&#39;" + b64 + "&#39;,&#39;and&#39;)}"
+
+# 示例：金额 > 1000
+expr_gt = make_condition_expr('money_1777276832095_357468', 'money', '预算金额', 'gt', '1000')
+expr_le = make_condition_expr('money_1777276832095_357468', 'money', '预算金额', 'lte', '1000')
+
+# 插入网关 XML 片段（在 </bpmn2:process> 前）
+new_elements = (
+    '<bpmn2:exclusiveGateway id="gateway_amount" name="金额判断">'
+    '<bpmn2:incoming>flow_2</bpmn2:incoming>'
+    '<bpmn2:outgoing>flow_gt1000</bpmn2:outgoing>'
+    '<bpmn2:outgoing>flow_le1000</bpmn2:outgoing>'
+    '</bpmn2:exclusiveGateway>'
+    f'<bpmn2:sequenceFlow id="flow_gt1000" name="大于1000" sourceRef="gateway_amount" targetRef="task_gm">'
+    f'<bpmn2:conditionExpression xsi:type="bpmn2:tFormalExpression">{expr_gt}</bpmn2:conditionExpression>'
+    '</bpmn2:sequenceFlow>'
+    f'<bpmn2:sequenceFlow id="flow_le1000" name="小于等于1000" sourceRef="gateway_amount" targetRef="task_dept">'
+    f'<bpmn2:conditionExpression xsi:type="bpmn2:tFormalExpression">{expr_le}</bpmn2:conditionExpression>'
+    '</bpmn2:sequenceFlow>'
+)
+xml_str = xml_str.replace('</bpmn2:process>', new_elements + '</bpmn2:process>')
+```
+
+### 9.3 常见陷阱
+
+| 陷阱 | 原因 | 解决方法 |
+|------|------|---------|
+| `saveProcess obj: null` | 编辑已有流程时服务端不返回新 ID | `new_id = save_result.get('obj') or PROCESS_ID` |
+| 第二次运行脚本 assert 失败 | XML 上次已修改，模式匹配失效 | 每次从 `queryById` 重新拉取最新 XML |
+| 条件规则面板字段为空 | `fieldType` 不匹配，或条件 JSON 缺 `logic/conditions` 包装，或用了 `value` 而非 `expectedValue` | 用 `make_condition_expr` 函数生成，对照映射表填 fieldType |
+| deploy "未找到对应实体" | `id` 传了 null 或错误 | 确保 `new_id = save_result.get('obj') or PROCESS_ID` |
+| Python `r.get('result', {})` 返回 `None` | API 返回 `{"result": null}` 时，key 存在但值为 null，`dict.get(key, default)` 的 default 只在 key **不存在** 时生效 | 改用 `(r.get('result') or {})` —— `or` 会在 None/False/0 时启用默认值 |
+| 角色创建后 admin 未加入角色 | `sys/role/add` 成功但 result 字段为 null（返回数字ID），`result.get('id')` 报 AttributeError | 用 `result_val = r.get('result') or {}`，再 `role_id = result_val.get('id') if isinstance(result_val, dict) else str(result_val)` |
+| deploy "路径不存在" | 使用了错误的 deploy 端点（如 `GET /deploy?id=...`） | 正确端点：`PUT /act/process/extActProcess/deployProcess`，body `{"id": id}`；始终用 `deploy_process()` 函数，不要手动拼接 |

@@ -1,5 +1,21 @@
 # taskExtendJson 与监听器配置
 
+## 0. 常见需求速查（避免猜字段名）
+
+> **⛔ 修改已有节点的 taskExtendJson 前，必须先读 XML 确认现有字段名，不可猜测。**
+
+| 用户需求 | 字段 | 正确值 | 错误示例 |
+|---------|------|--------|---------|
+| 审批人与发起人为**同一人**时自动跳过 | `sameMode` | `2` | ~~`isSkipAssigneeSameUser: true`~~、~~`isSkipApproval: true`~~（后者是无条件跳过） |
+| 只有**一个候选人**时自动签收 | `isSkipAssigneeOnePersion` | `true` | ~~`isAutoClaimTask: true`~~、~~`isSkipOne: true`~~ （注意字段名拼写 `Persion` 不是 `Person`）|
+| 审批人**为空**时自动跳过 | `isSkipAssigneeEmpty` | `true` | - |
+| **无条件**跳过（自动通过，与发起人无关） | `isSkipApproval` | `true` | 不要与 sameMode=2 混淆 |
+| 由**上一节点**指派审批人 | `isAssignedByPreviousNode` | `true` | - |
+
+配置以上任意跳过行为的节点，**必须**同时挂载 `TaskSkipApprovalListener`（event=create），否则配置不生效。
+
+---
+
 ## 1. taskExtendJson 配置说明
 
 taskExtendJson 控制审批节点的行为，以 JSON 字符串存储在 extensionElements 中：

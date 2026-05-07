@@ -335,6 +335,25 @@ def handle_JStatsSummary(c, p):
     if c.get('showCompare') is False:
         d.setdefault('option', {}).setdefault('sections', {}).setdefault('middle', {})['show'] = False
 
+    # 变体 2/3 默认 layout.fill.type=image 但 image.url 为空 → 平台回退到纯色，看起来"没背景"
+    # 自动填充平台内置素材 drag/lib/img/bg01.png（变体 2 用 layout 整层底图，变体 3 用 card 单卡片底图）
+    # 用户可通过 spec 顶层 bgImageUrl 字段或 option.layout.fill.image.url / option.card.fill.image.url 覆盖
+    if variant in ('2', '3'):
+        DEFAULT_BG = c.get('bgImageUrl', 'drag/lib/img/bg01.png')
+        target_section = 'layout' if variant == '2' else 'card'
+        sec = d.setdefault('option', {}).setdefault(target_section, {})
+        fill = sec.setdefault('fill', {})
+        img = fill.setdefault('image', {})
+        # 仅当用户未提供 url 时填默认值
+        if not img.get('url'):
+            img['url'] = DEFAULT_BG
+            img.setdefault('size', '100% 100%')
+            img.setdefault('repeat', 'no-repeat')
+            img.setdefault('position', 'center')
+        # 确保 fill.type=image（用户显式改 type=color/gradient 时不覆盖）
+        if fill.get('type') not in ('color', 'gradient'):
+            fill['type'] = 'image'
+
     # 折行高度回写：根据指标数量和组件宽度推算实际渲染行数，将 pos[3]（h）更新为正确值
     # 避免折行后下方组件被压盖（JStatsSummary 高度由 CSS 撑起，不受 h 字段控制，
     # 但 h 正确有助于 spec 后续组件的 y 坐标计算与布局检查）
@@ -1138,11 +1157,11 @@ SCHEMAS = {
     },
     'JStatsSummary': {
         'category': 'KPI 统计概览',
-        'spec_fields': 'variant("1"|"2"|"3"), data:[{name, value<number>, suffix|unit, compareLabel, compareValue, up:bool}], showCompare:bool(默认 true，false 隐藏中部同比/环比区)',
+        'spec_fields': 'variant("1"|"2"|"3"), data:[{name, value<number>, suffix|unit, compareLabel, compareValue, up:bool}], showCompare:bool(默认 true，false 隐藏中部同比/环比区), bgImageUrl:str(变体 2/3 底图 URL，默认 drag/lib/img/bg01.png)',
         'variants': {
             '1': '卡片分区式：top/middle/bottom 三层，最常用',
-            '2': '背景色块式：整卡带色块底',
-            '3': '高亮强调式：数值高亮突出',
+            '2': '背景色块式：整卡带色块底（layout 层背景图）',
+            '3': '高亮强调式：数值高亮突出（card 层背景图）',
         },
         'pitfalls': [
             'value 必须是数字（"48,620" 含逗号→NaN）',
@@ -1151,6 +1170,7 @@ SCHEMAS = {
             '不需要同比/环比时 spec 写 "showCompare": false（handler 自动设 option.sections.middle.show=false 隐藏中部区）',
             '⚠️ 高度字段 h 不生效：组件高度由内部三层（top标签/middle数值/bottom对比）内容 + 上下内边距撑起；写 pos=[x,y,w,h] 的 h 只是占位，不是最终可视高度。**全显 180px**（与 defaults 对齐）；**showCompare=false 隐中部后实测 153px**。布局时下方组件的 y 坐标至少预留对应高度，否则会被压盖。缩小高度需手动改 option.card/sections 的 padding 与字号。',
             '⚠️ 数据集绑定走 option.fieldMap（B.1）。机制速查见 references/data-binding-mapping.md',
+            '⚠️ 变体 2/3 默认 image.url 为空 → handler 自动注入平台内置素材 drag/lib/img/bg01.png（变体 2 写 layout 层、变体 3 写 card 层）。覆盖：spec 顶层 bgImageUrl="<URL>"，或显式写 option.layout.fill.image.url / option.card.fill.image.url。改纯色/渐变写 option.<layout|card>.fill.type="color"|"gradient" handler 不覆盖',
         ],
         'selection': '多指标 KPI 卡片带环比（4-6 项最佳）。仅数字用 JNumber/JCountTo。单大数字用 JCountTo',
     },

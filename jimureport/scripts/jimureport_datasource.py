@@ -50,6 +50,16 @@ def ensure_datasource(
     """
     确保指定名称的数据源存在，返回其 ID。
     已存在：1 次 HTTP；不存在：创建 + 再查，2 次 HTTP。
+
+    dbType 枚举值（大小写严格，前端下拉枚举匹配）：
+      MySQL 5.7  → "MYSQL5.7"    MySQL 8   → "MYSQL8"
+      Oracle     → "ORACLE"      SQLServer → "SQLSERVER"
+      PostgreSQL → "POSTGRESQL"  Redis     → "redis"  ← 全小写（唯一例外，已验证）
+      MongoDB    → "mongodb"
+    Redis 示例：
+      ensure_datasource(session, "myRedis", db_type="redis",
+                        db_driver="redis.clients.jedis.Jedis",
+                        db_url="127.0.0.1:6379")
     """
     resp = session.get("/initDataSource")
     records = resp.get("result", [])

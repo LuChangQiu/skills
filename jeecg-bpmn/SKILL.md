@@ -1,6 +1,6 @@
 ---
 name: jeecg-bpmn
-description: Use when user asks to create/generate a BPM workflow, design a Flowable BPMN process, or says "创建流程", "生成流程", "新建流程", "设计流程", "画流程", "审批流程", "工作流", "BPM", "BPMN", "create flow", "create process", "new workflow", "generate workflow". Also triggers when user describes an approval chain like "先经理审批再HR审批" or mentions process nodes like "开始→审批→网关→结束". Also triggers for OA application creation: "创建OA应用", "创建审批单", "创建报销单", "创建请假单", "做一个OA表单带流程", "一键创建表单和流程", "create OA app", "create approval form with workflow".
+description: Use when user asks to create/generate/edit/modify a BPM workflow, design a Flowable BPMN process, or says "创建流程", "生成流程", "新建流程", "设计流程", "画流程", "审批流程", "工作流", "BPM", "BPMN", "create flow", "create process", "new workflow", "generate workflow". Also triggers when user describes an approval chain like "先经理审批再HR审批" or mentions process nodes like "开始→审批→网关→结束". Also triggers for OA application creation: "创建OA应用", "创建审批单", "创建报销单", "创建请假单", "做一个OA表单带流程", "一键创建表单和流程", "create OA app", "create approval form with workflow". Also triggers for ANY operation on existing processes: "编辑流程", "修改流程", "删除监听器", "添加监听器", "删除节点", "添加节点", "修改节点", "配置节点", "流程中的", "edit process", "modify process", "delete listener", "add listener", "remove listener", "add node", "delete node", "configure node". Key rule: whenever user mentions a specific process name (like "网关测试") with any modification intent, this skill MUST be invoked FIRST before any manual API exploration.
 ---
 
 # JeecgBoot BPM 流程自动生成器
@@ -14,6 +14,502 @@ description: Use when user asks to create/generate a BPM workflow, design a Flow
 > 1. **会签节点**：串行/并行两种模式；全部通过/一人通过/半数通过/按比例/自定义 5种通过规则；指定人员/角色/审批角色/部门/岗位/职级/表单字段/流程变量 8种审批人类型
 > 2. **条件表达式**：系统内置流程变量（`result`、`applyUserId`、`applyDate` 等）；13种条件运算符；多条件组合用法（AND/OR）
 > 3. **监听器**：执行监听器/任务监听器/全局事件监听器三种类型；系统预置监听器（ProcessEndListener必需、TaskSkipApprovalListener、TaskCreatedAutoSubmitListener等）；taskExtendJson 节点行为控制字段说明
+
+## 性能规范与已验证规律
+
+> **⚠️ 禁止预防性读取参考文档。** 执行任务前不要为了"以防万用"而读取 references/ 下的文档。只在遇到具体问题时按需读取，且使用 offset/limit 指定行范围。
+>
+> **⚠️ 对外部 API 响应结构，先用小脚本探测，再写主逻辑。** 但下方速查表中**已验证的数据不需要重新探测**。
+>
+> **⚠️ 用不熟悉的 Python 模块前，必须先 `dir()` 查 exports。** 但下方速查表中**已验证的模块不需要重新 dir()**。
+>
+> **⚠️ 禁止对 API 响应的 `result` 直接做 `[:]` 切片。** JeecgBoot API 的 `result` 格式不统一：分页接口返回 dict `{"records": [...], "total": N}`，全量接口返回 list `[...]`，写操作返回 string。对 dict 做切片 → `KeyError: slice(None, 5, None)`。**强制规则：取值前必须根据「API 响应速查」表确定 result 类型，分页接口统一用 `.get('result', {}).get('records', [])`，全量接口用 `isinstance(result, list)` 判后再切片。**
+
+### 模块导入（固定模式，直接复用）
+
+```python
+import os, pathlib, sys
+_SKILLS_DIR = pathlib.Path.home() / '.claude' / 'skills'
+sys.path.insert(0, str(_SKILLS_DIR / 'jeecg-desform' / 'scripts'))  # desform_creator, desform_utils
+sys.path.insert(0, str(_SKILLS_DIR / 'jeecg-bpmn'    / 'scripts'))  # bpmn_creator, bpmn_oa
+sys.path.insert(0, str(_SKILLS_DIR / 'jeecg-system'  / 'scripts'))  # system_utils
+os.chdir(str(_SKILLS_DIR / 'jeecg-bpmn' / 'scripts'))
+import desform_utils as du; du.init_api(API_BASE, TOKEN)  # ⚠ 必须初始化，否则 ValueError: unknown url type
+import desform_creator as dc  # 无需初始化
+import bpmn_creator as bc     # 无需初始化，各函数直接传 api_base/token
+# system_utils 需要: from system_utils import init_api, ...; init_api(API_BASE, TOKEN)
+```
+
+### 函数返回值速查
+
+| 函数 | 返回类型 | 正确取值 |
+|------|---------|---------|
+| `dc.create_form(...)` | tuple `(form_id, title_field_model)` | `result[0]` |
+| `dc.get_form_id(code)` | tuple `(form_id, index)` | `result[0]` |
+| `bc.get_desform_fields(api_base, token, code)` | dict `{label: {model, key, type}}` | `fields.get('薪资', {}).get('model')` |
+| `bc.authorize_form(...)` | dict（**不是** tuple） | `r = bc.authorize_form(...)` |
+| `du.get_form_fields(code)` | list `[{name, model, type}]` | 返回表单字段列表。**注意：不存在 `du.get_form_detail()`** |
+
+### API 响应速查
+
+| API / 操作 | 返回值 | 正确取值 |
+|-----------|--------|---------|
+| `saveProcess` | dict | `result['obj']` 含新ID（编辑时可能 null，按 processKey 查）。路径：`/act/designer/api/saveProcess`，Content-Type：`application/x-www-form-urlencoded` |
+| `extActProcess/queryById` | dict | `result` 含流程全字段；`result['processXml']` 为 **base64 编码**的 XML，需 `base64.b64decode().decode('utf-8')` |
+| `sys/sysDepart/add` | `result=null` | 新建后用 `queryDepartAndPostTreeSync` 全量查找 |
+| `approvalRole/rootList` | `result.records[]`（**不是**裸数组） | `r['result']['records']`，每条 `{id, name, type, pid}` |
+| `approvalRole/childList?pid=xxx` | `result.records[]`（**不是**裸数组） | `r['result']['records']` |
+| `approvalRole/group/add` | `result="添加成功！"`（字符串，不是 ID） | 创建后调 `rootList` 按 name 查 ID |
+| `approvalRole/role/add` | `result="添加成功！"`（字符串，不是 ID） | 创建后调 `childList` 按 name 查 ID |
+| `sys/position/list` | `result.records[]` | 每条 `{id, name, code}`，用于 deptPosition 审批人 |
+| `query_approval_roles()` | `{'roles': [...], 'persons': [...]}` | 用 `find_approval_role(keyword)` |
+| `query_dept_positions()` | depart 树节点（`departName` 不是 `name`） | 过滤 `orgCategory=='3'` |
+
+### 关键函数签名
+
+| 函数 | 签名 |
+|------|------|
+| `du.create_form` | `(name, code, widgets, title_index=0, layout='auto', ...)` |
+| `bc.edit_node_config` | `(api_base, token, process_id, node_code, node_settings)` |
+| `bc.set_node_field_permissions` | `(api_base, token, process_id, node_code, form_code, field_permissions, form_type='2')` |
+
+### 其他关键规律
+
+- `dc.DIVIDER/USER/MONEY` 等常量**是函数不是字符串**，创建 widget 用 `dc.build_widget({'type':'money', 'name':'金额', 'required': True})`
+- `build_widget` 对**所有控件类型都强制要求 `name` 字段**（含 divider：`{'type': 'divider', 'name': '---', 'text': '标题'}`）
+- `build_widget` 合法 `type` 清单：基础 `input textarea number integer money date time switch slider rate color` / 选择 `radio select checkbox` / 系统 `select-user select-depart select-depart-post phone email area-linkage org-role` / 文件 `file-upload imgupload hand-sign` / 高级 `auto-number formula barcode location table-dict select-tree link-record link-field capital-money text-compose ocr map summary editor markdown` / OA `oa-approval-comments` / 布局 `tabs grid card divider text buttons`
+- DesForm 字段在 `design["list"]` 下（不是 `design["fields"]`），嵌套结构需递归提取：
+  ```python
+  def find_fields(node, results):
+      if isinstance(node, dict):
+          if node.get('type') not in ('grid','text','') and node.get('model'):
+              results.append(node)
+          for v in node.values(): find_fields(v, results)
+      elif isinstance(node, list):
+          for item in node: find_fields(item, results)
+  fields = []; find_fields(design, fields)
+  ```
+- `userTask` 含会签时 XML 子元素顺序：`extensionElements` → `incoming`/`outgoing` → `multiInstanceLoopCharacteristics`（顺序错报 `cvc-complex-type.2.4.a`）
+- 条件表达式必须调 `bc.build_condition_b64()`，手写格式：外层**数组** `[{"logic":"and","conditions":[...]}]`，`flowUtil.evaluateExpression` 需**三参数** `(execution, 'b64', 'and')`
+- 手工分支 + 网关组合 → 自动使用水平多行布局（`_detect_horizontal_multirow`），`W_GAP=60, MAIN_CY=330, LOWER_CY=540`
+- **包含网关（inclusiveGateway）带 default flow 时**：default flow 从 split 直达 join（无中间节点），`_detect_parallel_blocks` 已支持空链检测，`calc_layout` 只对非空分支做水平展开（已修复，此前空链导致检测失败、分支垂直堆叠重叠）
+- 子流程必须先于表单创建，否则表单关联冲突（修复：DELETE 子流程 formId 再重新 link_form）
+- `bpmn_oa.py` 支持 `subprocess` 键一键创建子流程，自动填充 `calledElement`
+- 手写子流程必须加 `"isSubProcess": True`（`bpmn_oa.py` 的 `_setup_oa_subprocess` 已自动设置）
+- **system_utils 函数**：查岗位 `query_dept_positions(dept_id=None)` / 查角色 `find_approval_role(keyword)` 返回 dict 或 None / 岗位列表 `GET /sys/position/list` / **不存在** `/sys/position/rank/list` `/sys/duty/list`
+- **不存在的 API（禁止尝试）**：`queryDepartTreeSync?pid=xxx` `queryIdTree` `queryTreeList` `queryMyDept` `loadNodeGroupData?groupType=deptPosition` `queryByKeywords` `sysDepart/list` `recycleBin/*`
+- **审批角色查找或创建模式**（防重复 + 获取真实 ID）：
+  ```python
+  def find_or_create_approval_role(name, grp_id):
+      def query_id():
+          r = api_get(f'/sys/approvalRole/childList?pid={grp_id}')
+          return next((c['id'] for c in r.get('result',{}).get('records',[]) if c['name']==name), None)
+      rid = query_id()
+      if not rid:
+          api_post('/sys/approvalRole/role/add', {'name': name, 'pid': grp_id})
+          rid = query_id()
+      return rid
+  ```
+- **`bc.edit_node_config` 不更新 `nodeConfigJson`（已踩坑）**：该函数只做 `node.update(settings)` 后 PUT，**不同步 `nodeConfigJson` 字段**。前端读 `nodeConfigJson.formEditStatus` 时仍为 false，导致可编辑节点实际不可编辑。**凡需设置 `formEditStatus=1` 的节点，必须手动同步更新 `nodeConfigJson`**，正确写法：
+  ```python
+  def fix_node_form_edit(api_base, token, process_id, node_code, url):
+      """设 formEditStatus=1 并同步 nodeConfigJson（edit_node_config 不做这步）"""
+      r = bc.api_request(api_base, token,
+          f'/act/process/extActProcessNode/list?processId={process_id}&pageNo=1&pageSize=50',
+          method='GET')
+      for node in (r.get('result') or {}).get('records', []):
+          if node.get('processNodeCode') == node_code:
+              node['formEditStatus'] = '1'
+              node['modelAndView'] = url
+              node['modelAndViewMobile'] = url
+              try:
+                  cfg = json.loads(node.get('nodeConfigJson') or '{}')
+              except Exception:
+                  cfg = {}
+              cfg['formEditStatus'] = True          # ← 关键：必须同步
+              node['nodeConfigJson'] = json.dumps(cfg, ensure_ascii=False)
+              return bc.api_request(api_base, token,
+                  '/act/process/extActProcessNode/edit', data=node, method='PUT')
+  ```
+  > `set_draft_nodes_editable` 已内置此逻辑；只有直接调 `edit_node_config` 设 formEditStatus 时需要用上述替代函数。
+- **子流程节点禁止使用 `draft=True`（已踩坑）**：在被 `callActivity` 调用的子流程中，任何节点都不能设 `draft=True`。原因：`draft=True` 会为节点添加 `TaskCreatedAutoSubmitListener`，callActivity 启动子流程时该监听器立即自动提交任务，此时子流程 execution 仍处于中间态，写入 `ACT_RU_VARIABLE` 时 `EXECUTION_ID_` 无效，触发 FK 约束失败（`ACT_FK_VAR_EXE`）。子流程中需要表单可编辑的节点，改用 `fix_node_form_edit` 显式设置 `formEditStatus=1` 即可。
+
+### 规则3：URL 中含中文参数必须用 urllib.parse.quote 编码（⚠️ 强制）
+
+```python
+# ✅ 正确
+import urllib.parse
+keyword = urllib.parse.quote('安全评审')
+url = f'{API_BASE}/sys/approvalRole/search?keyword={keyword}'
+# 或用 urlencode：params = urllib.parse.urlencode({'keyword': '安全评审'})
+```
+
+### 规则4：独立的系统数据查询必须合并到单个脚本一次执行（⚠️ 强制）
+
+不要分多轮 Bash 调用执行独立查询，合并到一个脚本里一次运行。
+
+### 规则5：部门/岗位查询只能用 queryDepartAndPostTreeSync（⚠️ 强制）
+
+```python
+req = urllib.request.Request(f'{API_BASE}/sys/sysDepart/queryDepartAndPostTreeSync', headers=HEADERS)
+result = json.loads(urllib.request.urlopen(req).read().decode())['result'] or []
+def flatten(nodes, acc=None):
+    if acc is None: acc = []
+    for n in (nodes or []):
+        if isinstance(n, dict):
+            acc.append(n)
+            flatten(n.get('children', []), acc)
+    return acc
+all_nodes  = flatten(result)
+depts      = [n for n in all_nodes if str(n.get('orgCategory','')) == '2']
+positions  = [n for n in all_nodes if str(n.get('orgCategory','')) == '3']
+```
+
+### 规则6：DesForm 表单编码被回收站占用时直接换编码（⚠️ 强制）
+
+`desform/add` 返回 `"该code已存在"` 但 `desform/list` 查不到 → 回收站占用。直接加后缀 `_v2`，禁止尝试 recycleBin API（均 404）。
+
+### 规则7：含 `${...}` 的 Python 脚本禁止用 `python -c "..."` 执行（⚠️ 强制）
+
+**现象：** `bash: bad substitution`，Python 根本没启动。
+
+**根因：** bash 双引号内的 `${...}` 会被当作 shell 变量展开。Python f-string 中的 `f'${{{model}}}'`（生成 DesForm URL 占位符如 `${BPM_DES_DATA_ID}`）触发 bash 的非法变量名错误。
+
+**强制规则：凡是脚本含 `${` 的，必须写入 `.py` 文件再执行，不得用 `-c "..."`。**
+
+```bash
+# ❌ 错误 —— bash 会展开 ${...}，报 bad substitution
+python -X utf8 -c "
+...
+f'${{{model}}}提交的申请'
+"
+
+# ✅ 正确 —— 写文件，bash 不解析文件内容
+# Write tool 写入 C:\Users\25067\tmp_script.py，然后：
+powershell -Command "& python -X utf8 C:\Users\25067\tmp_script.py"
+powershell -Command "Remove-Item 'C:\Users\25067\tmp_script.py'"
+```
+
+### 规则8：Scenario A 子流程创建后必须立即删除其表单绑定（⚠️ 强制）
+
+**现象：** 主流程 `link_form` 报 `"编码重复或表名已被授权流程！"`。
+
+**根因：** `bpmn_oa._setup_oa_subprocess` 内部会将主流程的 `form_code` 关联到子流程（`extActProcessForm`），后端对 `relationCode` 有唯一约束，导致主流程随后绑定同一表单失败。
+
+**强制规则：** 调用 `_setup_oa_subprocess` 后，主流程 `link_form` 前，必须先删除子流程的表单绑定：
+
+```python
+# _setup_oa_subprocess 执行完之后立即执行：
+import urllib.parse as _up
+q = _up.urlencode({'processId': sub_pid, 'pageNo': 1, 'pageSize': 10})
+sub_forms = bc.api_request(API_BASE, TOKEN,
+    f'/act/process/extActProcessForm/list?{q}', method='GET')
+for rec in (sub_forms.get('result') or {}).get('records', []):
+    bc.api_request(API_BASE, TOKEN,
+        f'/act/process/extActProcessForm/delete?id={rec["id"]}', method='DELETE')
+# 之后再 link_form 到主流程
+```
+
+> 此步骤不影响子流程运行——Scenario A 子流程通过 `JG_SUB_MAIN_PROCESS_ID` 共享主流程数据，无需自己独立绑定表单。
+
+### 规则9：API 响应遍历前必须做类型检查（⚠️ 强制）
+
+**现象：** `'str' object has no attribute 'get'` 或 `KeyError: 0`，程序崩溃。
+
+**根因：** 部分 API 的 `result` 字段结构不固定，可能是 `dict`（含 `records` 键）、裸 `list`、或 `str`。直接用 `[0]` 或 `.get()` 导致类型错误。
+
+**强制规则：凡是遍历 API 响应 `result` 的，必须先 `isinstance` 检查和 `print(type(result))` 确认结构。**
+
+```python
+# ❌ 错误 —— 假设 result 一定是 list
+for item in r['result']:  # 实际是 dict，抛出 KeyError
+    print(item['name'])
+
+# ✅ 正确 —— 先查验结构再遍历
+result = r.get('result', [])
+if isinstance(result, dict):
+    records = result.get('records', [])
+elif isinstance(result, list):
+    records = result
+else:
+    records = []
+for item in records:
+    print(item.get('name'))
+```
+
+### 规则10：复杂流程（含网关/会签/多种审批人）先 dry-run 验证 XML（⚠️ 推荐）
+
+**现象：** 直接调用 API 创建复杂流程后，发现 taskExtendJson 配置不正确或布局错乱，需要删除重建。
+
+**推荐流程：**
+```bash
+# 第一步：dry-run 只生成 XML，不调 API
+python "<skill目录>/scripts/bpmn_creator.py" \
+    --api-base <URL> --token <TOKEN> --config <config.json> --dry-run
+
+# 第二步：人工或脚本检查 XML 中的关键元素
+#   - taskExtendJson 的 sameMode/skipOne 值是否正确
+#   - assignee/candidateUsers/candidateGroups 属性是否存在
+#   - countersign/multiInstance/timer 等是否正确生成
+#   - 条件表达式的 field 字段 model 是否匹配 DesForm 实际字段
+
+# 第三步：确认无误后再正式创建（去掉 --dry-run）
+python "<skill目录>/scripts/bpmn_creator.py" \
+    --api-base <URL> --token <TOKEN> --config <config.json> --link-form
+```
+
+### 规则11：编辑已有流程 XML 时，正则必须兼容 `bpmn2:` 命名空间前缀（⚠️ 强制）
+
+**现象：** 用 `<userTask` 匹配开标签，实际 XML 是 `<bpmn2:userTask`，正则命中失败，脚本报"未找到节点"。
+
+**根因：** JeecgBoot 生成的 BPMN XML 固定使用 `bpmn2:` 命名空间前缀，所有 BPMN 元素名均带前缀（`bpmn2:userTask`、`bpmn2:endEvent`、`bpmn2:sequenceFlow` 等）。
+
+**强制规则：凡是用正则操作已有 BPMN XML，所有元素名必须加 `(?:bpmn2:)?` 前缀。**
+
+```python
+# ❌ 错误 —— 匹配不到 <bpmn2:userTask ...>
+pattern = rf'(<userTask[^>]*\bid="{node_code}"[^>]*>)'
+
+# ✅ 正确 —— 兼容有/无 bpmn2: 前缀两种写法
+pattern = rf'(<(?:bpmn2:)?userTask[^>]*\bid="{re.escape(node_code)}"[^>]*>)'
+```
+
+### 规则12：`candidateUsersExpression` 类型在 XML 中不加任何 `groupType`（⚠️ 强制）
+
+**现象：** 写了 `groupType="candidateUsersExpression"`（无 `flowable:` 前缀）导致发布失败：
+```
+cvc-complex-type.3.2.2: 元素 'bpmn2:userTask' 中不允许出现属性 'groupType'
+```
+
+**根因：** BPMN 标准不允许无命名空间的自定义属性。只有带 `flowable:` 前缀的属性（`flowable:groupType`）才合法。而 `candidateUsersExpression` 类型（`bpmn_creator.py` 368行）**本身就不生成任何 groupType 属性**。
+
+**各审批人类型 groupType 规则（来自 `bpmn_creator.py`）：**
+
+| 类型 | XML 属性 | groupType |
+|------|---------|-----------|
+| `expression` / `assignee` / `candidateUsers` | `flowable:assignee` / `flowable:candidateUsers` | **无** |
+| `candidateUsersExpression` | `flowable:candidateUsers="${表达式}"` | **无** |
+| `role` | `flowable:candidateGroups` | `flowable:groupType="role"` |
+| `approvalRole` | `flowable:candidateUsers="${flowUtil...}"` | `flowable:groupType="approvalRole"` |
+| `dept` | `flowable:candidateGroups` | `flowable:groupType="dept"` |
+| `deptPosition` | `flowable:candidateGroups` | `flowable:groupType="deptPosition"` |
+| `position` | `flowable:candidateUsers="${oaFlowExpression...}"` | `flowable:groupType="position"` |
+
+**强制规则：手写 XML 审批人属性前，必须先查 `bpmn_creator.py` 中对应 type 的生成代码（约 363-395 行），禁止凭记忆猜测。**
+
+### 规则13：手动调用 `saveProcess` 必须用 form-urlencoded + 正确路径（⚠️ 强制）
+
+**现象：** 调用 `/act/process/extActProcess/saveProcess` 报"路径不存在"。
+
+**根因：** `saveProcess` 的正确路径是 `/act/designer/api/saveProcess`，且必须用 `application/x-www-form-urlencoded` 编码，不能用 JSON。
+
+**强制规则：手动调用 saveProcess 必须严格按以下模板，禁止猜测路径或 Content-Type。**
+
+```python
+import urllib.parse
+
+save_data = {
+    'processDefinitionId': process_id,          # 已有流程ID（新建传 '0'）
+    'processName':  process_detail['processName'],
+    'processkey':   process_detail['processKey'],  # ⚠ 字段名是 processkey（全小写）
+    'typeid':       process_detail.get('processType', 'oa'),  # ⚠ 字段名是 typeid（全小写）
+    'lowAppId': '',
+    'params': '',
+    'nodes': nodes_str,                          # 见下方 nodes_str 构建方式
+    'processDescriptor': xml,                    # 原始 XML 字符串（非 base64）
+    'realProcDefId': '',
+    'startType': process_detail.get('startType', 'manual'),
+}
+
+# nodes_str 构建：只含 userTask 节点，格式 id=xxx###nodeName=xxx@@@
+nodes_str = ''.join(
+    f'id={n["processNodeCode"]}###nodeName={n["processNodeName"]}@@@'
+    for n in node_records  # 来自 extActProcessNode/list
+)
+
+form_body = urllib.parse.urlencode(save_data).encode('utf-8')
+req = urllib.request.Request(
+    f'{API_BASE}/act/designer/api/saveProcess',
+    data=form_body,
+    headers={**HEADERS, 'Content-Type': 'application/x-www-form-urlencoded'},
+    method='POST'
+)
+r = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
+```
+
+> 查询流程 XML：`GET /act/process/extActProcess/queryById?id={id}`，返回的 `processXml` 是 **base64 编码**，用 `base64.b64decode(xml_b64).decode('utf-8')` 解码；`processDescriptor` 传**原始 XML 字符串**。
+
+### 规则14：编辑已有流程前必须先 Grep 确认，不得猜测（⚠️ 强制）
+
+**现象：** 手写脚本时错误路径、错误属性名导致多轮失败，整体执行慢。
+
+**根因：** 执行前未查阅 `bpmn_creator.py` 源码就直接猜测 API 路径和 XML 属性，导致每次报错后才发现问题，反复修改脚本。
+
+**强制规则：编辑已有流程 XML 或调用 saveProcess 前，必须先用 Grep 查阅 `bpmn_creator.py` 的相关代码，确认后再写脚本。探查信息必须合并到单个脚本一次获取，严禁分多个探查脚本串行执行。**
+
+```python
+# 编辑流程前的必查清单（用 Grep，不要靠记忆）：
+# 1. saveProcess 路径：grep "saveProcess" bpmn_creator.py → /act/designer/api/saveProcess
+# 2. 目标审批人类型的 XML 生成：grep "candidateUsersExpression" bpmn_creator.py → 无 groupType
+# 3. 已有 XML 的节点命名空间：先探查 XML 打印节点开标签，确认是否有 bpmn2: 前缀
+```
+
+### 规则16：条件 fieldType 必须与 DesForm 字段实际类型完全一致（⚠️ 严重）
+
+**现象：** 条件规则配置面板中，字段和运算符正常显示，但值输入框为空（"请选择部门"占位符），"原始JSON数据"中条件值字段完全缺失。条件保存后无法生效。
+
+**根因（双重）：**
+1. 条件值字段名必须用 **`expectedValue`**，前端读的是 `expectedValue` 而非 `value`——传 `value` 时前端完全忽略，显示为空
+2. `fieldType` 必须与 DesForm 字段实际类型完全一致，否则前端规范化时丢弃 `expectedValue`
+
+**强制规则：conditionExpression 中每个 condition 必须同时满足：**
+- 字段名用 `expectedValue`（**不是** `value`）
+- `fieldType` 与 DesForm 字段 `type` 完全一致
+
+| DesForm 字段 `type` | condition 中的 `fieldType` |
+|---------------------|--------------------------|
+| `select-depart` | `"select-depart"` |
+| `select-user` | `"select-user"` |
+| `checkbox` | `"checkbox"` |
+| `select` / `radio` | `"select"` / `"radio"` |
+| `money` | `"money"` |
+| `integer` | `"integer"` |
+| `input` / `textarea` | `"input"` |
+| `date` | `"date"` |
+
+```python
+# ✅ 正确 —— expectedValue + 正确 fieldType
+cond = {"field": "select_depart_xxx", "fieldType": "select-depart", "fieldName": "所在部门",
+        "operator": "eq", "expectedValue": "dept_id_here"}
+
+cond = {"field": "money_xxx", "fieldType": "money", "fieldName": "报销金额",
+        "operator": "lt", "expectedValue": "1000"}
+
+# ❌ 错误 —— 用 "value" 代替 "expectedValue"，前端完全忽略，显示空白
+cond = {"field": "money_xxx", "fieldType": "money", "fieldName": "报销金额",
+        "operator": "lt", "value": "1000"}
+
+# ❌ 错误 —— fieldType 与实际类型不符，前端规范化时丢弃 expectedValue
+cond = {"field": "select_depart_xxx", "fieldType": "input", ...}
+```
+
+> `fieldType` 直接用 `bc.get_desform_fields()` 返回的 `info['type']`，**禁止手动映射或猜测**。
+
+---
+
+### 规则17：`position` 类型审批人表达式必须传三个参数（⚠️ 严重）
+
+**现象：** 前端"职务级别"选择框为空（"请选择职务级别"占位符），"开启职级表达式"勾选但无值，职级审批人实际为空，流程无法正常流转。
+
+**根因：** `oaFlowExpression.getApplyUserDeptPositionLevel` 需要三个参数：`(sys_org_code, applyUserId, positionId)`，传两个参数时方法签名不匹配，前端解析表达式提取 positionId 失败，显示为空。
+
+**强制规则：**
+
+```xml
+<!-- ✅ 正确 —— 三个参数 -->
+flowable:candidateUsers="${oaFlowExpression.getApplyUserDeptPositionLevel(sys_org_code, applyUserId, 'positionId')}"
+flowable:groupType="position"
+
+<!-- ❌ 错误 —— 用 execution 代替前两个参数，只有两个参数 -->
+flowable:candidateUsers="${oaFlowExpression.getApplyUserDeptPositionLevel(execution, 'positionId')}"
+```
+
+对应 JSON 配置：
+```json
+{"type": "position", "value": "1958471111989067778"}
+```
+`bpmn_creator.py` 第389行已正确生成三参数形式，**手写 XML 时必须严格按此格式，禁止简化参数列表**。
+
+---
+
+### 规则18：探查 XML 行内容必须用 `repr()` 打印原始字符串（⚠️ 强制）
+
+**现象：** 打印 XML 行时只用 `print(line)`，看不出行尾是否还有其他标签（如 `</bpmn2:extensionElements>`），写删除逻辑时整行删掉导致结构损坏，deploy 失败。
+
+**根因：** `print(line)` 不显示行边界，无法判断一行内是否同时包含多个标签。
+
+**强制规则：探查 XML 行内容时，必须用 `repr(line)` 打印，以便看清行尾是否还有其他内容。**
+
+```python
+# ❌ 错误 —— 看不出行尾有 </bpmn2:extensionElements>
+for i, line in enumerate(xml.splitlines()):
+    if 'TestExecutionListener' in line:
+        print(f'L{i+1}: {line}')
+
+# ✅ 正确 —— repr 显示完整内容，含行尾隐藏标签
+for i, line in enumerate(xml.splitlines()):
+    if 'TestExecutionListener' in line:
+        print(f'L{i+1}: {repr(line)}')
+# 输出: L20: '      <flowable:executionListener .../></bpmn2:extensionElements>'
+# 可见行尾还有 </bpmn2:extensionElements>，删除时必须保留该部分
+```
+
+**删除行内标签的正确模式：** 只删标签本身，保留同行其他内容：
+
+```python
+lines = xml.splitlines(keepends=True)
+new_lines = []
+for line in lines:
+    if 'TestExecutionListener' in line:
+        # 只删 executionListener 标签，保留同行剩余内容（如 </bpmn2:extensionElements>）
+        cleaned = re.sub(r'\s*<flowable:executionListener[^>]*TestExecutionListener[^>]*/>', '', line)
+        if cleaned.strip():          # 有剩余内容则保留
+            new_lines.append(cleaned)
+        # 否则整行丢弃（行内无其他内容）
+    else:
+        new_lines.append(line)
+```
+
+---
+
+### 规则19：`saveProcess` 成功即持久化，deploy 失败不回滚（⚠️ 强制）
+
+**现象：** `saveProcess` 返回 `success=True`，随后 `deployProcess` 失败。再次读取流程 XML 时，发现已是 saveProcess 提交的（可能损坏的）版本，而非原始版本。
+
+**根因：** `saveProcess` 和 `deployProcess` 是两个独立操作，`saveProcess` 一旦成功即写入数据库，deploy 失败不会回滚 save。
+
+**强制规则：在调用 `saveProcess` 之前，必须先用 dry-run 或本地验证确认 XML 结构合法，不要依赖 deploy 失败来发现 XML 错误。**
+
+```python
+# 保存前验证 XML 结构（最简验证）
+import xml.etree.ElementTree as ET
+try:
+    ET.fromstring(xml_new)
+    print('XML 结构合法 ✓')
+except ET.ParseError as e:
+    print(f'XML 结构错误，禁止保存: {e}')
+    exit(1)
+```
+
+---
+
+### 规则15：抄送配置必须写入 BPMN XML 的 ccConfigJson，不得写 nodeConfigJson（⚠️ 强制）
+
+**现象：** 将 ccConfig 写入 `extActProcessNode` 的 `nodeConfigJson` 字段，前端抄送人面板显示为空，配置不生效。
+
+**根因：** 前端读取的是 BPMN XML 中 `<flowable:ccConfigJson value="..."/>` 标签（base64 编码），`nodeConfigJson` 不是抄送人的存储位置。
+
+**强制规则：凡是添加或修改节点抄送人，必须修改 BPMN XML，在对应 userTask 的 `extensionElements` 内插入/替换 `flowable:ccConfigJson`，再通过 `saveProcess` 重新保存并发布。禁止将 ccConfig 写入 `nodeConfigJson`。**
+
+```python
+import json, base64, re
+
+# 1. 构建 ccConfigJson base64
+cc_list = [{"type": "submitter_parent_dept_leader"}]
+cc_b64 = base64.b64encode(json.dumps(cc_list, ensure_ascii=False).encode('utf-8')).decode('utf-8')
+
+# 2. 在 XML 中插入（找到节点的 extensionElements 结束标签前插入）
+node_match = re.search(r'(<(?:bpmn2:)?userTask[^>]*\bid="task_draft"[^>]*>)', xml)
+node_start = node_match.end()
+ext_close = re.search(r'</(?:bpmn2:)?extensionElements>', xml[node_start:])
+insert_pos = node_start + ext_close.start()
+last_flowable = re.findall(r'(\s+)<flowable:', xml[node_start:node_start + ext_close.end()])
+indent = last_flowable[-1] if last_flowable else '\n        '
+cc_tag = f'{indent}<flowable:ccConfigJson value="{cc_b64}" />'
+xml_new = xml[:insert_pos] + cc_tag + xml[insert_pos:]
+
+# 3. saveProcess + deployProcess（见规则13）
+```
 
 ## 前置条件
 
@@ -32,9 +528,17 @@ description: Use when user asks to create/generate a BPM workflow, design a Flow
 
 ## 主数据复用规则
 
-> **重要：** 配置审批人（角色、用户、部门）或字典时，必须遵循"先查后建"原则。
-> 使用 `jeecg-system` skill 的 `system_utils.py` 查询和管理主数据。
-> 详见 `../jeecg-system/SKILL.md`。
+> **⛔ 严重问题（已发生）：** 不得自行猜测或尝试 API 路径来查询主数据。
+>
+> **强制要求：必须且只能通过 `jeecg-system` skill 的 `system_utils.py` 查询主数据，禁止直接拼接 API 路径。**
+>
+> ```python
+> from system_utils import init_api, query_depts, query_roles, query_users, query_dept_positions
+> init_api(API_BASE, TOKEN)
+> depts = query_depts(); roles = query_roles(); users = query_users()
+> ```
+>
+> 配置审批人（角色、用户、部门）或字典时，必须遵循"先查后建"原则。详见 `../jeecg-system/SKILL.md`。
 
 ## 交互流程
 
@@ -58,30 +562,20 @@ description: Use when user asks to create/generate a BPM workflow, design a Flow
 - 用户描述中同时包含"建表/CRUD/代码生成" + "审批/流程/BPM"
 - 代码生成完成后，用户紧接着要求创建流程
 
-> **重要（用户明确规则）：** 代码生成完成后直接进入流程创建，**跳过 Step 2 的流程摘要确认**，无需再次展示摘要等待用户确认，直接执行角色查询、BPMN 配置生成和 API 调用。用户在代码生成阶段已完成整体确认，流程创建是连续操作，中间的二次确认是多余的打断。
+> **重要（用户明确规则）：** 代码生成完成后直接进入流程创建，**跳过 Step 2 的流程摘要确认**。
 
 **联合创建流程（必须按顺序执行）：**
 
-**第 1 步：告知用户并调用 `jeecg-codegen` skill 生成 CRUD 代码**
+**第 1 步：调用 `jeecg-codegen` skill 生成 CRUD 代码**
 
-> 告知用户："检测到您需要代码生成 + 审批流程，将先调用代码生成 skill 生成 CRUD 代码（含 bpm_status 字段），再创建审批流程。"
+调用时追加要求：实体包含 `bpm_status` 字段（`@Dict(dicCode = "bpm_status")`），生成 `Form.vue`，`List.vue` 含"发起流程"和"审批进度"。
 
-调用 jeecg-codegen skill 时，在需求描述中明确追加以下要求：
-- 实体必须包含 `bpm_status` 字段（`@Dict(dicCode = "bpm_status")`，varchar(10)）
-- 需要生成 `Form.vue`（BPM 流程审批表单组件）
-- `List.vue` 需包含"发起流程"和"审批进度"功能
-- `Modal.vue` 需将 `formSchema` 替换为 `getBpmFormSchema({})`
+**第 2 步：收集代码生成结果**
 
-**第 2 步：收集代码生成结果，确定流程关联参数**
-
-从 jeecg-codegen 输出中获取：
-- `tableName`（数据库表名） → 用作 `formTableName` 和 `relationCode`
-- `viewDir`（前端视图目录） → 用作 `formUrl` 路径前缀
-- `entityName`（实体名） → 用作 `formUrl` 中的组件名
+从输出中获取 `tableName` → `formTableName`、`viewDir` → `formUrl` 前缀、`entityName` → 组件名。
 
 **第 3 步：使用 `formType=3` 创建 BPM 流程**
 
-在 JSON 配置的 `formLink` 中使用：
 ```json
 {
   "formLink": {
@@ -94,11 +588,7 @@ description: Use when user asks to create/generate a BPM workflow, design a Flow
 }
 ```
 
-草稿节点（`draft: true`）表单地址（Step 5.5 需要）：
-```
-modelAndView: "{viewDir}/components/{entityName}Form?edit=1"
-modelAndViewMobile: ""
-```
+草稿节点表单地址：`modelAndView: "{viewDir}/components/{entityName}Form?edit=1"`
 
 > **注意：** `formType=3` 不需要发起授权步骤（跳过 Step 5），但必须完成 Step 5.5（草稿节点表单地址配置）。
 
@@ -113,66 +603,56 @@ modelAndViewMobile: ""
 | 开始 | 开始事件 | `startEvent` |
 | 结束 | 结束事件 | `endEvent` |
 | 审批/审核/处理/提交 | 用户任务 | `userTask` |
-| 条件判断/分支/通过或拒绝 | 排他网关（条件分支） | `exclusiveGateway` |
-| **手工分支/意见分支/选择分支** | **userTask 多出线（无条件）** | **无网关，直接从 userTask 引出多条 sequenceFlow** |
+| 条件判断/分支/通过或拒绝 | 排他网关 | `exclusiveGateway` |
+| **手工分支/意见分支/选择分支** | **userTask 多出线** | 无网关，直接多条 sequenceFlow |
 | 同时/并行 | 并行网关 | `parallelGateway` |
 | 条件并行/部分并行 | 包含网关 | `inclusiveGateway` |
-| **子流程/嵌套/扩展子流程** | **内嵌子流程** | **`subProcess`** — 详见 `references/bpmn-call-activity.md` 内嵌子流程章节 |
-| **调用子流程/主子流程** | **调用子流程** | **`callActivity`** — 详见 `references/bpmn-call-activity.md` |
+| **子流程/嵌套** | **内嵌子流程** | `subProcess` — 详见 `references/bpmn-call-activity.md` |
+| **调用子流程/主子流程** | **调用子流程** | `callActivity` — 详见 `references/bpmn-call-activity.md` |
 | 会签子流程 | 调用子流程+多实例 | `callActivity` + `multiInstance` |
-| **Java服务/表达式执行/调用Bean** | **Java 服务节点** | **`serviceTask`** — `bpmn_creator.py` 原生支持，见下方「serviceTask 配置」 |
-| **AI流程编排/AIGC调用** | **AI 服务节点** | **`aiTask`** — `bpmn_creator.py` 原生支持，见下方「aiTask 配置」 |
-| **调用外部HTTP接口** | **API 服务节点** | **`apiTask`** — `bpmn_creator.py` 原生支持，见下方「apiTask 配置」 |
-| **节点超时/定时触发** | **边界定时器事件** | **`timer`** 字段附加在 `userTask` 上 — `bpmn_creator.py` 原生支持，见下方「timer 边界定时器」 |
-| **脚本节点/执行脚本/Groovy/JS脚本** | **脚本节点** | **`scriptTask`** — `bpmn_creator.py` 原生支持，见下方「scriptTask 配置」 |
-| **等待信号/捕获信号/接收广播** | **信号捕获事件** | **`signalCatch`** — 中断等待匹配信号，见下方「信号与消息事件配置」 |
-| **发出信号/广播信号/抛出信号** | **信号抛出事件** | **`signalThrow`** — 向所有订阅者广播信号，见下方「信号与消息事件配置」 |
-| **任务上挂信号/信号边界** | **信号边界事件** | **`signalBoundary`** 字段附加在 `userTask` 上，见下方「信号与消息事件配置」 |
-| **等待消息/捕获消息/接收消息** | **消息捕获事件** | **`messageCatch`** — 中断等待唯一消息，见下方「信号与消息事件配置」 |
-| **发出消息/抛出消息/调用外部系统** | **消息抛出事件** | **`messageThrow`** — 发送内部消息或调用外部接口，见下方「信号与消息事件配置」 |
-| **任务上挂消息/消息边界** | **消息边界事件** | **`messageBoundary`** 字段附加在 `userTask` 上，见下方「信号与消息事件配置」 |
+| **Java服务/表达式/调用Bean** | **Java 服务节点** | `serviceTask` — 见下方 |
+| **AI流程编排/AIGC调用** | **AI 服务节点** | `aiTask` — 见下方 |
+| **调用外部HTTP接口** | **API 服务节点** | `apiTask` — 见下方 |
+| **节点超时提醒** | **节点配置字段** | `nodeTimeout` 整数（小时），通过 `edit_node_config` 设置 |
+| **节点定时触发** | **边界定时器** | `timer` 字段附加在 `userTask` 上 — 见下方 |
+| **脚本节点/Groovy/JS脚本** | **脚本节点** | `scriptTask` — 见下方 |
+| **信号/消息事件** | 捕获/抛出/边界 | `signalCatch` `signalThrow` `signalBoundary` `messageCatch` `messageThrow` `messageBoundary` — 详见 [`references/bpmn-signal-message-events.md`](references/bpmn-signal-message-events.md) |
 
-> **手工分支 vs 条件分支：** 条件分支使用 `exclusiveGateway` + 条件表达式自动判断走哪条线；手工分支（也叫意见分支）不使用网关，而是从一个 userTask 直接引出多条无条件的 sequenceFlow，用户在审批时手动选择走哪条线，线的名称显示为选项。详见 `references/bpmn-manual-branch.md`。
+> **手工分支 vs 条件分支：** 条件分支用 `exclusiveGateway` + 条件自动判断；手工分支从 userTask 直接引出多条无条件 sequenceFlow，用户审批时手动选择。详见 `references/bpmn-manual-branch.md`。
 >
-> **手工分支使用前提：** 手工分支仅在通过/拒绝后还需要经过不同的后续处理节点时才使用。如果审批节点后没有其他节点、只有结束节点，则**不需要手工分支**，直接一条线连到结束即可。分支的意义是让不同审批结果走不同路径，如果通过和拒绝都直接到结束，分支没有实际意义。
+> **手工分支使用前提：** 仅在通过/拒绝后还需经过不同后续处理节点时才使用。如果都直接到结束，不需要手工分支。
 
-**审批人配置映射（8 种类型 + 扩展，基于 `references/example/审批人员.bpmn` 实测验证）：**
+**审批人配置映射（8 种类型 + 扩展）：**
 
-| 用户描述 | JSON assignee type | BPMN XML 属性 | 说明 |
-|----------|-------------------|---------------|------|
-| "发起人/申请人" | `expression` + `applyUserId` | `flowable:assignee="${applyUserId}"` | 流程发起人自动填充 |
-| "admin/指定用户名" | `assignee` | `flowable:assignee="admin"` | 固定指定人 |
-| "张三或李四" | `candidateUsers` | `flowable:candidateUsers="zhangsan,lisi"` | 多候选人（固定用户名） |
-| "部门负责人（表达式）" | `candidateUsersExpression` | `flowable:candidateUsers="${flowNodeExpression.getDepartLeaders(applyUserId)}"` | 候选人表达式 |
-| "经理角色/角色组" | `role` | `flowable:candidateGroups="admin,vue3" groupType="role"` | 系统角色 |
-| "审批角色" | `approvalRole` | `flowable:candidateUsers="${flowUtil.getUsersByApprRole(...)}" groupType="approvalRole"` | 审批专用角色（**注意用 candidateUsers**） |
-| "某部门审批" | `dept` | `flowable:candidateGroups="部门ID" groupType="dept"` | 部门 |
-| "某岗位审批" | `deptPosition` | `flowable:candidateGroups="岗位ID" groupType="deptPosition"` | 岗位 |
-| "职级审批" | `position` | `flowable:candidateUsers="${oaFlowExpression.getApplyUserDeptPositionLevel(...)}" groupType="position"` | 职务级别（**注意用 candidateUsers**） |
-| "提交/填写/草稿" | `expression` + `draft: true` | `flowable:assignee="${applyUserId}"` + `sameMode=0` + `AutoSubmitListener` | 首节点（由发起人对自己审批 + 自动提交监听） |
-| "上一节点指派" | `assignedByPrev: true` | `isAssignedByPreviousNode=true` | 上一审批人选择 |
-| "会签/多人同时审批" | `callActivity` + `countersign` | `multiInstance` + `flowUtil.stringToList` | 并行/顺序会签 |
+| 用户描述 | JSON assignee type | BPMN XML 属性 |
+|----------|-------------------|---------------|
+| "发起人/申请人" | `expression` + `applyUserId` | `flowable:assignee="${applyUserId}"` |
+| "admin/指定用户名" | `assignee` | `flowable:assignee="admin"` |
+| "张三或李四" | `candidateUsers` | `flowable:candidateUsers="zhangsan,lisi"` |
+| "部门负责人（表达式）" | `candidateUsersExpression` | `flowable:candidateUsers="${flowNodeExpression.getDepartLeaders(applyUserId)}"` |
+| "经理角色/角色组" | `role` | `flowable:candidateGroups="admin,vue3" groupType="role"` |
+| "审批角色" | `approvalRole` | `flowable:candidateUsers="${flowUtil.getUsersByApprRole(...)}" groupType="approvalRole"` |
+| "某部门审批" | `dept` | `flowable:candidateGroups="部门ID" groupType="dept"` |
+| "某岗位审批" | `deptPosition` | `flowable:candidateGroups="岗位ID" groupType="deptPosition"` |
+| "职级审批" | `position` | `flowable:candidateUsers="${oaFlowExpression.getApplyUserDeptPositionLevel(...)}" groupType="position"` |
+| "提交/填写/草稿" | `expression` + `draft: true` | `flowable:assignee="${applyUserId}"` + AutoSubmitListener |
+| "上一节点指派" | `assignedByPrev: true` | `isAssignedByPreviousNode=true` |
+| "会签" | `countersign` 配置 | `multiInstance` + `flowUtil.stringToList` |
 
-> **重要区别：** `approvalRole` 和 `position` 类型使用 `candidateUsers`（不是 `candidateGroups`），value 传 ID，脚本自动包装为表达式。`role`/`dept`/`deptPosition` 使用 `candidateGroups`。参考 `references/example/审批人员.bpmn`。
+> **重要区别：** `approvalRole` 和 `position` 用 `candidateUsers`，`role`/`dept`/`deptPosition` 用 `candidateGroups`。
 
-**审批人数据查询：** 当用户提到具体角色/用户/部门名称时，可查数据库获取准确编码：
-- 角色编码：`SELECT role_code, role_name FROM sys_role`
-  - **创建系统角色**：`POST /sys/role/add`，body: `{"roleName":"角色名","roleCode":"role_code","description":"..."}`
-  - **创建角色后默认添加 admin 为成员**：`POST /sys/user/addSysUserRole`，body: `{"roleId":"{roleId}","userIdList":["e9ca23d68d884d4ebb19d07889727dae"]}`（admin 固定 ID）
+**审批人数据查询：**
+- 角色编码：`SELECT role_code, role_name FROM sys_role`；创建：`POST /sys/role/add`
 - 用户名：`SELECT username, realname FROM sys_user`
-- 部门/岗位ID：`SELECT id, depart_name, org_category FROM sys_depart`（org_category: 1=公司, 2=部门, 3=岗位, 4=子公司）
-- 审批角色ID：`GET /sys/approvalRole/search?keyword=` 查询（返回 `result.roles[]`，取 `id` 字段）
-  - 查询分组列表：`GET /sys/approvalRole/rootList?pageNo=1&pageSize=50`
-  - 查询分组下角色：`GET /sys/approvalRole/childList?pid={groupId}`
-  - **创建分组**：`POST /sys/approvalRole/group/add`，body: `{"name":"分组名", "pid":"0"}`
-  - **创建审批角色**：`POST /sys/approvalRole/role/add`，body: `{"name":"角色名", "pid":"{groupId}"}`
-  - **绑定用户**：`POST /sys/approvalRoleUser/add`，body: `{"approvalRoleId":"{roleId}", "userIds":["{userId}"], "bizScope":"all", "includeSub":0}`
+- 部门/岗位ID：`SELECT id, depart_name, org_category FROM sys_depart`（1=公司, 2=部门, 3=岗位, 4=子公司）
+- 审批角色：`GET /sys/approvalRole/search?keyword=`；分组 `rootList`；子角色 `childList?pid={groupId}`
+  - 创建分组：`POST /sys/approvalRole/group/add`，body: `{"name":"分组名", "pid":"0"}`
+  - 创建角色：`POST /sys/approvalRole/role/add`，body: `{"name":"角色名", "pid":"{groupId}"}`
+  - 绑定用户：`POST /sys/approvalRoleUser/add`，body: `{"approvalRoleId":"{roleId}", "userIds":["{userId}"], "bizScope":"all", "includeSub":0}`
 
 ### serviceTask 配置（Java 服务节点）
 
-`bpmn_creator.py` 原生支持 `serviceTask`，直接在 nodes 数组中配置即可，无需额外编写脚本。
-
-**JSON 节点配置：**
+`bpmn_creator.py` 原生支持，直接在 nodes 数组中配置。
 
 | 字段 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -180,676 +660,107 @@ modelAndViewMobile: ""
 | `type` | 是 | - | 固定为 `serviceTask` |
 | `name` | 是 | - | 节点名称 |
 | `serviceType` | 否 | `expression` | `expression` / `class` / `delegateExpression` |
-| `expression` | serviceType=expression 时 | - | UEL 表达式，如 `${myBean.doWork(execution)}` |
-| `className` | serviceType=class 时 | - | Java 全类名 |
-| `delegateExpr` | serviceType=delegateExpression 时 | - | 委托表达式 |
-| `resultVar` | 否 | - | 把表达式返回值存入该流程变量（仅 expression 类型） |
-
-**三种类型示例：**
+| `expression` | 条件 | - | UEL 表达式，如 `${myBean.doWork(execution)}` |
+| `className` | 条件 | - | Java 全类名（serviceType=class） |
+| `delegateExpr` | 条件 | - | 委托表达式 |
+| `resultVar` | 否 | - | 返回值存入该流程变量（仅 expression） |
 
 ```json
-// 表达式（最常用）
 {"id": "svc1", "type": "serviceTask", "name": "测试服务节点",
  "serviceType": "expression", "expression": "${testExpression.test()}"}
-
-// Java 类
-{"id": "svc2", "type": "serviceTask", "name": "Java服务",
- "serviceType": "class", "className": "com.example.MyJavaDelegate"}
-
-// 委托表达式
-{"id": "svc3", "type": "serviceTask", "name": "委托服务",
- "serviceType": "delegateExpression", "delegateExpr": "${myDelegate}"}
-
-// 带返回值（存入流程变量）
-{"id": "svc4", "type": "serviceTask", "name": "计算服务",
- "serviceType": "expression", "expression": "${calcService.calc(execution)}",
- "resultVar": "calcResult"}
 ```
 
-> **注意：** serviceTask 节点不需要配置审批人，不会出现在节点选择列表（nodes 参数）中，纯粹由引擎自动执行后流转到下一节点。
-
----
-
-### serviceTask 自动创建 Java 类（用户未提供类名/表达式时）
-
-> **触发条件：** 用户要配置 serviceTask 但没有提供 `className`、`expression` 或 `delegateExpr` 时，**必须按以下步骤自动创建 Java 类**，不能使用占位符或留空。
-
-#### 自动创建流程
-
-**Step A：确定后端项目路径**
-
-从记忆（MEMORY.md）读取后端项目路径。如无记忆，询问用户并保存到记忆。
-
-**Step B：查找 servicetask 包路径**
-
-在后端项目中查找已有的 servicetask 包（包含 `JavaDelegate` 实现类的目录）：
-
-```
-Glob: **/servicetask/*.java  →  提取包名和目录路径
-```
-
-如未找到，在 BPM 模块（含 `joa-flowable` 或 `bpm-flowable` 关键字的模块）下创建 `servicetask` 包。
-
-参考包结构（来自本地项目实测）：
-```
-jeecg-boot-module-joa-flowable
-  └─ src/main/java/org/jeecg/modules/servicetask/
-       ├─ TestDelegateExpression.java   ← 参考模板
-       └─ TestClass.java
-```
-
-**Step C：根据流程 processKey 推导类名**
-
-类名规则：将 processKey 转为大驼峰 + `ServiceTask` 后缀。
-
-| processKey | 推导类名 |
-|-----------|---------|
-| `oa_doc_countersign_process` | `OaDocCountersignProcessServiceTask` |
-| `leave_apply` | `LeaveApplyServiceTask` |
-| `contract_approval` | `ContractApprovalServiceTask` |
-
-Spring Bean 名（委托表达式）：类名首字母小写，如 `${oaDocCountersignProcessServiceTask}`。
-
-**Step D：创建 Java 类文件**
-
-使用 Write 工具在 Step B 确定的目录下创建类文件：
-
-```java
-package org.jeecg.modules.servicetask;
-
-import lombok.extern.slf4j.Slf4j;
-import org.flowable.engine.delegate.DelegateExecution;
-import org.flowable.engine.delegate.JavaDelegate;
-import org.springframework.stereotype.Component;
-
-/**
- * {流程中文名} - {节点名称}服务节点
- * 流程编码：{processKey}
- */
-@Slf4j
-@Component
-public class {ClassName} implements JavaDelegate {
-
-    @Override
-    public void execute(DelegateExecution execution) {
-        String processInstanceId = execution.getProcessInstanceId();
-        String businessKey = execution.getProcessInstanceBusinessKey();
-        log.info("======== {ClassName} 执行 ========= processInstanceId={}, businessKey={}",
-                processInstanceId, businessKey);
-        // TODO: 在此处添加业务逻辑
-    }
-}
-```
-
-**Step E：配置 serviceTask JSON**
-
-类创建后，自动填入 serviceTask 配置：
-
-```json
-{
-  "id": "svc_{processKey_short}",
-  "type": "serviceTask",
-  "name": "{节点名称}",
-  "serviceType": "delegateExpression",
-  "delegateExpr": "${beanName}"
-}
-```
-
-**Step F：告知用户**
-
-流程创建完成后，告知用户已自动创建的类：
-
-```
-已自动创建 Java 服务类：
-  路径：{完整文件路径}
-  类名：{ClassName}
-  Bean：{beanName}
-  委托表达式：${beanName}
-
-请在 execute() 方法中填写您的业务逻辑。
-```
-
----
+> 用户未提供类名/表达式时，参见 [`references/bpmn-service-task-autocreate.md`](references/bpmn-service-task-autocreate.md) 自动创建 Java 类。
+> serviceTask 不需要配置审批人，由引擎自动执行后流转。
 
 ### aiTask 配置（AI 流程编排节点）
 
-`bpmn_creator.py` 原生支持 `aiTask`，对应 JeecgBoot AIGC 流程编排服务任务。底层是 `serviceTask` + `AigcServiceTaskDelegate`，直接在 nodes 数组中配置即可。
-
-**JSON 节点配置：**
+底层是 `serviceTask` + `AigcServiceTaskDelegate`。
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `id` | 是 | 节点唯一ID |
 | `type` | 是 | 固定为 `aiTask` |
 | `name` | 是 | 节点名称 |
-| `aiFlowId` | 是 | AIGC 流程 ID（从系统 AIGC 流程管理页面获取） |
-| `inputParamsList` | 否 | 输入参数映射，将流程变量传入 AI 流程，如 `[{"key": "content", "value": "${name}"}]` |
-| `outputParamsList` | 否 | 输出参数映射，将 AI 流程输出存入流程变量，如 `[{"key": "result", "value": "aiResult"}]` |
-
-**示例：**
+| `aiFlowId` | 是 | AIGC 流程 ID |
+| `inputParamsList` | 否 | 输入参数映射，如 `[{"key": "content", "value": "${name}"}]` |
+| `outputParamsList` | 否 | 输出参数映射，如 `[{"key": "result", "value": "aiResult"}]` |
 
 ```json
-{
-  "id": "task_ai",
-  "type": "aiTask",
-  "name": "AI内容生成",
-  "aiFlowId": "2034580389262573569",
-  "inputParamsList": [
-    {"key": "content", "value": "${userName}"}
-  ],
-  "outputParamsList": [
-    {"key": "summary", "value": "aiSummary"}
-  ]
-}
+{"id": "task_ai", "type": "aiTask", "name": "AI内容生成",
+ "aiFlowId": "2034580389262573569",
+ "inputParamsList": [{"key": "content", "value": "${userName}"}],
+ "outputParamsList": [{"key": "summary", "value": "aiSummary"}]}
 ```
 
-> **生成的 XML 结构：** `serviceTask` + `flowable:class="org.jeecg.modules.extbpm.listener.service.AigcServiceTaskDelegate"` + 扩展元素 `<flowable:aiServiceTaskConfig value="{base64编码的配置JSON}" />`
->
-> **注意：** `aiTask` 与 `serviceTask` 一样不需要配置审批人，由引擎自动调用 AI 流程后流转到下一节点。`aiFlowId` 从系统「AIGC > 流程编排」管理页面获取。
-
----
+> **⚠️ AIGC 模块前缀是 `/airag/`，不是 `/ai/`。** 查询流程编排：`GET /airag/flow/list`；查询 AI 应用：`GET /airag/app/list`。
 
 ### timer 边界定时器（附加在 userTask 上）
 
-在任意 `userTask` 节点中添加 `timer` 字段，即可附加边界定时器事件。定时器触发时节点被中断，可路由到其他节点（如超时直接结束）。
-
-**`timer` 字段说明：**
+> **⛔ 严重坑：** 用户说"给某个流程的某个节点创建定时任务"时，**不要**去 `/sys/quartzJob` 创建 Quartz 定时任务。这是 BPMN 层面的操作，应在节点上添加 timer 边界事件。只要提到**流程名**或**节点名**，就是 BPMN 定时。
 
 | 字段 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `type` | 是 | `duration` | `date`=指定日期 / `duration`=等待时长 / `cycle`=重复周期 |
-| `value` | 是 | — | 定时器值，支持 ISO 8601 / cron 表达式 / `${var}` 流程变量 |
-| `timerTarget` | 否 | — | 定时器触发后流转到的节点ID（不填则只附加定时器，不添加出线） |
-| `eventId` | 否 | `timer_{nodeId}` | 边界事件ID，默认自动生成 |
-| `timerFlowId` | 否 | `flow_{eventId}` | 超时连线ID，默认自动生成 |
+| `value` | 是 | — | ISO 8601 / cron / `${var}` |
+| `timerTarget` | 否 | — | 触发后流转到的节点ID |
+| `eventId` | 否 | `timer_{nodeId}` | 自动生成 |
+| `timerFlowId` | 否 | `flow_{eventId}` | 自动生成 |
 
-**三种类型详细说明：**
+**value 格式：**
+- `date`：`yyyy-MM-ddTHH:mm:ss`（如 `2026-04-03T15:00:59`）
+- `duration`：ISO 8601（`PT1M` `PT10M` `PT1H` `P1D` `P1W` `P1M` `${duration}`）
+- `cycle`：ISO 8601 重复（`R3/PT10H` `R/PT1H`）或 cron（`0 0/5 * * * ?`）
 
-**① `date` — 指定日期（一次性）**
-
-到达指定时间点触发，格式：`yyyy-MM-ddTHH:mm:ss`
-
-```
-2026-04-03T15:00:59
-```
-
-**② `duration` — 等待时长**
-
-节点激活后等待指定时长触发，使用 ISO 8601 Duration 格式，**支持 `${var}` 表达式**：
-
-| 示例值 | 含义 |
-|--------|------|
-| `PT1M` | 1分钟后 |
-| `PT10M` | 10分钟后 |
-| `PT1H` | 1小时后 |
-| `P1D` | 1天后 |
-| `P1W` | 1周后 |
-| `P1M` | 1个月后 |
-| `P1Y2M10DT2H30M` | 1年2月10天2小时30分后 |
-| `${duration}` | 从流程变量中取值 |
-
-> ISO 8601 格式：`P[年Y][月M][日D]T[时H][分M][秒S]`，`T` 是日期和时间的分隔标记，无年月日时 `T` 不能省略（如 `PT1H` 而不是 `P1H`）
-
-**③ `cycle` — 重复周期**
-
-支持两种格式：
-
-**格式一：ISO 8601 重复格式（推荐）**
-
-```
-R{次数}/{开始时间}/{间隔}   完整格式
-R{次数}/{间隔}             省略开始时间
-```
-
-| 示例值 | 含义 |
-|--------|------|
-| `R3/PT10H` | 每隔10小时重复3次 |
-| `R/PT1H` | 每小时无限重复（R 不带数字=无限） |
-| `R3/2026-04-03T15:00:00/P1D` | 从指定时间开始，每天重复3次 |
-| `${cronExpr}` | 从流程变量中取值 |
-
-**格式二：Cron 表达式**
-
-```
-0 0/5 * * * ?      每5分钟执行一次（从整点开始）
-0 0 12 * * ?       每天12点执行
-0 0/30 9-18 * * ?  工作时间每30分钟执行
-```
-
-**示例配置：**
-
+**示例：**
 ```json
-// 等待1天超时跳转结束
-{
-  "timer": {"type": "duration", "value": "P1D", "timerTarget": "end"}
-}
-
-// 从流程变量取超时时间
-{
-  "timer": {"type": "duration", "value": "${approvalTimeout}", "timerTarget": "end"}
-}
-
-// 每5分钟催办一次，共3次
-{
-  "timer": {"type": "cycle", "value": "R3/PT5M"}
-}
-
-// 每5分钟执行（cron格式）
-{
-  "timer": {"type": "cycle", "value": "0 0/5 * * * ?"}
-}
-
-// 指定日期截止
-{
-  "timer": {"type": "date", "value": "2026-12-31T23:59:59", "timerTarget": "end"}
-}
+{"timer": {"type": "duration", "value": "P1D", "timerTarget": "end"}}
+{"timer": {"type": "cycle", "value": "R3/PT5M"}}
+{"timer": {"type": "date", "value": "2026-12-31T23:59:59", "timerTarget": "end"}}
 ```
-
-> **边界事件自动定位**在任务节点右下角（符合 BPMN 设计器规范）。
-> `timerTarget` 可以指向任何已存在的节点ID，通常为结束节点或专门的超时处理节点。
-
----
 
 ### apiTask 配置（API 服务节点）
 
-`bpmn_creator.py` 原生支持 `apiTask`，用于在流程中调用内部或外部 HTTP 接口。底层是 `serviceTask` + `ApiServiceTaskDelegate`。
-
-**JSON 节点配置：**
+底层是 `serviceTask` + `ApiServiceTaskDelegate`。
 
 | 字段 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `id` | 是 | — | 节点唯一ID |
 | `type` | 是 | — | 固定为 `apiTask` |
 | `name` | 是 | — | 节点名称 |
-| `apiUrl` | 是 | — | 接口路径，如 `/sys/user/list`，支持 `${var}` 引用流程变量 |
-| `method` | 否 | `GET` | HTTP 方法：`GET` / `POST` / `PUT` / `DELETE` |
-| `headersList` | 否 | `[]` | 请求头列表，如 `[{"key": "Content-Type", "value": "application/json"}]` |
-| `inputParamsList` | 否 | `[]` | 请求参数，支持流程变量，如 `[{"key": "name", "value": "${contactName}"}]` |
-| `outputParamsList` | 否 | `[]` | 响应结果映射到流程变量，支持 JSONPath，如 `[{"key": "result.records[0].id", "value": "userId"}]` |
-| `timeout` | 否 | `30000` | 超时时间（毫秒） |
-| `retryCount` | 否 | `3` | 失败重试次数 |
-
-**示例：**
+| `apiUrl` | 是 | — | 接口路径，支持 `${var}` 和完整 URL |
+| `method` | 否 | `GET` | `GET` / `POST` / `PUT` / `DELETE` |
+| `headersList` | 否 | `[]` | 请求头 |
+| `inputParamsList` | 否 | `[]` | 请求参数，支持流程变量 |
+| `outputParamsList` | 否 | `[]` | 响应映射到流程变量（JSONPath），如 `[{"key": "result.records[0].id", "value": "userId"}]` |
+| `timeout` | 否 | `30000` | 超时毫秒 |
+| `retryCount` | 否 | `3` | 重试次数 |
 
 ```json
-{
-  "id": "task_api",
-  "type": "apiTask",
-  "name": "查询会议室",
-  "apiUrl": "/eoa/meeting/eoaMeetingRoom/list",
-  "method": "GET",
-  "inputParamsList": [
-    {"key": "pageNo", "value": "1"},
-    {"key": "pageSize", "value": "10"},
-    {"key": "name", "value": "${roomName}"}
-  ],
-  "outputParamsList": [
-    {"key": "result.records[0].name", "value": "firstRoomName"}
-  ],
-  "timeout": 30000,
-  "retryCount": 3
-}
+{"id": "task_api", "type": "apiTask", "name": "查询会议室",
+ "apiUrl": "/eoa/meeting/eoaMeetingRoom/list", "method": "GET",
+ "inputParamsList": [{"key": "pageNo", "value": "1"}, {"key": "name", "value": "${roomName}"}],
+ "outputParamsList": [{"key": "result.records[0].name", "value": "firstRoomName"}]}
 ```
 
-> **`outputParamsList` 的 `key`** 使用 JSONPath 语法引用响应体字段（如 `result.records[0].name`），`value` 是存入流程变量的名称，后续节点可通过 `${firstRoomName}` 引用。
->
-> **注意：** `apiTask` 与 `serviceTask` 一样不需要配置审批人，由引擎自动执行后流转。
-
----
-
-### apiTask 自动创建 API 接口（用户未提供 apiUrl 时）
-
-> **触发条件：** 用户要配置 apiTask 但没有提供 `apiUrl` 时，**必须按以下步骤自动创建后端 Controller 接口**，不能使用占位符或留空。
-
-#### 自动创建流程
-
-**Step A：确定后端项目路径**
-
-从记忆（MEMORY.md）读取后端项目路径。如无记忆，询问用户并保存到记忆。
-
-**Step B：查找业务相关的 Controller**
-
-在后端项目中按流程的业务模块查找已有 Controller：
-
-```
-Glob: **/controller/**/*Controller.java  →  找到同业务模块的 Controller
-```
-
-优先顺序：
-1. 与流程 processKey 同名/同业务的 Controller（如 `oa_doc_countersign_process` → 找 `*DocCountersign*Controller.java`）
-2. 同包下其他业务 Controller（如 `/joa/controller/`）作为**新建参考模板**
-
-**Step C：推导接口路径与方法名**
-
-根据流程 processKey 和节点名称推导：
-
-| 要素 | 规则 | 示例 |
-|------|------|------|
-| Controller 类名 | 业务名大驼峰 + `Controller` | `JoaDocCountersignController` |
-| 包路径 | 与同模块已有 Controller 同包 | `org.jeecg.modules.joa.controller` |
-| RequestMapping | `/joa/{camelCase业务名}` | `/joa/joaDocCountersign` |
-| 方法名 | 根据节点名称推导（`afterSubmit`/`notify`/`callback` 等） | `afterSubmit` |
-| 请求方法 | 有副作用操作用 `POST`，纯查询用 `GET` | `POST` |
-| 接口路径 | `/{RequestMapping}/{方法名}` | `/joa/joaDocCountersign/afterSubmit` |
-
-**Step D：判断创建还是追加**
-
-- 如果目标 Controller **已存在** → 在文件末尾的 `}` 前追加新方法（用 Edit 工具）
-- 如果目标 Controller **不存在** → 用 Write 工具新建 Controller 文件
-
-**新建 Controller 模板：**
-
-```java
-package {package};
-
-import lombok.extern.slf4j.Slf4j;
-import org.jeecg.common.api.vo.Result;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-
-/**
- * {业务中文名} - 流程服务接口
- * 流程编码：{processKey}
- */
-@Slf4j
-@RestController
-@RequestMapping("{requestMapping}")
-public class {ClassName} {
-
-    /**
-     * {节点名称}回调接口（流程 apiTask 节点调用）
-     *
-     * @param businessKey       业务主键（流程变量 ${businessKey}）
-     * @param processInstanceId 流程实例ID（流程变量 ${processInstanceId}）
-     */
-    @PostMapping("{methodPath}")
-    public Result<?> {methodName}(
-            @RequestParam(required = false) String businessKey,
-            @RequestParam(required = false) String processInstanceId) {
-        log.info("===== {ClassName} {methodName} ===== businessKey={}, processInstanceId={}",
-                businessKey, processInstanceId);
-        // TODO: 在此处添加业务逻辑
-        return Result.OK("处理成功");
-    }
-}
-```
-
-**Step E：配置 apiTask JSON**
-
-接口创建后，自动填入 apiTask 配置：
-
-```json
-{
-  "id": "api_{processKey_short}",
-  "type": "apiTask",
-  "name": "{节点名称}",
-  "apiUrl": "{接口路径}",
-  "method": "POST",
-  "inputParamsList": [
-    {"key": "businessKey",       "value": "${businessKey}"},
-    {"key": "processInstanceId", "value": "${processInstanceId}"}
-  ],
-  "outputParamsList": [],
-  "timeout": 30000,
-  "retryCount": 3
-}
-```
-
-**Step F：告知用户**
-
-流程创建完成后，告知用户已自动创建的接口：
-
-```
-已自动创建 API 接口：
-  文件路径：{完整文件路径}
-  接口地址：POST {apiUrl}
-  Controller：{完整类名}#{methodName}
-  入参：businessKey（业务主键）、processInstanceId（流程实例ID）
-
-请在方法体中填写您的业务逻辑。
-```
-
----
+> 用户未提供 apiUrl 时，参见 [`references/bpmn-api-task-autocreate.md`](references/bpmn-api-task-autocreate.md) 自动创建。
 
 ### scriptTask 配置（脚本节点）
-
-`bpmn_creator.py` 原生支持 `scriptTask`，直接在 nodes 数组中配置即可。
-
-**JSON 节点配置：**
 
 | 字段 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `id` | 是 | - | 节点唯一ID |
 | `type` | 是 | - | 固定为 `scriptTask` |
 | `name` | 是 | - | 节点名称 |
-| `scriptFormat` | 否 | `javascript` | 脚本语言：`javascript` / `groovy` / `juel` |
-| `script` | 是 | - | 脚本内容（含 `<` `>` `&` 等特殊字符时自动用 CDATA 包裹） |
-| `resultVar` | 否 | - | 把脚本返回值存入该流程变量 |
-
-**示例：**
+| `scriptFormat` | 否 | `javascript` | `javascript` / `groovy` / `juel` |
+| `script` | 是 | - | 脚本内容（特殊字符自动 CDATA 包裹） |
+| `resultVar` | 否 | - | 返回值存入流程变量 |
 
 ```json
-// JavaScript 脚本
 {"id": "script_node", "type": "scriptTask", "name": "脚本节点",
  "scriptFormat": "javascript",
  "script": "var sum = 2 + 9;\nexecution.setVariable(\"myVar\", sum);"}
-
-// Groovy 脚本（带返回值）
-{"id": "script_calc", "type": "scriptTask", "name": "计算脚本",
- "scriptFormat": "groovy",
- "script": "execution.getVariable('amount') * 0.1",
- "resultVar": "tax"}
-
-// 含特殊字符（自动 CDATA 包裹）
-{"id": "script_cond", "type": "scriptTask", "name": "条件脚本",
- "scriptFormat": "javascript",
- "script": "if (amount > 1000) { execution.setVariable('flag', true); }"}
 ```
-
-> **支持的脚本语言：** `javascript`（JDK 内置，最常用）、`groovy`（需引入依赖）、`juel`（UEL 表达式语言）
->
-> **注意：** scriptTask 与 serviceTask 一样不需要配置审批人，由引擎自动执行后流转。
-
----
-
-### 信号与消息事件配置
-
-#### 信号事件（Signal Event）概述
-
-信号是**广播**机制，同一信号可以有**多个订阅者**，所有匹配的订阅者都会被触发。信号被捕获后**不会被消耗**。
-
-| 事件类型 | XML 元素 | 触发方式 | 说明 |
-|---------|---------|---------|------|
-| 信号捕获事件 | `intermediateCatchEvent` + `signalEventDefinition` | 引擎自动（等待匹配信号） | 流程暂停等待信号 |
-| 信号抛出事件 | `intermediateThrowEvent` + `signalEventDefinition` | 引擎自动（执行到节点即广播） | 发出信号后继续流转 |
-| 信号边界事件 | `boundaryEvent` + `signalEventDefinition` | 引擎自动（等待附属任务期间） | 附加在 userTask 上 |
-
-**信号 vs 消息的关键区别：**
-
-| 特性 | 信号（Signal） | 消息（Message） |
-|------|--------------|----------------|
-| 订阅者 | **多个**（广播） | **唯一一个** |
-| 消耗 | 捕获后**不消耗**，所有订阅者都收到 | 消耗后只有一个订阅者处理 |
-| 作用范围 | **全局**（可跨流程实例） | 通过关联规则确定唯一订阅者 |
-| 匹配规则 | 可选（匹配规则不同则忽略） | **必选**（`消息名 + 捕获规则` 全局唯一） |
-
-#### 信号捕获事件（Signal Intermediate Catching Event）
-
-执行到此节点时暂停，等待流程内的抛出信号事件或 API 发出匹配信号后继续。
-
-**JSON 节点配置：**
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `id` | 是 | 节点唯一ID |
-| `type` | 是 | 固定为 `signalCatch` |
-| `name` | 是 | 节点名称 |
-| `signalName` | 是 | 要订阅的信号名（与抛出事件/API 保持一致） |
-| `matchRule` | 否 | 可选匹配规则，如 `vip`；信号名相同但规则不匹配则忽略 |
-
-**JSON 示例：**
-```json
-{
-  "id": "signal_catch_1",
-  "type": "signalCatch",
-  "name": "等待CRM订单信号",
-  "signalName": "CRM-Order",
-  "matchRule": "vip"
-}
-```
-
-> **注意：** 信号捕获事件由引擎自动触发，不需要额外调用 API。
-
-#### 信号抛出事件（Signal Intermediate Throwing Event）
-
-执行到此节点时，向系统内部广播一个信号，所有匹配的订阅者（信号捕获事件、信号边界事件）都会被触发，之后流程继续。
-
-**JSON 节点配置：**
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `id` | 是 | 节点唯一ID |
-| `type` | 是 | 固定为 `signalThrow` |
-| `name` | 是 | 节点名称 |
-| `signalName` | 是 | 要发出的信号名 |
-| `matchRule` | 否 | 可选匹配规则；订阅者规则不同则不处理 |
-
-**JSON 示例：**
-```json
-{
-  "id": "signal_throw_1",
-  "type": "signalThrow",
-  "name": "发出审批完成信号",
-  "signalName": "ApprovalDone"
-}
-```
-
-> **同一信号可被多个订阅者接收。** 信号边界事件具有全局作用域（广播），可接收来自任何流程实例发出的信号，甚至跨不同流程实例。
-
-#### 信号边界事件（Signal Boundary Interrupting Event）
-
-附加在 `userTask` 上，在任务执行期间等待匹配信号。收到信号后中断任务（或非中断模式），按后继路线继续。
-
-**在 userTask 节点上添加 `signalBoundary` 字段：**
-
-| 字段 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `signalName` | 是 | — | 要订阅的信号名 |
-| `matchRule` | 否 | — | 可选匹配规则 |
-| `cancelActivity` | 否 | `true` | `true`=中断型（中断依附的任务），`false`=非中断型 |
-| `boundaryTarget` | 否 | — | 触发后路由到的节点 ID |
-| `eventId` | 否 | `signal_boundary_{nodeId}` | 边界事件ID |
-
-**JSON 示例：**
-```json
-{
-  "id": "task_approval",
-  "type": "userTask",
-  "name": "经理审批",
-  "assignee": {"type": "role", "value": "manager"},
-  "signalBoundary": {
-    "signalName": "CancelOrder",
-    "cancelActivity": true,
-    "boundaryTarget": "end"
-  }
-}
-```
-
-> **重要特性：** 信号边界事件为**全局作用域**，不限于当前流程范围。不同流程实例发出的相同信号也能触发此边界事件。信号被捕获后**不会消耗**，多个活跃的信号边界事件订阅同一信号时，全部都会被触发。
-
----
-
-#### 消息事件（Message Event）概述
-
-消息是**单播**机制，每条消息只允许**唯一一个**订阅者。通过 `消息名 + 关联规则` 确定唯一订阅者。
-
-**配置消息的前提：** 必须在流程属性的 `消息` 中定义消息变量名，确保消息变量名与订阅/抛出事件一致。
-
-#### 消息捕获事件（Message Intermediate Catch Event）
-
-执行到此节点时暂停，等待匹配消息后继续。与信号不同，每条消息只允许一个订阅者，关联规则用于确定唯一目标。
-
-**JSON 节点配置：**
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `id` | 是 | 节点唯一ID |
-| `type` | 是 | 固定为 `messageCatch` |
-| `name` | 是 | 节点名称 |
-| `messageName` | 是 | 要订阅的消息名（需与流程属性中定义的变量名一致） |
-| `correlationKey` | 是 | **必选**关联规则，如订单号 `201702040007`，与消息名组合保证全局唯一 |
-
-**JSON 示例：**
-```json
-{
-  "id": "msg_catch_1",
-  "type": "messageCatch",
-  "name": "等待Alibaba订单消息",
-  "messageName": "Alibaba-B2B-Order",
-  "correlationKey": "201702040007"
-}
-```
-
-> **唯一性要求：** `消息名 + 关联规则` 必须全局唯一，否则存在多个订阅者会导致匹配异常。消息捕获事件由引擎自动触发，无需额外 API 调用。
-
-#### 消息抛出事件（Message Intermediate Throwing Event）
-
-执行到此节点时，向系统内部发送一条消息（内部消息）或调用外部系统接口，之后继续流转。
-
-**JSON 节点配置：**
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `id` | 是 | 节点唯一ID |
-| `type` | 是 | 固定为 `messageThrow` |
-| `name` | 是 | 节点名称 |
-| `messageName` | 是 | 要发出的消息名（需在流程属性中定义，与订阅事件的消息名一致） |
-
-**JSON 示例：**
-```json
-{
-  "id": "msg_throw_1",
-  "type": "messageThrow",
-  "name": "发送订单确认消息",
-  "messageName": "Alibaba-B2B-Order"
-}
-```
-
-> **同一消息只允许一个订阅者。** 抛出前必须在流程属性的「消息」中定义消息变量名，并确保消息变量名、关联规则与订阅端完全一致。
-
-#### 消息边界事件（Message Boundary Interrupting Event）
-
-附加在 `userTask` 或子流程上，在任务执行期间等待匹配消息。可以是中断型（默认）或非中断型。
-
-**在 userTask 节点上添加 `messageBoundary` 字段：**
-
-| 字段 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `messageName` | 是 | — | 要订阅的消息名 |
-| `correlationKey` | 是 | — | 必选关联规则，保证唯一订阅者 |
-| `cancelActivity` | 否 | `true` | `true`=中断型，`false`=非中断型（任务继续，同时也触发边界路线） |
-| `boundaryTarget` | 否 | — | 触发后路由到的节点 ID |
-| `eventId` | 否 | `message_boundary_{nodeId}` | 边界事件ID |
-
-**JSON 示例：**
-```json
-{
-  "id": "task_wait",
-  "type": "userTask",
-  "name": "等待付款",
-  "assignee": {"type": "role", "value": "finance"},
-  "messageBoundary": {
-    "messageName": "PaymentReceived",
-    "correlationKey": "${orderId}",
-    "cancelActivity": true,
-    "boundaryTarget": "task_ship"
-  }
-}
-```
-
-> **注意：** 消息边界事件**既可以是中断型（右手边），也可以是非中断型（左手边）**。非中断型触发后依附的任务仍然继续执行，适合并行通知场景。消息边界事件还可以通过 JMS、HTTP/SOAP 等外部系统触发。
 
 ---
 
@@ -886,23 +797,14 @@ public class {ClassName} {
 
 ### Step 3: 生成 JSON 配置并调用通用脚本
 
-> **重要：优先使用 `scripts/bpmn_creator.py` 通用脚本 + JSON 配置文件的方式，只需生成 JSON 数据即可创建流程，无需每次编写 Python 代码。**
-
-**脚本位置：** `scripts/bpmn_creator.py`
+> **重要：优先使用 `scripts/bpmn_creator.py` 通用脚本 + JSON 配置文件的方式，只需生成 JSON 数据即可创建流程。**
 
 **使用步骤：**
 1. 根据用户需求生成 JSON 配置文件（Write 到工作目录的临时 `.json` 文件）
-2. 用 Bash 执行脚本：`python "<skill目录>/scripts/bpmn_creator.py" --api-base <URL> --token <TOKEN> --config <config.json>`
+2. 用 Bash 执行：`python "<skill目录>/scripts/bpmn_creator.py" --api-base <URL> --token <TOKEN> --config <config.json>`
 3. 删除临时 JSON 配置文件
 
-**脚本自动完成：**
-- 生成完整 BPMN XML（含节点、连线、布局）
-- 构建 nodes 参数
-- 调用 saveProcess API 创建/更新流程
-- 关联表单（如配置了 formLink）
-- 条件表达式自动 base64 编码（flowUtil.evaluateExpression）
-- taskExtendJson 自动生成
-- 布局自动计算（垂直排列、绕行连线自动检测）
+**脚本自动完成：** 生成 BPMN XML、构建 nodes 参数、调用 saveProcess、关联表单、条件 base64 编码、taskExtendJson、布局计算。
 
 **JSON 配置格式：**
 ```json
@@ -964,52 +866,17 @@ public class {ClassName} {
   ]
 }
 ```
-> **自动检测：** 当一个 userTask 有 2+ 条出线且都不带 `conditions` 时，脚本自动识别为手工分支，使用水平布局。无需额外配置。
+> 当 userTask 有 2+ 条出线且都不带 `conditions` 时，脚本自动识别为手工分支，使用水平布局。
 
 ---
 
-### 并行网关 / 包容网关的水平分支布局（自动）
+### 并行网关 / 包容网关 / 排他网关的水平分支布局（自动）
 
-当流程中出现「**`parallelGateway` 或 `inclusiveGateway`（split，出度 ≥ 2）→ 多条分支链 → 同一 `parallelGateway` / `inclusiveGateway`（join，入度 = split 出度）**」的经典对称模式时，`bpmn_creator.py` 会自动把各条分支链**横向并排**放在 split 下方，join 落在所有分支底部正中下方，连线走 L 形（水平折线）。这是 BPMN 标准的经典样子，而不是把分支节点串行垂直堆叠。
+当流程出现 split（出度≥2）→ 多分支链 → join（入度=split出度）的对称模式时，自动横向并排布局。不满足条件退化为垂直布局，无需额外配置。
 
-```
-             开始
-              ↓
-           填写申请
-              ↓
-           ◇ split
-           / | \
-          /  |  \
-      节点A 节点B 节点C       ← 三条分支横向并排
-          \  |  /
-           \ | /
-           ◇ join
-              ↓
-            结束
-```
+**排他网关 3+ 分支水平展开（自动）：** 当 `exclusiveGateway` 有 3 条及以上出线时，非空分支链自动水平展开（左/右/更多列），默认流直线向下连接后续节点，分支通过 L 形线汇聚。**不再使用右侧绕行（bypass）**，避免多条绕行线重叠。2 条出线的排他网关仍使用垂直+绕行布局。
 
-识别条件（同时满足才走水平布局）：
-1. split 节点类型为 `parallelGateway` 或 `inclusiveGateway`，出度 ≥ 2
-2. 每条分支是一条**不再分叉**的链（分支链中途不能再次出现多出线节点，否则放弃自动识别）
-3. 所有分支最终都汇入同一个 `parallelGateway` / `inclusiveGateway` 作为 join，且 join 的入度正好等于 split 的出度
-
-不满足任一条件时退化为原有垂直布局。**不需要在 JSON 中做任何额外配置**，只要流程结构符合模式就自动生效。
-
-**手工分支布局规则（避免节点和连线重叠）：**
-
-布局结构：
-```
-开始 → [前置节点...] → 分支源 ──(第一条线)──→ 结束
-                          │                     ↑
-                          └──(第二条线)──→ 目标 ─┘
-```
-
-- 顶行水平排列：开始 → 前置节点（如草稿、审批节点） → 分支源 → 结束
-- 分支源的**第一条出线**（如"拒绝"）：从源右侧**直线水平**连到结束
-- 分支源的**后续出线**（如"同意"）：从源**底部向下**，再**向右**连到目标节点（避免与第一条线重叠）
-- 目标节点**回到结束**：从目标右侧**向右**，再**向上**连到结束底部（避免与顶部线重叠）
-- 支持前置节点（如 start → draft → dept → finance(分支源)），自动计算偏移
-- 支持 callActivity / subProcess 等特殊节点作为分支目标
+**手工分支布局规则：** 顶行水平排列（开始→前置→分支源→结束），第一条出线水平直连结束，后续出线向下再向右，目标节点回到结束走 L 形。
 
 #### JSON 配置字段说明
 
@@ -1024,7 +891,7 @@ public class {ClassName} {
 | `startType` | 否 | `manual` | 发起方式 |
 | `nodes` | 是 | - | 节点数组 |
 | `flows` | 是 | - | 连线数组 |
-| `formLink` | 否 | - | 表单关联配置（存在则自动关联） |
+| `formLink` | 否 | - | 表单关联配置 |
 
 **节点（nodes）字段：**
 
@@ -1033,116 +900,94 @@ public class {ClassName} {
 | `id` | 是 | 节点唯一ID |
 | `type` | 是 | `startEvent` / `endEvent` / `userTask` / `exclusiveGateway` / `parallelGateway` / `inclusiveGateway` |
 | `name` | 是 | 节点名称 |
-| `draft` | 否 | `true` = 首节点提交/填写（sameMode=0 由发起人对自己审批 + AutoSubmitListener 自动提交监听 + **自动设置表单可编辑 formEditStatus=1**）。可通过 `assignee.sameMode` 显式覆盖。**重要：草稿节点只添加 `TaskCreatedAutoSubmitListener`，不添加 `TaskSkipApprovalListener`，否则流程启动失败；非草稿节点只添加 `TaskSkipApprovalListener`，不添加 `TaskCreatedAutoSubmitListener`**。**开启 formEditStatus=1 的节点必须同时设置 PC 和移动端表单地址**，否则表单无法正常打开（见下方「Online/DesForm 表单地址配置」） |
+| `draft` | 否 | `true` = 首节点（sameMode=0 + AutoSubmitListener + formEditStatus=1）。**草稿节点只添加 `TaskCreatedAutoSubmitListener`，非草稿节点只添加 `TaskSkipApprovalListener`**。开启 formEditStatus=1 的节点必须同时设置 PC 和移动端表单地址 |
 | `default` | 否 | 排他网关的默认流 ID |
-| `assignee` | 否 | 审批人配置（见下方） |
-| `countersign` | 否 | 会签配置（见下方），设置后节点自动变为多实例会签 userTask |
+| `assignee` | 否 | 审批人配置 |
+| `countersign` | 否 | 会签配置 |
 
 **会签（countersign）配置：**
 
 | 字段 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
-| `sequential` | 否 | `false` | `true`=串行（顺序逐个），`false`=并行（同时） |
-| `rule` | 否 | `countersign_all` | `countersign_all`=全部通过 / `countersign_one`=一人通过 / `countersign_half`=半数通过 / `countersign_proportion`=按比例 / `countersign_custom`=自定义指定人员 |
-| `proportion` | 否 | - | 仅 `rule=countersign_proportion` 时有效，如 `"0.6"` |
+| `sequential` | 否 | `false` | `true`=串行，`false`=并行 |
+| `rule` | 否 | `countersign_all` | `countersign_all`/`countersign_one`/`countersign_half`/`countersign_proportion`/`countersign_custom` |
+| `proportion` | 否 | - | 仅 `countersign_proportion` 时有效 |
 | `auditorUserType` | 是 | - | `candidateUsers`/`candidatePosts`/`candidateDepts`/`candidateGroups`/`candidateApprovalGroups`/`candidateDeptPositions`/`formData`/`customUser` |
-| `auditorUserIds` | 条件 | - | `candidateUsers` 时必填，如 `["admin","jeecg"]` |
-| `auditorPostIds` | 条件 | - | `candidatePosts`（职务/职级）时必填，如 `["1958471074953363458"]` |
-| `auditorDeptIds` | 条件 | - | `candidateDepts` 时必填 |
-| `auditorGroupIds` | 条件 | - | `candidateGroups`（角色）时必填 |
-| `auditorApprovalGroupIds` | 条件 | - | `candidateApprovalGroups`（审批角色）时必填 |
-| `auditorDeptPositionIds` | 条件 | - | `candidateDeptPositions`（岗位）时必填 |
-| `auditorCountersignFormField` | 条件 | - | `formData` 时必填，表单字段 model |
-| `auditorCountersignFormFieldType` | 条件 | `select-user` | `formData` 时使用，表单字段类型 |
+| `auditorUserIds` | 条件 | - | `candidateUsers` 时，如 `["admin","jeecg"]` |
+| `auditorPostIds` | 条件 | - | `candidatePosts` 时 |
+| `auditorDeptIds` | 条件 | - | `candidateDepts` 时 |
+| `auditorGroupIds` | 条件 | - | `candidateGroups` 时，**填角色 code 不是 ID** |
+| `auditorApprovalGroupIds` | 条件 | - | `candidateApprovalGroups` 时 |
+| `auditorDeptPositionIds` | 条件 | - | `candidateDeptPositions` 时 |
+| `auditorCountersignFormField` | 条件 | - | `formData` 时，表单字段 model |
 
-> **注意：** 配置了 `countersign` 后，`assignee` 中的审批人配置会被忽略（assignee 自动改为 `${assigneeUserId}`），审批人由 `countersign` 中的配置决定。
+> 配置了 `countersign` 后，`assignee` 被忽略（自动改为 `${assigneeUserId}`）。
+>
+> **`customUser` 类型**：无 `taskCountersignExtendJson`，collection 为 `${flowUtil.stringToList(assigneeUserIdList)}`，发起时选人。
 
-> **`customUser` 类型（会签自定义-指定人员）说明：**
-> - 对应 UI 中的"会签自定义(指定人员)"，`flowable:countersignRule="countersign_custom"`
-> - **无 `taskCountersignExtendJson`**（与其他类型不同）
-> - collection 自动生成为 `${flowUtil.stringToList(assigneeUserIdList)}`，通过流程变量 `assigneeUserIdList` 动态传入（发起时选人）
-> - 完成条件默认 `${nrOfCompletedInstances/nrOfInstances>=1}`（全部通过）
-> - JSON 示例：
-> ```json
-> {
->   "id": "task_countersign",
->   "type": "userTask",
->   "name": "会签自定义(指定人员)",
->   "countersign": {
->     "sequential": false,
->     "rule": "countersign_custom",
->     "auditorUserType": "customUser"
->   }
-> }
-> ```
-
-**会签 JSON 示例（串行，半数通过，职务总经理）：**
+**会签示例：**
 ```json
-{
-  "id": "task_countersign",
-  "type": "userTask",
-  "name": "总经理会签",
-  "countersign": {
-    "sequential": true,
-    "rule": "countersign_half",
-    "auditorUserType": "candidatePosts",
-    "auditorPostIds": ["1958471074953363458"]
-  }
-}
+{"id": "task_cs", "type": "userTask", "name": "总经理会签",
+ "countersign": {"sequential": true, "rule": "countersign_half",
+  "auditorUserType": "candidatePosts", "auditorPostIds": ["1958471074953363458"]}}
 ```
 
 **审批人（assignee）配置：**
 
-| type 值 | value 含义 | 生成的 XML | 示例 |
-|---------|-----------|-----------|------|
-| `assignee` | 固定用户名 | `flowable:assignee="value"` | `"admin"` |
-| `expression` | 表达式变量名 | `flowable:assignee="${value}"` | `"applyUserId"` |
-| `candidateUsers` | 多候选人（用户名） | `flowable:candidateUsers="value"` | `"qinfeng,test"` |
-| `candidateUsersExpression` | 候选人表达式 | `flowable:candidateUsers="value"` | `"${flowNodeExpression.getDepartLeaders(applyUserId)}"` |
-| `role` | 角色编码 | `candidateGroups + groupType="role"` | `"admin,vue3"` |
-| `approvalRole` | 审批角色 ID | `candidateUsers + 表达式 + groupType="approvalRole"` | `"1979845941985529857"` |
-| `dept` | 部门 ID | `candidateGroups + groupType="dept"` | `"6d35e179..."` |
-| `deptPosition` | 岗位 ID | `candidateGroups + groupType="deptPosition"` | `"1958497164..."` |
-| `position` | 职级 ID | `candidateUsers + 表达式 + groupType="position"` | `"1958470912..."` |
+| type 值 | value 含义 | 生成的 XML |
+|---------|-----------|-----------|
+| `assignee` | 固定用户名 | `flowable:assignee="value"` |
+| `expression` | 表达式变量名 | `flowable:assignee="${value}"` |
+| `candidateUsers` | 多候选人 | `flowable:candidateUsers="value"` |
+| `candidateUsersExpression` | 候选人表达式 | `flowable:candidateUsers="value"` |
+| `role` | 角色编码 | `candidateGroups + groupType="role"` |
+| `approvalRole` | 审批角色 ID | `candidateUsers + 表达式 + groupType="approvalRole"` |
+| `dept` | 部门 ID | `candidateGroups + groupType="dept"` |
+| `deptPosition` | 岗位 ID | `candidateGroups + groupType="deptPosition"` |
+| `position` | 职级 ID | `candidateUsers + 表达式 + groupType="position"` |
 
-assignee 额外可选参数：`sameMode`, `skipOne`, `skipEmpty`, `skipApproval`, `assignedByPrev`, `emptyAssignedByPrev`
+**assignee 额外可选参数（节点行为控制）：**
 
-> **注意：** `approvalRole` 和 `position` 自动包装为表达式（`flowUtil.getUsersByApprRole` / `oaFlowExpression.getApplyUserDeptPositionLevel`），只需传 ID。
+> **⛔ 严重坑：这些参数必须放在 `assignee` 字典内部，不能放在节点顶层。**
+> `gen_user_task` 从 `assignee_cfg = node.get('assignee', {})` 读取这些值，
+> 放在节点顶层会导致 taskExtendJson 中对应字段全为 false/0。
+>
+> ```json
+> // ❌ 错误 —— sameMode 在节点顶层，不会被读取
+> {"id": "task_x", "type": "userTask", "name": "审批",
+>  "assignee": {"type": "role", "value": "manager"},
+>  "sameMode": 2, "skipOne": true}
+>
+> // ✅ 正确 —— 所有行为参数都在 assignee 内部
+> {"id": "task_x", "type": "userTask", "name": "审批",
+>  "assignee": {"type": "role", "value": "manager",
+>               "sameMode": 2, "skipOne": true, "skipEmpty": false}}
+> ```
+
+| 参数 | 说明 |
+|------|------|
+| `sameMode: 2` | 审批人与发起人同一人时自动跳过（**值为 2，不是 1**） |
+| `skipOne: true` | 只有一个候选人时自动签收（字段名拼写 `OnePersion`） |
+| `skipEmpty: true` | 审批人为空时自动跳过 |
+| `skipApproval: true` | 完全跳过审批（**不是**"与发起人相同时跳过"） |
+| `assignedByPrev: true` | 由上一节点指派审批人 |
+| `emptyAssignedByPrev: true` | 为空时由上一节点指派 |
+
+> 启用跳过功能的节点**必须**挂载 `TaskSkipApprovalListener`。
 
 **节点抄送人（ccConfig）字段：**
 
-在节点 JSON 中通过 `ccConfig` 数组配置抄送人，脚本自动 base64 编码后写入 `<flowable:ccConfigJson>`：
-
 ```json
 {
-  "id": "task_manager",
-  "type": "userTask",
-  "name": "经理审批",
-  "assignee": {"type": "role", "value": "manager"},
   "ccConfig": [
-    {
-      "type": "candidateUsers",
-      "userIds": ["qinfeng"],
-      "selectedUsers": [{"value": "qinfeng", "label": "秦峰"}]
-    },
+    {"type": "candidateUsers", "userIds": ["qinfeng"], "selectedUsers": [{"value": "qinfeng", "label": "秦峰"}]},
     {"type": "submitter_dept_leader"},
     {"type": "dept_leader"}
   ]
 }
 ```
 
-| ccConfig type | 说明 | 附加字段 |
-|--------------|------|---------|
-| `candidateUsers` | 指定用户 | `userIds`（用户名数组）、`selectedUsers`（`[{value,label}]`） |
-| `candidateRoles` | 指定角色 | `roleIds`（角色编码数组）、`selectedRoles`（`[{value,label}]`） |
-| `candidateDeptPositions` | 指定岗位 | `deptPositionIds`（岗位ID数组）、`selectedDeptPositions`（`[{value,label}]`） |
-| `submitter_user` | 发起人本人 | 无 |
-| `submitter_dept_leader` | 发起人的部门负责人 | 无 |
-| `submitter_parent_dept_leader` | 发起人的上级部门负责人 | 无 |
-| `dept_members` | 发起人所在部门全体成员 | 无 |
-| `dept_leader` | 当前节点审批人的部门负责人 | 无 |
-
-> 详细说明及 Python 生成代码见 `references/bpmn-advanced.md` 第2节。
+可选 type：`candidateUsers` `candidateRoles` `candidateDeptPositions` `submitter_user` `submitter_dept_leader` `submitter_parent_dept_leader` `dept_members` `dept_leader`。详见 `references/bpmn-advanced.md` 第2节。
 
 **连线（flows）字段：**
 
@@ -1151,21 +996,19 @@ assignee 额外可选参数：`sameMode`, `skipOne`, `skipEmpty`, `skipApproval`
 | `id` | 是 | 连线唯一ID |
 | `source` | 是 | 源节点ID |
 | `target` | 是 | 目标节点ID |
-| `name` | 否 | 连线名称（分支时显示） |
-| `conditions` | 否 | 条件数组（自动 base64 编码为 flowUtil.evaluateExpression） |
-| `bypass` | 否 | `true` = 从右侧绕行（自动检测，通常无需手动设） |
+| `name` | 否 | 连线名称 |
+| `conditions` | 否 | 条件数组（自动 base64 编码） |
+| `bypass` | 否 | `true` = 从右侧绕行 |
 
-**条件（conditions）格式：**
+**条件格式：**
 ```json
 {"field": "integer_xxx", "fieldType": "integer", "fieldName": "请假天数", "operator": "gt", "value": "3"}
 ```
-operator 值：`eq`, `ne`, `gt`, `gte`, `lt`, `lte`/`le`, `in`, `not_in`, `contains`, `is_empty`, `is_not_empty`
+operator：`eq` `ne` `gt` `gte` `lt` `lte`/`le` `in` `not_in` `contains` `is_empty` `is_not_empty`
 
-**表单类型选择规则（强制）：**
+> **DesForm 字段类型 → fieldType 映射：** `money`→`"money"` / `integer`→`"integer"` / `input`/`textarea`→`"input"` / `select`/`radio`/`checkbox`→对应同名 / `date`→`"date"` / `number`→`"number"`
 
-> 用户明确说"online表单"时，表单部分必须使用 **jeecg-onlform** 技能创建，`formType` 填 `"1"`。
-> 用户明确说"表单设计器"时，表单部分使用 **jeecg-desform** 技能创建，`formType` 填 `"2"`。
-> 两者是完全独立的表单体系，不可混用。
+**表单类型选择规则（强制）：** "online表单" → `formType="1"` 用 jeecg-onlform / "表单设计器" → `formType="2"` 用 jeecg-desform / 两者不可混用。
 
 **表单关联（formLink）字段：**
 
@@ -1173,49 +1016,30 @@ operator 值：`eq`, `ne`, `gt`, `gte`, `lt`, `lte`/`le`, `in`, `not_in`, `conta
 |------|------|------|
 | `formType` | `1`=Online, `2`=DesForm, `3`=自定义 | `"2"` |
 | `relationCode` | Online: `onl_{表名}`, DesForm: `desform_{编码}`, 自定义: 直接写 | `"onl_test_bpm_apply"` |
-| `titleExp` | 业务标题 `${字段model}` 引用 | `"${user_xxx}提交的请假"` |
+| `titleExp` | 业务标题 `${字段model}` | `"${user_xxx}提交的请假"` |
 | `formTableName` | DesForm=表单编码, Online=表名 | `"oa_leave"` |
 | `formDealStyle` | 处理方式 | `"default"` |
 | `flowStatusCol` | 状态字段 | `"bpm_status"` |
-| `formUrl` | 自定义表单地址（仅 formType=3，可选，不填则自动推导） | `"visitor/components/BizVisitorRegisterForm?edit=1"` |
+| `formUrl` | 仅 formType=3 可选 | `"visitor/components/BizVisitorRegisterForm?edit=1"` |
 
-**DesForm 表单绑定示例：**
+> `relationCode` 无需手动加前缀，`bpmn_creator.py` 根据 `formType` 自动补全（1 加 `onl_`，2 加 `desform_`，3 不加）。Online 表单走流程必须含 `bpm_status` 字段。
+
+**DesForm 表单绑定：**
 ```json
-{
-  "formLink": {
-    "formType": "2",
-    "relationCode": "oa_leave",
-    "formTableName": "oa_leave",
-    "flowStatusCol": "bpm_status",
-    "titleExp": "${user_name}提交的请假申请"
-  }
-}
+{"formLink": {"formType": "2", "relationCode": "oa_leave", "formTableName": "oa_leave",
+  "flowStatusCol": "bpm_status", "titleExp": "${user_name}提交的请假申请"}}
 ```
 
-**Online 表单绑定示例：**
+**Online 表单绑定：**
 ```json
-{
-  "formLink": {
-    "formType": "1",
-    "relationCode": "test_bpm_apply",
-    "formTableName": "test_bpm_apply",
-    "flowStatusCol": "bpm_status",
-    "titleExp": "BPM测试申请-${title}"
-  }
-}
+{"formLink": {"formType": "1", "relationCode": "test_bpm_apply", "formTableName": "test_bpm_apply",
+  "flowStatusCol": "bpm_status", "titleExp": "BPM测试申请-${title}"}}
 ```
 
-**自定义开发表单绑定示例（代码生成的表单）：**
+**自定义开发表单绑定：**
 ```json
-{
-  "formLink": {
-    "formType": "3",
-    "relationCode": "dev_demo_all_component_001",
-    "formTableName": "demo_all_component",
-    "flowStatusCol": "bpm_status",
-    "titleExp": "全组件演示-${name}"
-  }
-}
+{"formLink": {"formType": "3", "relationCode": "dev_demo_all_component_001",
+  "formTableName": "demo_all_component", "flowStatusCol": "bpm_status", "titleExp": "全组件演示-${name}"}}
 ```
 
 > **自定义开发表单（formType=3）使用场景与规则：**
@@ -1233,239 +1057,55 @@ operator 值：`eq`, `ne`, `gt`, `gte`, `lt`, `lte`/`le`, `in`, `not_in`, `conta
 **调用示例：**
 ```bash
 python "<skill目录>/scripts/bpmn_creator.py" \
-    --api-base <api_base> \
-    --token <token> \
-    --config leave_process.json
+    --api-base <api_base> --token <token> --config leave_process.json
 
 # 只生成 XML 不调用 API（调试用）
 python "<skill目录>/scripts/bpmn_creator.py" \
-    --api-base <api_base> \
-    --token xxx \
-    --config leave_process.json \
-    --dry-run
+    --api-base <api_base> --token xxx --config leave_process.json --dry-run
 ```
+
+> **⚠ Windows 环境：**
+> - **必须加 `-X utf8`**，否则中文 GBK 乱码
+> - Python 未加 PATH 时用 PowerShell：`powershell -Command "& '$PYTHON_PATH' '-X' 'utf8' '<script>'"`
+> - 删除临时文件用 PowerShell：`powershell -Command "Remove-Item 'C:\path\to\file'"`
+> - 不要在 bash 中直接传 Windows 路径（盘符冒号问题），转 bash 格式（`/c/Users/...`）或用 PowerShell
+> - **含 `${...}` 的脚本禁止用 `-c "..."`，必须写入 `.py` 文件执行（见规则7）**
 
 #### 当通用脚本不满足需求时
 
-对于会签、复杂子流程等场景，通用脚本可能无法覆盖，此时需编写临时 Python 脚本。（serviceTask 已原生支持，无需临时脚本）阅读以下参考文件：
-- `references/bpmn-xml-skeleton.md` — XML 骨架 + 基本节点模板
-- `references/bpmn-assignee-types.md` — 审批人配置 + groupType
+对于会签、复杂子流程等场景，需编写临时 Python 脚本。阅读以下参考文件：
+- `references/bpmn-xml-skeleton.md` — XML 骨架
+- `references/bpmn-assignee-types.md` — 审批人配置
 - `references/bpmn-layout.md` — 布局计算
 - `references/bpmn-countersign.md` — 会签配置
 - `references/bpmn-task-extend.md` — taskExtendJson + 监听器
 - `references/bpmn-advanced.md` — 条件表达式 + 抄送 + 按钮 + 服务任务
 - `references/bpmn-subprocess-gateway.md` — 网关 + 子流程
+- `references/bpmn-save-process-api.md` — **saveProcess API 规范 + XML 转义 + 元素顺序 + 临时脚本模式**
 - `references/example/*.bpmn` — 生产环境示例
-
-##### saveProcess API 规范（临时脚本必须遵守）
-
-> **重要：** 临时脚本调用 `saveProcess` API 时，必须与 `bpmn_creator.py` 保持一致：
-
-| 项目 | 正确值 | 常见错误 |
-|------|--------|---------|
-| **请求路径** | `/act/designer/api/saveProcess` | ~~`/act/process/extActProcess/saveProcess`~~ |
-| **Content-Type** | `application/x-www-form-urlencoded` | ~~`application/json`~~ |
-| **流程Key字段名** | `processkey`（全小写） | ~~`processKey`~~（驼峰） |
-| **类型字段名** | `typeid`（全小写） | ~~`typeId`~~（驼峰） |
-| **XML字段名** | `processDescriptor` | ~~`processXml`~~ |
-| **XML 值的形式** | **原始 XML 字符串**（服务器会自动 base64 编码后存储） | ~~`base64.b64encode(xml)`~~（传 base64 会被再次编码导致双重编码，部署时报 "前言中不允许有内容"） |
-| **流程ID字段名** | `processDefinitionId`（新建传`0`） | ~~`id`~~ |
-| **返回值中流程ID** | `result['obj']` | ~~`result['result']`~~ |
-
-> **⚠ 关键坑（实测）：** `processDescriptor` 字段传入的必须是**原始 XML 字符串**，**不是 base64**。虽然数据库 `ext_act_process.process_xml` 列最终存的是 base64，但编码是服务器端自动完成的。如果脚本自己先做 `base64.b64encode` 再传，服务器会再编码一次形成双重 base64，`saveProcess` 仍返回 success，但后续 `deployProcess` 解析失败报：
-> ```
-> javax.xml.stream.XMLStreamException: ParseError at [row,col]:[1,1]
-> Message: 前言中不允许有内容。
-> ```
-> 同理，从 `queryById` 取出的 `processXml` 是 base64，必须先 `base64.b64decode` 得到原始 XML，修改后再以**原始 XML** 形式传回 `saveProcess`。
-
-**saveProcess 请求参数完整列表：**
-```python
-data = {
-    'processDefinitionId': '0',        # 新建传 '0'，编辑传已有流程ID
-    'processName': '流程名称',
-    'processkey': 'process_key',        # 注意全小写
-    'typeid': 'oa',                     # 注意全小写
-    'lowAppId': '',
-    'params': '',
-    'nodes': 'id=task_xxx###nodeName=节点名@@@',  # 节点列表字符串
-    'processDescriptor': bpmn_xml,       # 完整 BPMN XML
-    'realProcDefId': '',
-    'startType': 'manual',
-}
-result = api_request('/act/designer/api/saveProcess', data,
-                     content_type='application/x-www-form-urlencoded')
-process_id = result['obj']  # 返回的流程ID在 obj 字段
-```
-
-##### BPMN XML 转义规则（临时脚本必须遵守）
-
-> **重要：** 由于 XML 经过 URL 编码传输，必须严格使用 XML 数字实体转义，不能使用 Python 字符串拼接嵌入变量值：
-
-| 字符 | 必须转义为 | 使用场景 | 错误写法 |
-|------|----------|---------|---------|
-| `"` | `&#34;` | taskExtendJson 的 value 属性中的 JSON 双引号 | ~~`&quot;`~~（虽然语义等价，但推荐用 `&#34;` 与设计器前端保持一致） |
-| `'` | `&#39;` | `flowUtil.getAssigneeUsers(execution,'BASE64')` 中的单引号 | ~~字面单引号 `'`~~（URL 编码后可能丢失） |
-
-**正确写法示例（Python）：**
-```python
-# taskExtendJson — 使用 &#34; 转义双引号
-TASK_EXTEND = '{&#34;sameMode&#34;:0,&#34;isSkipAssigneeEmpty&#34;:false,...}'
-
-# collection 表达式 — 使用 &#39; 转义单引号
-COLLECTION = '${flowUtil.getAssigneeUsers(execution,&#39;%s&#39;)}' % b64_config
-
-# 拼接 XML（使用 % 格式化，不要用三引号字符串拼接）
-xml_parts.append('<flowable:taskExtendJson value="%s" />' % TASK_EXTEND)
-xml_parts.append('<bpmn2:multiInstanceLoopCharacteristics flowable:collection="%s" .../>' % COLLECTION)
-```
-
-**错误写法（会导致 URL 编码后单引号丢失）：**
-```python
-# 错误！三引号拼接中的单引号在 URL 编码后会被吞掉
-xml = '''...flowable:collection="${flowUtil.getAssigneeUsers(execution,'''' + b64 + '''')}"...'''
-```
-
-##### 临时脚本推荐模式
-
-使用 `xml_parts` 列表逐行拼接 XML（压缩格式），最后 `''.join(xml_parts)` 生成完整 XML。这样避免三引号字符串拼接的转义问题：
-
-```python
-xml_parts = []
-xml_parts.append('<?xml version="1.0" encoding="UTF-8"?>')
-xml_parts.append('<bpmn2:definitions ...>')
-xml_parts.append('<bpmn2:process id="%s" name="%s">' % (key, name))
-# ... 逐行添加节点、连线、布局 ...
-xml_parts.append('</bpmn2:definitions>')
-bpmn_xml = ''.join(xml_parts)
-```
-
-临时脚本执行步骤：
-```
-1. Write 工具 → 写入 create_process.py（项目根目录）
-2. Bash 工具 → python create_process.py
-3. Bash 工具 → rm create_process.py（清理）
-```
 
 ### Step 4: 自动发布流程
 
-流程创建成功后，自动调用发布接口部署流程（无需手动到后台点击发布）：
-
-```python
-# 发布流程 — PUT /act/process/extActProcess/deployProcess
-deploy_data = json.dumps({'id': process_id}).encode('utf-8')
-req = urllib.request.Request(
-    f'{API_BASE}/act/process/extActProcess/deployProcess',
-    data=deploy_data,
-    headers={
-        'X-Access-Token': TOKEN,
-        'Content-Type': 'application/json; charset=UTF-8',
-        'X-Sign': '00000000000000000000000000000000',
-        'X-Tenant-Id': '1',
-    },
-    method='PUT'
-)
-resp = urllib.request.urlopen(req)
-result = json.loads(resp.read().decode('utf-8'))
-# success: true → 发布成功
-```
-
-通用脚本 `bpmn_creator.py` 已内置 `--deploy` 参数自动发布。
+通用脚本 `bpmn_creator.py` 已内置 `--deploy` 参数自动发布。手动发布 API：`PUT /act/process/extActProcess/deployProcess`，body `{"id": process_id}`。详见 [`references/bpmn-deploy-authorize.md`](references/bpmn-deploy-authorize.md)。
 
 ### Step 5: 发起授权
 
-流程关联设计器表单（formType=1 或 formType=2）后，需要将表单授权给角色，用户才能在「发起审批」中看到该流程。
+formType=1/2 需要授权（将表单授权给角色），formType=3 跳过。默认角色ID `f6817f48af4fb3af11b9e8bf182f618b`。
 
-**适用范围：**
-- `formType=1`（Online 表单）— 需要授权
-- `formType=2`（设计器表单 DesForm）— 需要授权
-- `formType=3`（自定义表单）— **不需要授权**，跳过此步骤
+API：`GET getAuthorizedDesignList` 查已有 → `POST saveWorkorderAuth/{roleId}` 追加新表单ID。`authId` 必须包含已有+新增（逗号分隔），否则覆盖。
 
-**授权 API 说明：**
-
-| 步骤 | API | 方法 | 说明 |
-|------|-----|------|------|
-| 1. 查询已有授权 | `/joa/designform/designFormCommuse/getAuthorizedDesignList?principalId={roleId}&authMode=role&_t={timestamp}` | GET | 获取角色已授权的表单ID列表 |
-| 2. 保存授权 | `/joa/designform/designFormCommuse/saveWorkorderAuth/{roleId}` | POST | 追加新表单ID并保存 |
-
-**保存授权请求体：**
-```json
-{
-  "authMode": "role",
-  "authId": "id1,id2,id3,...,新表单ID",
-  "subDepartIds": ""
-}
-```
-
-> **重要：** `authId` 必须包含该角色已有的所有授权表单ID + 新表单ID（逗号分隔），否则会覆盖已有授权。
-
-**默认角色ID：** `f6817f48af4fb3af11b9e8bf182f618b`（管理员角色）
-
-**不同表单类型的 form_id 取值（实战验证）：**
-
-| formType | 表单类型 | form_id 取值 | 获取方式 |
-|----------|---------|-------------|---------|
-| `1` | Online 表单 | Online 表单的 **headId** | 创建 Online 表单时 `onlform_creator.py` 输出的 headId，或通过 `GET /online/cgform/head/list?tableName={表名}` 查询 |
-| `2` | 设计器表单 DesForm | DesForm 的**表单 ID** | 创建设计器表单时 `desform_creator.py` 输出的表单 ID，或通过 `GET /desform/queryByIdOrCode?desformCode={编码}` 查询 |
-
-> **踩坑记录：** Online 表单授权时，`form_id` 必须传 Online 表单的 `headId`（如 `a22625df48b0473ea51197fb276eba95`），**不是**流程 ID，也不是数据库表名。DesForm 表单授权时传 DesForm 的表单记录 ID。两者使用**同一套授权 API**（`saveWorkorderAuth`），只是传入的 ID 来源不同。
-
-**Python 示例：**
-```python
-import json, time, urllib.request
-
-def authorize_form(api_base, token, form_id, role_id='f6817f48af4fb3af11b9e8bf182f618b'):
-    """为表单添加发起授权（保留已有授权）"""
-    headers = {
-        'X-Access-Token': token,
-        'Content-Type': 'application/json; charset=UTF-8',
-    }
-
-    # 1. 查询已有授权
-    ts = str(int(time.time() * 1000))
-    url = f'{api_base}/joa/designform/designFormCommuse/getAuthorizedDesignList?principalId={role_id}&authMode=role&_t={ts}'
-    req = urllib.request.Request(url, headers=headers)
-    result = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
-    existing_ids = [item['id'] for item in result.get('result', []) or []]
-
-    # 2. 追加新表单ID
-    if form_id not in existing_ids:
-        existing_ids.append(form_id)
-
-    # 3. 保存授权
-    url = f'{api_base}/joa/designform/designFormCommuse/saveWorkorderAuth/{role_id}'
-    data = json.dumps({
-        'authMode': 'role',
-        'authId': ','.join(existing_ids),
-        'subDepartIds': '',
-    }, ensure_ascii=False).encode('utf-8')
-    req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-    result = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
-    return result
-```
-
-> **何时执行：** 当流程关联了 Online 表单（formType=1）或设计器表单（formType=2）时，流程创建完成后自动执行发起授权。如果流程关联的是自定义表单（formType=3），则不需要此步骤。
+详见 [`references/bpmn-deploy-authorize.md`](references/bpmn-deploy-authorize.md)。
 
 ### Step 5.5: Online/DesForm 表单地址配置（重要）
 
-> **开启 `formEditStatus=1` 的节点必须同时设置 PC 和移动端表单地址**，否则表单无法正常打开。仅对表单可编辑的节点（如草稿节点）设置，其他审批节点无需设置。
+> **开启 `formEditStatus=1` 的节点必须同时设置 PC 和移动端表单地址**，否则表单无法正常打开。仅对表单可编辑的节点（如草稿节点）设置。
 
-**不同表单类型的地址：**
-
-| 表单类型 | PC 表单地址 (`modelAndView`) | 移动端表单地址 (`modelAndViewMobile`) |
+| 表单类型 | PC (`modelAndView`) | 移动端 (`modelAndViewMobile`) |
 |---------|---------------------------|-------------------------------------|
 | **Online 表单** (formType=1) | `super/bpm/process/components/OnlineFormOpt` | `check/onlineForm/flowedit` |
-| **DesForm 表单** (formType=2) | `{{DOMAIN_URL}}/desform/edit/{表单编码}/${BPM_DES_DATA_ID}?token={{TOKEN}}&taskId={{TASKID}}&skip=false` | `check/desForm/flowedit` |
+| **DesForm 表单** (formType=2) | `{{DOMAIN_URL}}/desform/edit/{表单编码}/${BPM_DES_DATA_ID}?token={{TOKEN}}&taskId={{TASKID}}&skip=false` | *(同 PC 地址或留空)* |
 | **自定义开发表单** (formType=3) | `{{viewDir}}/components/{{entityName}}Form?edit=1` | *(同 PC 地址或留空)* |
 
-> **自定义开发表单 PC 表单地址说明：**
-> - 地址格式：`{前端视图目录}/components/{实体名}Form?edit=1`
-> - 示例：`demo/allComponent/components/DemoAllComponentForm?edit=1`
-> - `?edit=1` 参数标识该节点表单可编辑，Form.vue 通过 `props.formData.disabled` 控制
-> - 该地址指向代码生成的 `Form.vue` 组件（不是 `Modal.vue`），Form.vue 使用 `defineComponent` + `getBpmFormSchema` 模式
-> - **仅在草稿/提交申请节点（formEditStatus=1）设置**，审批节点无需设置
-
-**配置示例（仅对 formEditStatus=1 的节点设置）：**
 ```python
 # Online 表单
 edit_node_config(api_base, token, process_id, 'task_draft', {
@@ -1473,463 +1113,27 @@ edit_node_config(api_base, token, process_id, 'task_draft', {
     'modelAndView': 'super/bpm/process/components/OnlineFormOpt',
     'modelAndViewMobile': 'check/onlineForm/flowedit',
 })
-
-# 自定义开发表单
-edit_node_config(api_base, token, process_id, 'task_draft', {
-    'formEditStatus': '1',
-    'modelAndView': 'demo/allComponent/components/DemoAllComponentForm?edit=1',
-    'modelAndViewMobile': '',
-})
 ```
 
-> **注意：** 非表单可编辑节点（如审批节点 formEditStatus=0）**不需要**设置 modelAndView 和 modelAndViewMobile，保持为空即可。
->
-> **关闭 formEditStatus 时必须同步清空表单地址：** 将 `formEditStatus` 从 `1` 改为 `0` 时，必须同时将 `modelAndView` 和 `modelAndViewMobile` 清空为 `''`，并重新发布流程。
+> 非可编辑节点不需要设置。关闭 formEditStatus 时必须同步清空表单地址。
 
 ### Step 6: 节点字段权限配置（可选）
 
-流程创建后，可通过 `bpmn_creator.py` 中的函数配置每个节点上表单字段的可见、可编辑、必填状态。
-
-**两个核心函数：**
-
-#### `edit_node_config(api_base, token, process_id, node_code, node_settings)`
-
-编辑节点级配置（表单可编辑、抄送、转办、加签、驳回等开关）。
+> 详见 [`references/bpmn-field-permissions.md`](references/bpmn-field-permissions.md)
 
 ```python
-from bpmn_creator import edit_node_config
-
-edit_node_config(api_base, token, process_id, 'task_draft', {
-    'formEditStatus': '1',   # 表单可编辑
-    'ccStatus': '1',          # 启用抄送
-    'selnextUserStatus': '1', # 选择下一步处理人
-    'msgStatus': '1',         # 消息通知
-    'addSignStatus': '1',     # 加签
-    'transferStatus': '1',    # 转办
-    'rejectStatus': '1',      # 驳回
-    'modelAndView': 'PC端表单地址',
-    'modelAndViewMobile': '移动端表单地址',
-})
-```
-
-#### `set_node_field_permissions(api_base, token, process_id, node_code, form_code, field_permissions, form_type='2')`
-
-批量设置节点上每个字段的可见/可编辑/必填权限。支持用**字段中文名**或**字段 model** 引用字段。
-
-```python
-from bpmn_creator import set_node_field_permissions
-
-result = set_node_field_permissions(api_base, token, process_id, 'task_draft', 'oa_interview_apply', [
-    {"field": "面试地点", "visible": True, "editable": False},              # 可见但禁用
-    {"field": "联系电话", "visible": True, "editable": True, "required": True},  # 必填
-    {"field": "面试说明", "visible": False},                                # 隐藏
-])
-# 返回: {"success": True, "updated": 3, "errors": [], "message": "批量保存成功！"}
-```
-
-**字段权限配置项：**
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `field` | string | 必填 | 字段中文名或字段 model |
-| `visible` | bool | `true` | 是否可见 |
-| `editable` | bool | `true` | 是否可编辑 |
-| `required` | bool | `false` | 是否必填 |
-
-> **必填时必须同时显式设 `editable: True`**
->
-> `required: true` 会自动强制 `visible=true` + `editable=true`，但生成的 ruleType=2 status 必须为 `'0'`（可编辑勾选）才能在 UI 上正确显示必填。
-> `bpmn_creator.py` 中 ruleType=2 的 status 已修正为 `'0' if editable else '1'`（原来写反，导致必填时 UI 可编辑未勾选、必填校验不生效）。
->
-> 正确写法：`{"field": "申请日期", "visible": True, "editable": True, "required": True}`
-> 错误写法：`{"field": "申请日期", "required": True}` ← 省略 editable 时默认值为 True，代码会自动补，但明确写出更安全
-
-> **联动规则（formEditStatus=1 节点的 API status 值对照，实测验证）：**
->
-> **关键：ruleType=2 的 status 与 UI 可编辑勾选状态是反的！**
-> - `status='0'` → UI 可编辑**已勾选**（跟随节点默认=可编辑）
-> - `status='1'` → UI 可编辑**未勾选**（启用控制=禁用/只读）
->
-> | 操作 | UI 可见 | UI 可编辑 | UI 必填 | 可见(ruleType=1) status | 可编辑(ruleType=2) status | required |
-> |------|--------|---------|--------|----------------------|------------------------|----------|
-> | **隐藏** | ✗ | ✗ | ✗ | `'0'` | `'1'` | `false` |
-> | **可见+可编辑**（默认） | ✓ | ✓ | ✗ | `'1'` | `'0'` | `false` |
-> | **可见+禁用**（只读） | ✓ | ✗ | ✗ | `'1'` | `'1'` | `false` |
-> | **必填** | ✓ | ✓ | ✓ | `'1'` | `'0'` | `true` |
-
-**API 对应关系：**
-
-| UI 列 | API 字段 | 说明 |
-|--------|---------|------|
-| 可见 | `ruleType='1'` 的 `status` | `'1'`=勾选（可见），`'0'`=未勾选（隐藏） |
-| 可编辑 | `ruleType='2'` 的 `status` | **`'0'`=勾选（可编辑），`'1'`=未勾选（禁用）——与直觉相反！** |
-| 必填 | `required` (`true`/`false`) | 两行记录都需设置 |
-
-> **重要：ruleType=2 的 status 含义与 ruleType=1 相反（实测验证）：**
->
-> 当节点开启了 `formEditStatus=1`（表单可编辑）时，所有字段默认可编辑。此时：
-> - `ruleType=2` 的 `status='0'` = UI 可编辑**勾选** = 字段可编辑（跟随节点默认）
-> - `ruleType=2` 的 `status='1'` = UI 可编辑**未勾选** = 字段禁用/只读（启用控制覆盖默认）
->
-> 这与 `ruleType=1` 的逻辑相反（ruleType=1: status='1'=勾选=可见）。
->
-> 各操作的正确 status 值：
-> - **必填**：ruleType=1 status=`'1'`，ruleType=2 status=`'0'`，required=`true`
-> - **隐藏**：ruleType=1 status=`'0'`，ruleType=2 status=`'1'`，required=`false`
-> - **禁用**：ruleType=1 status=`'1'`，ruleType=2 status=`'1'`，required=`false`
-> - **可编辑**：ruleType=1 status=`'1'`，ruleType=2 status=`'0'`，required=`false`
-
-**三种表单类型的 ruleCode 格式（实测验证）：**
-
-| 表单类型 | ruleCode 格式 | formBizCode | desformComKey |
-|---------|--------------|-------------|---------------|
-| Online (formType=1) | `online:{表名}:{字段名}` | 表名 | null |
-| DesForm (formType=2) | `{desformComKey}` | 表单编码 | 组件 key |
-| **自定义 (formType=3)** | **`{自定义编码}`** | **主表表名（主表字段和子表列都用主表名！）** | null |
-
-**Online 表单子表字段的 ruleName 格式（实测验证）：**
-
-- 主表字段：`ruleName` = 字段中文名，如 `申请标题`
-- **子表字段：`ruleName` = `{子表描述}::{字段中文名}`，如 `采购明细::金额`**
-- `formBizCode` 填**子表表名**（不是主表表名），`ruleCode` 也用子表表名：`online:{子表表名}:{字段名}`
-
-> **⚠ Online 与自定义表单的子表列 formBizCode 规则相反（实测验证）：**
-> - **Online (formType=1)**：子表列 `formBizCode` = **子表表名**
-> - **自定义 (formType=3)**：子表列 `formBizCode` = **主表表名**（与主表字段相同！）
->
-> 用错会导致权限保存成功但流程节点设计器中看不到配置，`subPermissionList` 也不注入。
-
-**更新已有字段权限时（强制要求）：**
-
-> 调用 `saveOrUpdateBatch` 更新权限时，**必须先查询已有记录**，携带原记录的 `id` 提交，**不得修改 `ruleName`**。直接新建（不带 `id`）会导致重复记录；擅自修改 `ruleName` 会破坏系统中已有的字段名称显示。
-
-```python
-# 正确流程：先查 → 取 id + ruleName → 只改 status/required
-r = requests.get(f"{BASE}/act/process/extActProcessNodePermission/list",
-    headers=headers,
-    params={"processId": process_id, "processNodeCode": node_code, "pageNo": 1, "pageSize": 100})
-records = r.json()["result"]["records"]
-existing = {rec["ruleCode"]: rec for rec in records}
-
-# 更新时保留原 id 和 ruleName，只修改 status/required
-payload = []
-for rule_code, new_status_1, new_status_2, new_required in fields_to_update:
-    rec1 = existing.get(rule_code + ":ruleType1")  # 按实际查询结果匹配
-    payload.append({
-        "id": rec["id"],           # 必须携带原 id
-        "ruleName": rec["ruleName"],  # 保留原 ruleName，不修改
-        "ruleType": rec["ruleType"],
-        "status": new_status,
-        "required": new_required,
-        # ... 其他字段不变
-    })
-```
-
-**自定义开发表单（formType=3）字段权限配置详解（实测验证）：**
-
-> 自定义开发表单的字段权限通过前端 `usePermission` 的 `hasPermission(code)` / `isDisabledAuth(code)` 与后端配置的 `ruleCode` 联动。`ruleCode` 是自定义的权限编码，需要与前端 data.ts 中 formSchema 的 `show`/`dynamicDisabled` 里使用的编码一致。
-
-**ruleCode 命名规则：** `{模块简称}:{字段名}`，如 `demoall:password`、`demoall:remark`
-
-**完整 API 调用流程：**
-
-**第 1 步：编辑节点配置（开启表单可编辑 + 设置表单地址）**
-
-```
-PUT /act/process/extActProcessNode/edit
-
-请求体：
-{
-    "id": "{节点记录ID}",
-    "formEditStatus": "1",
-    "ccStatus": "1",
-    "selnextUserStatus": "1",
-    "msgStatus": "1",
-    "modelAndView": "{{viewDir}}/components/{{entityName}}Form?edit=1",
-    "modelAndViewMobile": "",
-    "processId": "{流程ID}",
-    "processNodeCode": "task_draft",
-    "processNodeName": "提交申请",
-    "addSignStatus": "1",
-    "transferStatus": "1",
-    "rejectStatus": "1"
-}
-
-返回：{"success": true, "message": "编辑成功", "code": 200}
-```
-
-> **节点记录ID** 通过 `GET /act/process/extActProcessNode/list?processId={流程ID}` 查询获取。
-
-**第 1.5 步：添加授权标识到菜单（前置条件）**
-
-> **重要（实测验证，按表结构区分）：**
->
-> | 表类型 | 是否需要 sys_permission | 说明 |
-> |--------|----------------------|------|
-> | **单表**（formType=3） | ✅ **需要** | `hasPermission`/`isDisabledAuth` 依赖 sys_permission 中的权限编码 |
-> | **一对多主子表**（formType=3） | ❌ **不需要** | BPM 引擎直接通过 `formData.permissionList` 注入，前端从中读取，与 sys_permission 无关 |
->
-> 一对多场景只需两步：① data.ts 中 `getBpmFormSchema` 加钩子 ② `saveOrUpdateBatch` 写权限记录。
-
-> **重要：** 自定义开发**单表**表单的字段权限编码（ruleCode）必须先作为**按钮/权限**添加到系统菜单中，并授权给 admin 角色，否则 `hasPermission(code)` 和 `isDisabledAuth(code)` 无法识别该权限编码。
-
-```
-POST /sys/permission/add
-
-请求体（每个字段权限一条记录）：
-{
-    "menuType": 2,
-    "name": "密码显示",
-    "parentId": "{主菜单ID}",
-    "perms": "demoall:password",
-    "permsType": "1",
-    "status": "1"
-}
-
-返回：{"success": true, "message": "添加成功！", "code": 200}
-```
-
-**字段说明：**
-
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| `menuType` | 固定 `2`（按钮/权限） | `2` |
-| `name` | 权限名称（UI显示） | `"密码显示"` |
-| `parentId` | 上级菜单ID（即该模块的主菜单ID，Flyway SQL 中生成的 `{timestamp}01`） | `"177501111975001"` |
-| `perms` | 授权标识（与 ruleCode、前端 hasPermission/isDisabledAuth 的参数一致） | `"demoall:password"` |
-| `permsType` | 授权策略：`"1"`=可见/可访问，`"2"`=可编辑 | `"1"` |
-| `status` | `"1"`=有效 | `"1"` |
-
-**permsType 与前端函数对应关系：**
-
-| permsType | 含义 | 前端对应函数 | 流程节点 ruleType |
-|-----------|------|-----------|-----------------|
-| `"1"` | 可见/可访问 | `hasPermission(code)` — 控制字段 `show` | ruleType=1（可见性） |
-| `"2"` | 可编辑 | `isDisabledAuth(code)` — 控制字段 `dynamicDisabled` | ruleType=2（可编辑性） |
-
-**添加后需授权给 admin 角色：**
-```
-POST /sys/permission/saveRolePermission
-
-请求体：
-{
-    "roleId": "f6817f48af4fb3af11b9e8bf182f618b",
-    "permissionIds": "{新增的权限ID1},{新增的权限ID2},...",
-    "lastpermissionIds": "{原有权限IDs}"
-}
-```
-> 或者通过 Flyway SQL 直接插入 `sys_permission` + `sys_role_permission` 表（参考代码生成的菜单 SQL 格式）。
-
-**第 2 步：保存节点字段权限**
-
-```
-POST /act/process/extActProcessNodePermission/saveOrUpdateBatch
-
-请求体（数组，每个字段2条记录：ruleType=1 可见 + ruleType=2 可编辑）：
-[
-    {
-        "ruleType": "1",
-        "status": "1",
-        "formType": "3",
-        "formBizCode": "demo_all_component",
-        "processId": "2039187744210108418",
-        "processNodeCode": "task_draft",
-        "ruleCode": "demoall:password",
-        "ruleName": "密码显示隐藏"
-    },
-    {
-        "ruleType": "2",
-        "status": "0",
-        "formType": "3",
-        "formBizCode": "demo_all_component",
-        "processId": "2039187744210108418",
-        "processNodeCode": "task_draft",
-        "ruleCode": "demoall:password",
-        "ruleName": "密码显示隐藏"
-    }
-]
-
-返回：{"success": true, "message": "批量保存成功！", "code": 200}
-```
-
-**字段权限记录字段说明：**
-
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| `ruleType` | `'1'`=可见性规则，`'2'`=可编辑性规则 | `'1'` |
-| `status` | ruleType=1: `'1'`=可见/`'0'`=隐藏；ruleType=2: `'0'`=可编辑/`'1'`=禁用 | `'1'` |
-| `formType` | `'3'`=自定义开发 | `'3'` |
-| `formBizCode` | 数据库表名 | `'demo_all_component'` |
-| `processId` | 流程ID | `'2039187744210108418'` |
-| `processNodeCode` | 节点编码 | `'task_draft'` |
-| `ruleCode` | 权限编码（与前端 hasPermission/isDisabledAuth 的参数一致） | `'demoall:password'` |
-| `ruleName` | 权限名称（UI显示用） | `'密码显示隐藏'` |
-| `id` | 记录ID（新增不传，编辑传） | `'2039250050830880769'` |
-
-**前端 data.ts 与后端权限编码对应关系：**
-
-```typescript
-// data.ts 中 — ruleCode 与 hasPermission/isDisabledAuth 的参数必须一致
-{ label: '密码', field: 'password', component: 'InputPassword',
-  show: ({ values }) => {
-    return hasPermission('demoall:password');  // ← 对应后端 ruleCode: 'demoall:password'
-  },
-},
-{ label: '多行文本', field: 'remark', component: 'InputTextArea',
-  dynamicDisabled: ({ values }) => {
-    return isDisabledAuth('demoall:demoall');  // ← 对应后端 ruleCode: 'demoall:demoall'
-  },
-},
-```
-
-> **子表字段的 ruleName 格式（实测验证）：**
->
-> - **Online (formType=1)**：`ruleName` = `{子表描述}::{字段标签}`，如 `商品明细::小计`；`formBizCode` = 子表表名
-> - **自定义 (formType=3)**：`ruleName` = `{子表描述}{字段标签}`（无 `::`，直接拼接），如 `订单明细商品名称`；`formBizCode` = **主表表名**（与主表字段完全相同）；`ruleCode` = `{子表Key前缀}:{columnKey}`，如 `salOrderItemColumns:productName`
->
-> 自定义表单子表列权限写入示例：
-> ```python
-> # formBizCode 统一用主表名，不论主表字段还是子表列！
-> {"ruleType":"1","status":"1","formType":"3","formBizCode":"sal_sales_order",
->  "ruleCode":"salOrderItemColumns:productName","ruleName":"订单明细商品名称", ...}
-> {"ruleType":"2","status":"1","formType":"3","formBizCode":"sal_sales_order",
->  "ruleCode":"salOrderItemColumns:productName","ruleName":"订单明细商品名称", ...}
-> ```
-
-**Online 表单设置必填的完整示例：**
-```python
-# 为 task_draft 节点的 order_date 字段设置必填
-records = [
-    {
-        'processId': PROCESS_ID,
-        'processNodeCode': 'task_draft',
-        'ruleCode': 'online:sales_order:order_date',  # online:{表名}:{字段名}
-        'ruleName': '下单日期',
-        'ruleType': '1',       # 可见
-        'status': '1',         # 启用
-        'required': 1,         # 必填
-        'formType': '1',       # Online 表单
-        'formBizCode': 'sales_order'  # 表名
-    },
-    {
-        'processId': PROCESS_ID,
-        'processNodeCode': 'task_draft',
-        'ruleCode': 'online:sales_order:order_date',
-        'ruleName': '下单日期',
-        'ruleType': '2',       # 可编辑
-        'status': '0',         # 跟随节点默认（formEditStatus=1 时已默认可编辑）
-        'required': 1,         # 必填
-        'formType': '1',
-        'formBizCode': 'sales_order'
-    }
-]
-api_request(api_base, token, '/act/process/extActProcessNodePermission/saveOrUpdateBatch', data=records)
-```
-
-> 每个字段在后端存储为两条记录：`ruleType=1`（可见性规则）和 `ruleType=2`（可编辑性规则），批量通过 `POST /act/process/extActProcessNodePermission/saveOrUpdateBatch` 保存。
-
----
-
-### OA 审批意见字段配置规范（DesForm + 流程节点联动）
-
-> 适用场景：表单使用 `oa-approval-comments`（审批意见控件），需要与流程节点联动——表单上默认禁用，流转到对应节点时才启用并必填。
-
-#### 第一步：表单设计器中设置审批意见为禁用状态
-
-`oa-approval-comments` 控件创建时默认 `disabled: false`，**必须手动将其设为 `disabled: true`**，否则表单上的审批意见框始终可编辑，与流程节点控制失效。
-
-**操作方式（通过 desform_utils）：**
-
-```python
-import sys, json
-sys.path.insert(0, r'<desform-skill目录>/scripts')
-from desform_utils import init_api, export_design_json, save_design_from_file
-
-init_api('<api_base>', '<token>')
-
-# 1. 导出当前设计 JSON
-file_path, _ = export_design_json('<form_code>')
-
-# 2. 遍历所有控件，将 oa-approval-comments 的 disabled 设为 True
-with open(file_path, 'r', encoding='utf-8') as f:
-    design = json.load(f)
-
-def walk(items):
-    for w in items:
-        if w.get('type') == 'oa-approval-comments':
-            w['options']['disabled'] = True
-        for child in w.get('list', []):
-            walk([child])
-        for col in w.get('columns', []):
-            walk(col.get('list', []))
-
-walk(design.get('list', []))
-
-with open(file_path, 'w', encoding='utf-8') as f:
-    json.dump(design, f, ensure_ascii=False)
-
-# 3. 保存回服务器
-save_design_from_file('<form_code>', file_path)
-```
-
-#### 第二步：每个审批节点配置字段权限
-
-**规则（必须同时满足三点）：**
-1. 开启节点表单可编辑（`formEditStatus=1`）并设置 DesForm 表单地址
-2. 对应审批意见字段：`editable=True, required=True`（启用并必填）
-3. 其他所有字段：`editable=False`（只读，防止审批人篡改申请内容）
-
-**完整 Python 示例：**
-
-```python
-import sys
-sys.path.insert(0, r'<bpmn-skill目录>/scripts')
 from bpmn_creator import edit_node_config, set_node_field_permissions
-
-api_base = '<api_base>'
-token = '<token>'
-process_id = '<process_id>'
-form_code = '<form_code>'
-form_url = '{{DOMAIN_URL}}/desform/edit/<form_code>/${BPM_DES_DATA_ID}?token={{TOKEN}}&taskId={{TASKID}}&skip=false'
-
-# 所有表单字段（中文名列表）
-all_fields = ['字段A', '字段B', '审批意见1', '审批意见2', ...]
-
-# 每个节点 → 该节点可编辑且必填的审批意见字段
-node_editable_fields = {
-    'task_node1': {'审批意见1'},
-    'task_node2': {'审批意见2'},
-}
-
-for node_code, editable_set in node_editable_fields.items():
-    # 1. 开启表单可编辑 + 设置表单地址
-    edit_node_config(api_base, token, process_id, node_code, {
-        'formEditStatus': '1',
-        'modelAndView': form_url,
-        'modelAndViewMobile': 'check/desForm/flowedit',
-    })
-
-    # 2. 设置字段权限：对应审批意见字段必填，其余只读
-    perms = []
-    for field in all_fields:
-        if field in editable_set:
-            perms.append({'field': field, 'visible': True, 'editable': True, 'required': True})
-        else:
-            perms.append({'field': field, 'visible': True, 'editable': False, 'required': False})
-    set_node_field_permissions(api_base, token, process_id, node_code, form_code, perms)
+edit_node_config(api_base, token, process_id, 'task_draft', {'formEditStatus': '1', ...})
+set_node_field_permissions(api_base, token, process_id, 'task_draft', 'form_code', [
+    {"field": "字段名", "visible": True, "editable": True, "required": True},
+])
 ```
 
-#### 第三步：节点配置修改后重新发布流程
+> **⚠️ 关键顺序：** `deploy_process` → `edit_node_config` → `deploy_process`（再发布） → `set_node_field_permissions`（deploy 后才保存权限）
 
-> **重要：** 修改节点 `formEditStatus`、`modelAndView`、字段权限等配置后，**必须重新发布流程**，否则已发布版本不会生效。
+### OA 审批意见字段配置规范
 
-```python
-from bpmn_creator import deploy_process
-result = deploy_process(api_base, token, process_id)
-# success: True → 发布成功
-```
-
----
+> 详见 [`references/bpmn-oa-approval-comments.md`](references/bpmn-oa-approval-comments.md)
 
 ### Step 7: 输出结果
 
@@ -1937,773 +1141,17 @@ result = deploy_process(api_base, token, process_id)
 
 ### Step 7.5: 流程高级配置（可选）
 
-流程创建/发布后，可通过以下 API 修改流程的高级配置（通知方式、催办、撤回、督办等）：
-
-**API：** `PUT /act/process/extActProcess/edit`
-
-**请求体（JSON）：**
-```json
-{
-    "id": "{流程ID}",
-    "notifyWay": "system,dingtalk,email,wechat_enterprise",
-    "urgeStatus": "1",
-    "backStatus": "1",
-    "graphicStatus": "1",
-    "autoSubmitStatus": "0",
-    "pcIcon": "",
-    "appIcon": "",
-    "messageTemplate": "bpm_node_notify",
-    "izSupervise": 0
-}
-```
-
-**字段说明：**
-
-| 字段 | 说明 | 取值 |
-|------|------|------|
-| `notifyWay` | 通知方式（逗号分隔） | `system`=系统消息, `dingtalk`=钉钉, `email`=邮件, `wechat_enterprise`=企业微信 |
-| `urgeStatus` | 允许催办 | `"1"`=开, `"0"`=关 |
-| `backStatus` | 允许撤回 | `"1"`=开, `"0"`=关 |
-| `graphicStatus` | 显示流程图 | `"1"`=开, `"0"`=关 |
-| `autoSubmitStatus` | 自动提交 | `"1"`=开, `"0"`=关 |
-| `messageTemplate` | 消息模板 | `bpm_node_notify`（默认） |
-| `izSupervise` | 督办 | `1`=开, `0`=关 |
-| `pcIcon` | PC 端图标 | 图标路径或留空 |
-| `appIcon` | 移动端图标 | 图标路径或留空 |
-
-**Python 示例：**
-```python
-def edit_process_config(api_base, token, process_id, config):
-    """修改流程高级配置"""
-    data = {'id': process_id, **config}
-    body = json.dumps(data, ensure_ascii=False).encode('utf-8')
-    req = urllib.request.Request(
-        f'{api_base}/act/process/extActProcess/edit',
-        data=body,
-        headers={
-            'X-Access-Token': token,
-            'Content-Type': 'application/json; charset=UTF-8',
-            'X-Sign': '00000000000000000000000000000000',
-            'X-Tenant-Id': '1',
-        },
-        method='PUT'
-    )
-    resp = urllib.request.urlopen(req)
-    return json.loads(resp.read().decode('utf-8'))
-
-# 示例：只开启系统消息+钉钉，关闭催办和撤回
-edit_process_config(api_base, token, process_id, {
-    'notifyWay': 'system,dingtalk',
-    'urgeStatus': '0',
-    'backStatus': '0',
-    'graphicStatus': '1',
-    'autoSubmitStatus': '0',
-    'messageTemplate': 'bpm_node_notify',
-    'izSupervise': 0,
-})
-```
-
----
+通过 `PUT /act/process/extActProcess/edit` 修改通知方式、催办、撤回、督办等。详见 [`references/bpmn-process-config.md`](references/bpmn-process-config.md)。
 
 ### Step 7.6: 设置报表打印地址（可选）
 
-流程关联了积木报表后，用户可在审批详情页直接打印报表。**仅 formType=3（自定义开发表单）支持此配置。**
-
-**正确 API：** `PUT /act/process/extActProcessForm/edit`（不是 extActProcess/edit）
-
-**reportPrintUrl 格式（通用模板，只替换报表ID）：**
-```
-{{DOMAIN_URL}}/jmreport/view/{积木报表ID}?id={{DATAID}}&token={{TOKEN}}&procInstId={{PROCINSTID}}
-```
-
-**操作步骤：**
-
-1. 查询流程表单绑定记录，获取记录 id
-2. 调用 edit 接口更新 `reportPrintUrl` 字段
-
-**Python 示例：**
-```python
-import json, urllib.request, urllib.parse
-
-def set_report_print_url(api_base, token, process_id, report_id):
-    headers = {
-        'X-Access-Token': token,
-        'Content-Type': 'application/json; charset=UTF-8',
-        'X-Sign': '00000000000000000000000000000000',
-        'X-Tenant-Id': '1',
-    }
-
-    # Step 1: 查询表单绑定记录
-    url = f'{api_base}/act/process/extActProcessForm/list?processId={process_id}'
-    req = urllib.request.Request(url, headers=headers)
-    result = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
-    records = result.get('result', {}).get('records', [])
-    if not records:
-        raise Exception('未找到流程表单绑定记录')
-    form_record = records[0]
-
-    # Step 2: 更新 reportPrintUrl
-    report_print_url = (
-        '{{DOMAIN_URL}}/jmreport/view/' + report_id +
-        '?id={{DATAID}}&token={{TOKEN}}&procInstId={{PROCINSTID}}'
-    )
-    edit_data = {
-        'id': form_record['id'],
-        'processId': process_id,
-        'formDealStyle': form_record.get('formDealStyle', 'default'),
-        'formType': form_record.get('formType', '3'),
-        'relationCode': form_record.get('relationCode', ''),
-        'flowStatusCol': form_record.get('flowStatusCol', 'bpm_status'),
-        'titleExp': form_record.get('titleExp', ''),
-        'formTableName': form_record.get('formTableName', ''),
-        'reportPrintUrl': report_print_url,
-    }
-    body = json.dumps(edit_data, ensure_ascii=False).encode('utf-8')
-    req = urllib.request.Request(
-        f'{api_base}/act/process/extActProcessForm/edit',
-        data=body, headers=headers, method='PUT'
-    )
-    return json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
-```
-
-> **常见错误：** 用 `/act/process/extActProcess/edit` + `printUrl` 字段无法生效，必须用 `/act/process/extActProcessForm/edit` + `reportPrintUrl` 字段。
+仅 formType=3 支持。通过 `PUT /act/process/extActProcessForm/edit` 设置 `reportPrintUrl`（不是 `extActProcess/edit` + `printUrl`）。详见 [`references/bpmn-process-config.md`](references/bpmn-process-config.md)。
 
 ---
 
-## 自定义开发表单（代码生成）关联流程时的前端代码变更
+## 自定义开发表单关联流程时的前端代码变更
 
-> **触发条件：** 当用户的表有 `bpm_status` 字段，或者要求为代码生成的模块创建审批流程时，前端代码需要做以下变更。
->
-> **执行方式：**
-> - 如果是通过 **Step 0.5 联合创建场景** 进入的，这些变更由 `jeecg-codegen` skill 在第 1 步生成代码时**自动完成**（在调用 jeecg-codegen 时在需求中明确要求包含 bpm_status 字段和 Form.vue）。
-> - 如果是已有代码模块补充流程，则通过 `jeecg-codegen` skill 的**增量修改（场景C）**执行，或手动按以下清单逐一修改。
-
-### 需要变更的文件清单
-
-| 文件 | 变更类型 | 说明 |
-|------|---------|------|
-| `Entity.java` | 增量修改 | 添加 `bpmStatus` 字段 + `@Dict(dicCode = "bpm_status")` |
-| `Flyway SQL` | 增量修改 | 添加 `bpm_status varchar(10)` 列 |
-| `data.ts` | 增量修改 | columns 添加 `bpmStatus_dictText` 列 + 导出 `getBpmFormSchema()` 函数 |
-| `List.vue` | **重新生成** | 添加流程提交/审批进度功能 |
-| `Modal.vue` | 增量修改 | `import { formSchema }` 改为 `import { getBpmFormSchema }`，`schemas: formSchema` 改为 `schemas: getBpmFormSchema({})` |
-| `Form.vue` | **新建** | BPM 流程审批表单组件 |
-
-### 1. Entity.java — 添加 bpmStatus 字段
-
-```java
-//update-begin---author:ai ---date:YYYY-MM-DD  for：【xxx】添加流程状态字段-----------
-/**流程状态*/
-@Excel(name = "流程状态", width = 15, dicCode = "bpm_status")
-@Dict(dicCode = "bpm_status")
-@Schema(description = "流程状态")
-private String bpmStatus;
-//update-end---author:ai ---date:YYYY-MM-DD  for：【xxx】添加流程状态字段-----------
-```
-
-### 2. data.ts — 添加 usePermission + columns + getBpmFormSchema
-
-**需要添加的 import 和初始化（文件顶部）：**
-```typescript
-import { usePermission } from '/@/hooks/web/usePermission';
-const { isDisabledAuth, hasPermission, initBpmFormData } = usePermission();
-```
-
-**三个函数说明（来自 `/@/hooks/web/usePermission.ts`）：**
-
-| 函数 | 用途 | 用法 |
-|------|------|------|
-| `initBpmFormData(_formData)` | 加载流程节点的字段权限配置到 usePermission 内部 | 在 `getBpmFormSchema` 中调用，传入流程表单的 formData |
-| `hasPermission(code)` | 判断字段是否**可见**（type=1） | 用在 formSchema 的 `show` 属性中 |
-| `isDisabledAuth(code)` | 判断字段是否**禁用**（type=2） | 用在 formSchema 的 `dynamicDisabled` 属性中 |
-
-**权限控制原理：**
-- 流程节点配置的字段权限存储在 `formData.permissionList` 中（由 BPM 引擎注入）
-- `initBpmFormData` 将权限列表加载到 `usePermission` 内部
-- `hasPermission(code)` 检查 `permissionList` 中 type=1（显示）的 action 是否包含该 code
-- `isDisabledAuth(code)` 检查 `permissionList` 中 type=2（禁用）的 action 是否包含该 code
-- code 格式：后端 `set_node_field_permissions` 配置的 `ruleCode`（如 `online:表名:字段名` 或自定义编码）
-
-**columns 第一列添加流程状态：**
-```typescript
-export const columns: BasicColumn[] = [
-  { title: '流程状态', align: 'center', dataIndex: 'bpmStatus_dictText' },
-  // ... 其他列
-];
-```
-
-**formSchema 中使用权限控制字段显示/禁用（示例）：**
-```typescript
-export const formSchema: FormSchema[] = [
-  // 通过 hasPermission 控制字段可见性
-  {
-    label: '密码', field: 'password', component: 'InputPassword',
-    show: ({ values }) => {
-      return hasPermission('{{entityPackage}}:{{tableName}}:password');
-    },
-  },
-  // 通过 isDisabledAuth 控制字段禁用
-  {
-    label: '金额', field: 'amount', component: 'InputNumber',
-    dynamicDisabled: ({ values }) => {
-      return isDisabledAuth('{{entityPackage}}:{{tableName}}:amount');
-    },
-  },
-  // ... 其他字段
-];
-```
-
-**getBpmFormSchema 函数（文件末尾）：**
-```typescript
-export function getBpmFormSchema(_formData): FormSchema[] {
-  // 加载流程节点权限配置（必须在返回 formSchema 之前调用）
-  initBpmFormData(_formData);
-  // 默认和原始表单保持一致 如果流程中配置了权限数据，这里需要单独处理formSchema
-  return formSchema;
-}
-```
-
-> **重要：** `initBpmFormData(_formData)` 必须在 `return formSchema` 之前调用，否则 `hasPermission` 和 `isDisabledAuth` 无法读取到流程节点的权限配置。
-
-### 3. Modal.vue — 替换 formSchema 为 getBpmFormSchema
-
-> **重要：** Modal.vue 必须使用 `getBpmFormSchema` 替代 `formSchema`，否则流程节点配置的字段权限（如 `dynamicDisabled`、`show` 中的 `isDisabledAuth`/`hasPermission`）在普通新增/编辑弹窗中不会生效。传 `{}` 空对象时权限函数返回默认值，不影响正常使用。
-
-**需要修改的两处：**
-
-```typescript
-// 修改前：
-import { formSchema } from '../{{entityName}}.data';
-// 修改后：
-import { getBpmFormSchema } from '../{{entityName}}.data';
-
-// 修改前：
-schemas: formSchema,
-// 修改后：
-schemas: getBpmFormSchema({}),
-```
-
-> **原理：** `getBpmFormSchema({})` 内部调用 `initBpmFormData({})`，空对象不含 `permissionList`，`hasPermission` 返回 `true`（可见），`isDisabledAuth` 返回 `false`（不禁用），与原始 `formSchema` 行为一致。但在 BPM 流程表单（Form.vue）中，`formData` 包含流程注入的 `permissionList`，权限控制才会真正生效。
-
-### 4. List.vue — 完整 BPM 功能变更
-
-**需要添加的 import：**
-```typescript
-import { startProcess } from '/@/api/common/api';
-```
-
-**需要添加的组件（template 中 Modal 后面）：**
-```html
-<!-- 审批流程图 -->
-<BpmPictureModal @register="registerBpmModal" />
-```
-
-**需要添加的变量：**
-```typescript
-const [registerBpmModal, { openModal: bpmPicModal }] = useModal();
-```
-
-**操作栏（getDropDownAction）变更 — 添加"发起流程"和"审批进度"：**
-```typescript
-function getDropDownAction(record) {
-  let dropDownAction = [
-    { label: '详情', onClick: handleDetail.bind(null, record) },
-    { label: '删除', popConfirm: { title: '是否确认删除', confirm: handleDelete.bind(null, record), placement: 'topLeft' }, auth: '{{entityPackage}}:{{tableName}}:delete' },
-    {
-      label: '审批进度',
-      onClick: handlePreviewPic.bind(null, record),
-      ifShow: !!record.bpmStatus && record.bpmStatus !== '1',
-    }
-  ];
-  // bpmStatus 为空或 '1'（未提交）时显示"发起流程"按钮
-  if (!record.bpmStatus || record.bpmStatus === '1') {
-    dropDownAction.push({
-      label: '发起流程',
-      popConfirm: { title: '确认提交流程吗？', confirm: handleProcess.bind(null, record), placement: 'topLeft' }
-    });
-  }
-  return dropDownAction;
-}
-```
-
-**需要添加的方法：**
-```typescript
-/**
- * 提交流程
- */
-async function handleProcess(record) {
-  let params = {
-    flowCode: 'dev_{{tableName}}_001',    // 与流程关联的唯一编码一致
-    id: record.id,
-    formUrl: '{{viewDir}}/components/{{entityName}}Form',  // 指向 Form.vue（不是 Modal.vue）
-    formUrlMobile: ''
-  }
-  await startProcess(params);
-  handleSuccess();
-}
-
-/**
- * 审批进度
- */
-async function handlePreviewPic(record) {
-  bpmPicModal(true, {
-    flowCode: 'dev_{{tableName}}_001',
-    dataId: record.id,
-  });
-}
-```
-
-### 5. Form.vue — BPM 流程审批表单（新建文件）
-
-路径：`src/views/{{viewDir}}/components/{{entityName}}Form.vue`
-
-**完整模板：**
-```vue
-<template>
-    <div style="min-height: 400px">
-        <BasicForm @register="registerForm"></BasicForm>
-        <div style="width: 100%;text-align: center" v-if="!formDisabled">
-            <a-button @click="submitForm" pre-icon="ant-design:check" type="primary">提 交</a-button>
-        </div>
-    </div>
-</template>
-
-<script lang="ts">
-    import {BasicForm, useForm} from '/@/components/Form/index';
-    import {computed, defineComponent} from 'vue';
-    import {defHttp} from '/@/utils/http/axios';
-    import { propTypes } from '/@/utils/propTypes';
-    import {getBpmFormSchema} from '../{{entityName}}.data';
-    import {saveOrUpdate} from '../{{entityName}}.api';
-
-    export default defineComponent({
-        name: "{{entityName}}Form",
-        components:{ BasicForm },
-        props:{
-            formData: propTypes.object.def({}),
-            formBpm: propTypes.bool.def(true),
-        },
-        setup(props){
-            const [registerForm, { setFieldsValue, setProps, getFieldsValue }] = useForm({
-                labelWidth: 150,
-                schemas: getBpmFormSchema(props.formData),
-                showActionButtonGroup: false,
-                baseColProps: {span: 24}
-            });
-
-            const formDisabled = computed(()=>{
-                if(props.formData.disabled === false){
-                    return false;
-                }
-                return true;
-            });
-
-            let formData = {};
-            const queryByIdUrl = '/{{entityPackagePath}}/{{entityName_uncap}}/queryById';
-            async function initFormData(){
-                let params = {id: props.formData.dataId};
-                const data = await defHttp.get({url: queryByIdUrl, params});
-                formData = {...data}
-                await setFieldsValue(formData);
-                await setProps({disabled: formDisabled.value})
-            }
-
-            async function submitForm() {
-                let data = getFieldsValue();
-                let params = Object.assign({}, formData, data);
-                console.log('表单数据', params)
-                await saveOrUpdate(params, true)
-            }
-
-            initFormData();
-
-            return { registerForm, formDisabled, submitForm }
-        }
-    });
-</script>
-```
-
-**关键说明：**
-- Form.vue 使用 `defineComponent`（Options API），不是 `<script setup>`
-- 通过 `props.formData.dataId` 获取数据 ID，`props.formData.disabled` 控制表单禁用
-- `getBpmFormSchema` 从 data.ts 导入，默认返回 formSchema
-- `queryByIdUrl` 指向后端 `queryById` 接口
-- `formUrl` 参数（List.vue 的 handleProcess 中）指向此 Form 组件路径（不含 `.vue` 后缀）
-
-### 5.1 Form.vue（一对多子表）— 含子表节点字段权限控制
-
-> 适用场景：主表 + 一对多子表（JVxeTable），需在流程节点上对主表字段和子表列分别配置显示/禁用权限。
-
-**与单表 Form.vue 的区别：**
-
-| 差异点 | 单表 Form.vue | 一对多 Form.vue |
-|--------|--------------|----------------|
-| 模板 | 仅 BasicForm | BasicForm + a-tabs + JVxeTable |
-| 子表列权限 | 无 | `filterSubTableColnmns` 过滤 `subPermissionList` |
-| 子表数据 | 无 | `purXxxTable.dataSource` 绑定，`initFormData` 加载 |
-| submit | `getFieldsValue` | `getFieldsValue` + `ref.getTableData()` |
-
-**完整模板：**
-
-```vue
-<template>
-  <div style="min-height: 400px">
-    <BasicForm @register="registerForm"></BasicForm>
-    <!-- 子表tabs -->
-    <a-tabs v-model:activeKey="activeKey" animated class="jeecg-tab">
-      <a-tab-pane tab="{{subTableLabel}}" key="{{subTableKey}}" :forceRender="true">
-        <JVxeTable
-          keep-source
-          resizable
-          ref="{{subTableKey}}"
-          :loading="{{subTableKey}}Table.loading"
-          :columns="{{subTableKey}}Table.columns"
-          :dataSource="{{subTableKey}}Table.dataSource"
-          :height="300"
-          :rowNumber="true"
-          :rowSelection="!formDisabled"
-          :disabled="formDisabled"
-          :toolbar="!formDisabled"
-        />
-      </a-tab-pane>
-    </a-tabs>
-    <div style="width: 100%; text-align: center; margin-top: 8px" v-if="!formDisabled">
-      <a-button @click="submitForm" pre-icon="ant-design:check" type="primary">提 交</a-button>
-    </div>
-  </div>
-</template>
-
-<script lang="ts">
-  import { BasicForm, useForm } from '/@/components/Form/index';
-  import { computed, defineComponent, ref, reactive } from 'vue';
-  import { defHttp } from '/@/utils/http/axios';
-  import { propTypes } from '/@/utils/propTypes';
-  import { JVxeTable } from '/@/components/jeecg/JVxeTable';
-  import { getBpmFormSchema, {{subTableKey}}Columns } from '../{{entityName}}.data';
-  import { saveOrUpdate } from '../{{entityName}}.api';
-
-  export default defineComponent({
-    name: '{{entityName}}Form',
-    components: { BasicForm, JVxeTable },
-    props: {
-      formData: propTypes.object.def({}),
-      formBpm: propTypes.bool.def(true),
-    },
-    setup(props) {
-      const [registerForm, { setFieldsValue, setProps, getFieldsValue }] = useForm({
-        labelWidth: 150,
-        schemas: getBpmFormSchema(props.formData),
-        showActionButtonGroup: false,
-        baseColProps: { span: 24 },
-      });
-
-      const formDisabled = computed(() => {
-        if (props.formData.disabled === false) {
-          return false;
-        }
-        return true;
-      });
-
-      const activeKey = ref('{{subTableKey}}');
-      // 子表 JVxeTable 实例引用，名称必须与模板 ref="{{subTableKey}}" 一致
-      const {{subTableKey}} = ref();
-
-      let mainFormData: any = {};
-      const queryByIdUrl = '/{{entityPackagePath}}/{{entityName_uncap}}/queryById';
-      const querySubUrl = '/{{entityPackagePath}}/{{entityName_uncap}}/query{{SubEntityName}}ByMainId';
-
-      const {{subTableKey}}Table = reactive({
-        loading: false,
-        dataSource: [],
-        // filterSubTableColnmns 根据 subPermissionList 过滤列的显示/禁用
-        columns: filterSubTableColnmns({{subTableKey}}Columns, '{{permCodePrefix}}:'),
-        show: false,
-      });
-
-      /**
-       * 子表列权限过滤（从 props.formData.subPermissionList 读取节点配置的列权限）
-       * @param columns  原始列配置数组
-       * @param pre      流程节点上配置的权限编码前缀，如 'purApplyItemColumns:'
-       */
-      function filterSubTableColnmns(columns, pre) {
-        let authList = props.formData.subPermissionList;
-        // 未配置子表权限时原样返回
-        if (!authList || authList.length === 0) {
-          return columns;
-        }
-        return columns.filter(item => {
-          let oneAuthList = authList.filter(auth => auth.action === pre + item.key);
-          if (!oneAuthList || oneAuthList.length === 0) {
-            return true;
-          }
-          let oneAuthHidden = oneAuthList.find(auth => auth.type == '1');
-          let oneAuthDisable = oneAuthList.find(auth => auth.type == '2');
-          // 隐藏逻辑（type=1 且无权限）
-          if (oneAuthHidden && !oneAuthHidden.isAuth) {
-            return false;
-          }
-          // 禁用逻辑（type=2 且无权限）
-          if (oneAuthDisable && !oneAuthDisable.isAuth) {
-            item['disabled'] = true;
-          } else {
-            item['disabled'] = false;
-          }
-          return true;
-        });
-      }
-
-      async function initFormData() {
-        let params = { id: props.formData.dataId };
-        const data = await defHttp.get({ url: queryByIdUrl, params });
-        mainFormData = { ...data };
-        await setFieldsValue(mainFormData);
-        await setProps({ disabled: formDisabled.value });
-        // 加载子表数据
-        if (props.formData.dataId) {
-          {{subTableKey}}Table.loading = true;
-          try {
-            const items = await defHttp.get({ url: querySubUrl, params: { id: props.formData.dataId } });
-            {{subTableKey}}Table.dataSource = items || [];
-          } finally {
-            {{subTableKey}}Table.loading = false;
-          }
-        }
-      }
-
-      async function submitForm() {
-        let data = getFieldsValue();
-        // 优先从 JVxeTable 实例获取含用户编辑的最新数据
-        let items: any[] = {{subTableKey}}Table.dataSource;
-        if ({{subTableKey}}.value?.getTableData) {
-          items = {{subTableKey}}.value.getTableData() || {{subTableKey}}Table.dataSource;
-        }
-        let params = Object.assign({}, mainFormData, data, {
-          {{subTableKey}}List: items,
-        });
-        await saveOrUpdate(params, true);
-      }
-
-      initFormData();
-
-      return {
-        registerForm,
-        formDisabled,
-        activeKey,
-        {{subTableKey}},
-        {{subTableKey}}Table,
-        submitForm,
-      };
-    },
-  });
-</script>
-
-<style lang="less" scoped>
-  .jeecg-tab { padding: 0 20px; }
-  :deep(.ant-input-number) { width: 100%; }
-</style>
-```
-
-**模板变量说明：**
-
-| 变量 | 示例值 | 说明 |
-|------|--------|------|
-| `{{subTableLabel}}` | `采购明细` | tab 标签文字 |
-| `{{subTableKey}}` | `purPurchaseApplyItem` | ref 名称、reactive key 名，需与 data.ts 中列变量名前缀对应 |
-| `{{subTableKey}}Columns` | `purPurchaseApplyItemColumns` | data.ts 导出的子表列配置 |
-| `{{permCodePrefix}}` | `purApplyItemColumns` | 流程节点上配置子表列权限时的编码前缀（不含末尾冒号） |
-| `{{SubEntityName}}` | `PurPurchaseApplyItem` | 子表实体大驼峰名，用于拼接后端接口路径 |
-| `{{subTableKey}}List` | `purPurchaseApplyItemList` | 提交时子表数组的字段名（与后端 DTO 一致） |
-
-**关键注意事项：**
-
-1. `filterSubTableColnmns` 读取 `props.formData.subPermissionList`（由 BPM 引擎注入），`subPermissionList` 为空时不过滤任何列，原样显示
-2. 模板中 `ref="{{subTableKey}}"` 与 setup 返回的 `{{subTableKey}}` 变量名**必须一致**，否则 `getTableData()` 拿不到用户编辑的数据
-3. 子表数据加载/loading 统一操作 `{{subTableKey}}Table.dataSource` 和 `{{subTableKey}}Table.loading`，不可另建独立 ref（模板绑定的是 reactive 对象）
-4. `submitForm` 中优先用 `ref.value.getTableData()` 拿最新数据，降级到 `table.dataSource`
-5. `getBpmFormSchema(props.formData)` 内部调用 `initBpmFormData(props.formData)`，确保主表字段的 `show`/`dynamicDisabled` 能读取到节点权限
-
-### 5.2 Form.vue（含一对一子表）— 嵌入 BasicForm 子组件 + 节点字段权限控制
-
-> 适用场景：主表 + 一对一子表（BasicForm 嵌入），需在流程节点上对一对一子表字段配置显示/禁用权限。
-
-#### data.ts 中为一对一子表单独导出 getBpmFormSchemaOne
-
-一对一子表需要独立的 `getBpmFormSchemaOne(formData)` 函数，同样调用 `initBpmFormData`：
-
-```typescript
-export function getBpmFormSchemaOne(formData): FormSchema[] {
-  const { isDisabledAuth, hasPermission, initBpmFormData } = usePermission();
-  initBpmFormData(formData);
-  const bpmFormSchemaOne: FormSchema[] = [
-    { label: '', field: 'id',     component: 'Input', show: false },
-    { label: '', field: 'mainId', component: 'Input', show: false },
-    {
-      label: '客户名称', field: 'customerName', required: true, component: 'Input',
-      dynamicDisabled: ({ values }) => isDisabledAuth('salOne:customerName'),
-    },
-    {
-      label: '联系人', field: 'contactPerson', component: 'Input',
-      show: ({ values }) => hasPermission('salOne:contactPerson'),
-    },
-    // ... 其他字段
-  ];
-  return bpmFormSchemaOne;
-}
-```
-
-**ruleCode 命名约定（三类并存时区分前缀）：**
-
-| 子表类型 | ruleCode 前缀 | 示例 |
-|---------|--------------|------|
-| 主表字段 | `{模块}:` | `sal:orderNo` |
-| 一对一子表字段 | `{模块}One:` | `salOne:customerName` |
-| 一对多子表列 | `{子表变量名}Columns:` | `salOrderItemColumns:productName` |
-
-**formBizCode 统一用主表名**（三类权限记录的 formBizCode 均相同）：`sal_sales_order`
-
-#### 一对一子表组件（XxxOneForm.vue）
-
-```vue
-<template>
-  <BasicForm @register="registerForm" name="{{EntityName}}OneForm" class="basic-modal-form" />
-</template>
-
-<script lang="ts">
-  import { defineComponent } from 'vue';
-  import { BasicForm, useForm } from '/@/components/Form/index';
-  import { getBpmFormSchemaOne } from '../{{EntityName}}.data';
-  import { defHttp } from '/@/utils/http/axios';
-  import { VALIDATE_FAILED } from '/@/utils/common/vxeUtils';
-  import { propTypes } from '@/utils/propTypes';
-
-  export default defineComponent({
-    name: '{{EntityName}}OneForm',
-    components: { BasicForm },
-    emits: ['register'],
-    props: {
-      formData: propTypes.object.def({}),
-      disabled: { type: Boolean, default: false },
-    },
-    setup(props, { emit }) {
-      const [registerForm, { setProps, resetFields, setFieldsValue, getFieldsValue, validate, scrollToField }] = useForm({
-        schemas: getBpmFormSchemaOne(props.formData),   // ← 传入 formData 激活节点权限
-        showActionButtonGroup: false,
-        baseColProps: { span: 12 },
-      });
-
-      /**
-       * 初始化加载数据（由父组件 Form.vue 调用）
-       * @param url  子表查询接口，如 /sal/salSalesOrder/querySalCustomerInfoByMainId
-       * @param id   主表 ID
-       */
-      function initFormData(url, id) {
-        if (id) {
-          defHttp.get({ url, params: { id } }, { isTransformResponse: false }).then((res) => {
-            if (res.success && res.result && res.result.length > 0) {
-              setFieldsValue({ ...res.result[0] });
-            }
-          });
-        }
-        setProps({ disabled: props.disabled });
-      }
-
-      /** 获取表单数据（返回数组，与后端 List<Entity> 一致） */
-      function getFormData() {
-        let formData = getFieldsValue();
-        Object.keys(formData).map((k) => {
-          if (formData[k] instanceof Array) formData[k] = formData[k].join(',');
-        });
-        return [formData];
-      }
-
-      /** 表单校验 */
-      function validateForm(index) {
-        return new Promise((resolve, reject) => {
-          validate()
-            .then(() => resolve(undefined))
-            .catch(({ errorFields }) =>
-              reject({ error: VALIDATE_FAILED, index, errorFields, scrollToField })
-            );
-        });
-      }
-
-      return { registerForm, resetFields, initFormData, getFormData, validateForm };
-    },
-  });
-</script>
-
-<style lang="less" scoped>
-  .basic-modal-form { overflow: auto; height: 280px; }
-</style>
-```
-
-#### 父级 Form.vue 中嵌入一对一子表组件
-
-在主 Form.vue 的 `<template>` 中通过 `ref` 引用子组件，调用其 `initFormData` / `getFormData` / `validateForm`：
-
-```vue
-<template>
-  <div>
-    <BasicForm @register="registerForm" />
-    <!-- 一对一子表 -->
-    <{{EntityName}}OneForm ref="oneFormRef" :formData="props.formData" :disabled="formDisabled" />
-    <!-- 一对多子表（JVxeTable） -->
-    ...
-  </div>
-</template>
-
-<script lang="ts">
-  // initFormData 中加载一对一数据
-  const oneFormRef = ref();
-  async function initFormData() {
-    const data = await defHttp.get({ url: queryByIdUrl, params: { id: props.formData.dataId } });
-    await setFieldsValue(data);
-    // 加载一对一子表
-    oneFormRef.value?.initFormData('/sal/salSalesOrder/querySalCustomerInfoByMainId', props.formData.dataId);
-  }
-
-  // submitForm 中收集一对一数据
-  async function submitForm() {
-    let data = getFieldsValue();
-    let oneData = oneFormRef.value?.getFormData() || [];
-    let params = Object.assign({}, mainFormData, data, {
-      salCustomerInfoList: oneData,       // 一对一子表数据
-      salOrderItemList: tableData,        // 一对多子表数据
-    });
-    await saveOrUpdate(params, true);
-  }
-</script>
-```
-
-#### 节点字段权限配置（一对一子表）
-
-一对一子表字段的权限记录与主表字段写入同一批次，`formBizCode` 统一用主表名：
-
-```python
-perms = [
-    # 主表字段
-    {"ruleCode": "sal:orderNo",         "formBizCode": "sal_sales_order", ...},
-    # 一对一子表字段（formBizCode 仍用主表名）
-    {"ruleCode": "salOne:customerName", "formBizCode": "sal_sales_order", ...},
-    {"ruleCode": "salOne:phone",        "formBizCode": "sal_sales_order", ...},
-    # 一对多子表列（formBizCode 仍用主表名）
-    {"ruleCode": "salOrderItemColumns:productName", "formBizCode": "sal_sales_order", ...},
-]
-```
-
-> **是否需要 sys_permission？**
-> 含一对多子表的表单（主表 + 一对一 + 一对多）属于"一对多场景"，全部字段（含一对一子表字段）均**不需要**添加 sys_permission，BPM 引擎直接通过 `formData.permissionList` 注入。
-
----
-
-### flowCode 命名规则
-
-`flowCode` 必须与流程关联表单时的 `relationCode` 一致：
-- 自定义开发（formType=3）：`dev_{表名}_001`
-- Online（formType=1）：`onl_{表名}`
-- DesForm（formType=2）：`desform_{编码}`
-
----
+> 详见 [`references/bpmn-custom-form-frontend.md`](references/bpmn-custom-form-frontend.md)
 
 ## OA 应用一键生成（表单 + 流程 + 授权）
 
@@ -2713,15 +1161,7 @@ perms = [
 
 #### OA Step 0: 解析用户需求
 
-从用户描述中提取：
-
-| 信息 | 默认值 | 示例 |
-|------|--------|------|
-| 应用名称 | 用户指定 | "费用报销单" |
-| 表单编码 | 英文命名，`oa_` 前缀 | `oa_expense_reimbursement` |
-| 表单字段 | 从描述中解析 | 申请人、金额、附件等 |
-| 流程节点 | 从描述中解析 | 提交→部门审批→财务审核→结束 |
-| 审批人 | 从描述中解析 | 角色/指定人/表达式 |
+从用户描述中提取：应用名称、表单编码（`oa_` 前缀）、表单字段、流程节点、审批人。
 
 #### OA Step 1: 展示应用摘要并确认
 
@@ -2735,19 +1175,15 @@ perms = [
 - 目标环境：<api_base>
 
 ### 表单字段
-
-| 序号 | 字段名称 | 控件类型 | 必填 | 说明 |
-|------|---------|---------|------|------|
-| 1 | 申请人 | select-user | 是 | 标题字段 |
-| 2 | 报销金额 | money | 是 | |
-| ... | ... | ... | ... | ... |
+| 序号 | 字段名称 | 控件类型 | 必填 |
+|------|---------|---------|------|
+| 1 | 申请人 | select-user | 是 |
+| ... | ... | ... | ... |
 
 ### 流程节点
-
 | 序号 | 节点名称 | 类型 | 审批人 |
 |------|---------|------|--------|
 | 1 | 开始 | startEvent | - |
-| 2 | 提交申请 | userTask (草稿) | ${applyUserId} |
 | ... | ... | ... | ... |
 
 ### 连线
@@ -2766,9 +1202,7 @@ perms = [
 2. 用 Bash 执行脚本：
 ```bash
 python "<jeecg-bpmn skill目录>/scripts/bpmn_oa.py" \
-    --api-base <后端地址> \
-    --token <TOKEN> \
-    --config <config.json>
+    --api-base <后端地址> --token <TOKEN> --config <config.json>
 ```
 3. 删除临时 JSON 配置文件
 
@@ -2849,255 +1283,54 @@ python "<jeecg-bpmn skill目录>/scripts/bpmn_oa.py" \
 
 ### OA 表单字段类型
 
-| type | 可选参数 | 说明 |
-|------|---------|------|
-| `input` | `required`, `placeholder`, `unique` | 单行文本 |
-| `textarea` | `required` | 多行文本 |
-| `number` | `required`, `unit`, `precision` | 数字 |
-| `integer` | `required`, `unit` | 整数 |
-| `money` | `required`, `unit` | 金额 |
-| `date` | `required`, `fmt` | 日期 |
-| `time` | `required` | 时间 |
-| `radio` | `options`(必填), `required`, `dictCode` | 单选 |
-| `select` | `options`(必填), `required`, `multiple`, `dictCode` | 下拉 |
-| `checkbox` | `options`(必填), `required`, `dictCode` | 多选 |
-| `select-user` | `required`, `multiple` | 选人 |
-| `select-depart` | `required`, `multiple` | 选部门 |
-| `phone` | `required` | 手机 |
-| `email` | `required` | 邮箱 |
-| `file-upload` | `required` | 文件上传 |
-| `imgupload` | `required` | 图片上传 |
-| `hand-sign` | `required` | 手写签名 |
-| `auto-number` | `prefix` | 自动编号 |
-| `divider` | `text` | 分隔符 |
-| `formula` | `mode`, `expression`, `decimal`, `unit` | 公式 |
-| `location` | `required` | 定位 |
-| `barcode` | `codeType` | 条码 |
-| `editor` | `required` | 富文本 |
-| `oa-approval-comments` | - | 审批意见（grid 6:18布局，禁用状态） |
-
-> **审批意见组件规则：** 当字段名包含"意见"、"签字"、"审批"等关键词（如"部门负责人意见"、"财务审核签字"），**必须**使用 `oa-approval-comments` 类型，**不要**使用 `hand-sign` 或 `textarea`。该组件自动生成 grid 布局（左侧标签 + 右侧审批意见区域），默认禁用，由流程节点控制启用。
-
-### OA 流程分支规则
-
-> **重要：** 生成流程 JSON 配置时，必须根据表单字段决定分支方式：
-> - **表单有 `result` 等可用于条件判断的字段** → 使用 `exclusiveGateway` + `conditions` 条件分支
-> - **表单没有 `result` 字段** → 使用**手工分支**（从 userTask 直接引出多条无条件的 sequenceFlow）
->
-> **手工分支使用前提：** 仅在通过/拒绝后还需要经过不同的后续处理节点时才使用。如果审批后只有结束节点，不需要手工分支，直接连到结束即可。
-
-### OA callActivity 外部子流程
-
-使用 callActivity 需要**两步创建**：
-
-**第 1 步：先创建并部署外部子流程**（使用 `bpmn_creator.py`）
-
-OA 类子流程（如借款、用车）**不关联独立表单**，draft 节点 PC 地址复用主流程 DesForm：
-
-```json
-{
-  "processName": "借款申请子流程",
-  "processKey": "oa_business_trip_loan_sub",
-  "typeId": "oa",
-  "isSubProcess": true,
-  "draftNodeForm": {
-    "formType": "desform",
-    "formCode": "oa_business_trip_apply",
-    "mode": "edit"
-  },
-  "nodes": [
-    {"id": "start", "type": "startEvent", "name": "开始"},
-    {"id": "task_draft", "type": "userTask", "name": "填写借款申请", "draft": true,
-     "assignee": {"type": "expression", "value": "applyUserId"}},
-    {"id": "task_finance", "type": "userTask", "name": "财务审批",
-     "assignee": {"type": "role", "value": "admin"}},
-    {"id": "end", "type": "endEvent", "name": "结束"}
-  ],
-  "flows": [
-    {"id": "flow_1", "source": "start", "target": "task_draft"},
-    {"id": "flow_2", "source": "task_draft", "target": "task_finance"},
-    {"id": "flow_3", "source": "task_finance", "target": "end"}
-  ]
-}
-```
-
-> **关键规则：**
-> - `isSubProcess: true` — start 节点纳入 nodes 参数（必须，否则设计器看不到 start 节点）
-> - `draftNodeForm` — draft 节点 PC 地址指向**主流程**的 DesForm（不配置则无 PC 表单地址）
-> - **不要**加 `formLink` — OA 子流程不需要关联独立表单
-> - `draftNodeForm.formCode` 填**主流程**的表单编码（如 `oa_business_trip_apply`）
-
-**第 2 步：创建主 OA 应用**（使用 `bpmn_oa.py`），在主流程 JSON 中用 callActivity 节点引用子流程：
-```json
-{"id": "call_loan", "type": "callActivity", "name": "借款子流程",
- "calledElement": "oa_business_trip_loan_sub"}
-```
-`calledElement` 必须与子流程的 `processKey` 一致。
-
-### 会签子流程（自动创建规则）
-
-> **执行规则：当流程中包含会签子流程节点（`callActivity` + `multiInstanceLoopCharacteristics`）时，无需询问用户是否创建子流程，直接按以下步骤自动创建并部署。**
-
-#### 创建步骤
-
-**第 1 步：创建会签子流程**（`bpmn_creator.py`）
-
-```json
-{
-  "processName": "XXX会签子流程",
-  "processKey": "<calledElement值>",
-  "typeId": "oa",
-  "isCountersignSubProcess": true,
-  "nodes": [
-    {"id": "start", "type": "startEvent", "name": "开始"},
-    {"id": "sub_task_review", "type": "userTask", "name": "会签审核",
-     "assignee": {"type": "expression", "value": "assigneeUserId"}},
-    {"id": "end", "type": "endEvent", "name": "结束"}
-  ],
-  "flows": [
-    {"id": "f1", "source": "start", "target": "sub_task_review"},
-    {"id": "f2", "source": "sub_task_review", "target": "end"}
-  ]
-}
-```
-
-关键规则：
-- `isCountersignSubProcess: true` — 自动添加 `SubProcessHqStartListener`，区别于普通子流程的 `SubProcessStartListener`
-- 任务节点 assignee 固定用 `assigneeUserId`（由主流程 callActivity 通过 `flowable:in` 传入）
-- **不加** `formLink`、**不加** `draftNodeForm`
-
-**第 2 步：配置所有节点表单地址**（发布前，指向主流程表单 detail 模式）
-
-```python
-DETAIL_URL = '{{DOMAIN_URL}}/desform/detail/<主流程formCode>/${BPM_DES_DATA_ID}?token={{TOKEN}}&taskId={{TASKID}}&skip=false'
-# 通过 /act/process/extActProcessNode/list 查询节点列表
-# 逐个调用 /act/process/extActProcessNode/edit 设置 modelAndView + modelAndViewMobile
-```
-
-**第 3 步：重新发布子流程**（`deploy_process`）
-
-#### 更新流程 XML 的正确方式
-
-> **重要：** `/act/designer/api/saveProcess` 不会更新 `ext_act_process.process_xml`，必须直接操作数据库：
-
-```python
-# 1. 从数据库读取 XML
-conn = pymysql.connect(...)
-cur.execute('SELECT process_xml FROM ext_act_process WHERE id=%s', (process_id,))
-xml = cur.fetchone()[0].decode('utf-8')
-
-# 2. 修改 XML（字符串替换）
-
-# 3. 写回数据库
-cur.execute('UPDATE ext_act_process SET process_xml=%s WHERE id=%s', (xml.encode('utf-8'), process_id))
-conn.commit()
-
-# 4. 调用 deploy API 重新发布
-deploy_process(api_base, token, process_id)
-```
-
----
-
-### 常见 OA 应用模板
-
-#### 费用报销单
-- 字段：报销单号、申请人、部门、日期、报销类别、金额、说明、发票、附件、部门负责人意见(审批意见)、财务审核意见(审批意见)
-- 流程：提交 → 部门审批 →(手工分支: 通过/拒绝)→ 财务审核 → 结束
-- **注意：** 表单无 result 字段，使用手工分支
-
-#### 请假申请单
-- 字段：申请人、部门、日期、请假类型、开始/结束日期、天数、说明、附件、部门负责人意见(审批意见)
-- 流程：提交 → 部门审批 → 结束
-- **注意：** 审批后只有结束节点，不需要手工分支
-
-#### 采购申请单
-- 字段：申请人、部门、日期、采购物品、数量、预算金额、供应商、说明、附件、部门负责人意见(审批意见)、总经理意见(审批意见)
-- 流程：提交 → 部门审批 →(手工分支: 通过/拒绝)→ 总经理审批 → 结束
-
-#### 出差申请单（含 callActivity 子流程）
-- 字段：申请人、部门、出差地点、开始/结束日期、天数、事由、预算、附件、部门负责人意见(审批意见)、总监审批意见(审批意见)、财务审批意见(审批意见)
-- 子流程：借款子流程（processKey: oa_business_trip_loan_sub），含财务审批节点
-- 主流程：提交 → 部门审批 →(手工分支: 同意/不同意)→ 总监审批 → 借款子流程(callActivity) → 结束
-- **注意：** 需先用 `bpmn_creator.py` 创建子流程（设置 `isSubProcess:true` + `draftNodeForm` 指向主流程表单，不加 `formLink`），再用 `bpmn_oa.py` 创建主流程
-
----
+> 详见 [`references/bpmn-oa-templates.md`](references/bpmn-oa-templates.md)
+> 包含：28种字段类型、OA 流程分支规则、callActivity 规则、会签子流程、常见 OA 模板。
 
 ## 编辑已有流程
 
-在 JSON 配置中传入 `"processId": "已有流程ID"` 即可更新流程。
-
-### 查询已有流程 XML
-
-**API：** `GET /act/process/extActProcess/queryById?id={processId}`
-
-返回 `result.processXml` 字段是 **base64 编码**的，必须先解码才能得到原始 XML：
-
-```python
-import base64, json, urllib.request
-req = urllib.request.Request(
-    f'{api_base}/act/process/extActProcess/queryById?id={process_id}',
-    headers={'X-Access-Token': token, 'X-Sign': '0'*32, 'X-Tenant-Id': '1'},
-)
-result = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))['result']
-xml_str = base64.b64decode(result['processXml']).decode('utf-8')  # 原始 XML
-# ... 修改 xml_str ...
-# 回写时传原始 xml_str，不要再 base64.b64encode（服务器自动做）
-```
-
-### 调整已有流程布局（x 坐标平移）
-
-**场景：** 流程在设计器中显示异常（节点被工具栏遮住、节点 x 坐标为负、或想整体平移避开面板）。
-
-**步骤：**
-1. `queryById` 取出 base64 后 decode 得到原始 XML
-2. 只对 `<bpmndi:BPMNDiagram>` 区段内的 `x="N"` 做替换（避免误改表达式中的数字）
-3. `saveProcess` 传回**原始 XML**（不是 base64）
-4. `deployProcess` 重新发布
-
-```python
-import re, base64
-# 定位到布局区段，只改这部分
-di_start = xml_str.index('<bpmndi:BPMNDiagram')
-head = xml_str[:di_start]
-diag = xml_str[di_start:]
-# 整体右移 +120px
-diag = re.sub(r'x="(-?\d+)"', lambda m: f'x="{int(m.group(1)) + 120}"', diag)
-new_xml = head + diag
-
-# saveProcess 参数与 bpmn_creator.py 一致，processDescriptor 传 new_xml（原始 XML）
-# 注意：防止多次运行导致重复平移，应先检查最小 x 值，若已 >= 安全阈值则跳过
-```
-
-> **防重复平移：** 脚本应记录"已平移"状态或检查当前最小 x（`min_x = min(int(m.group(1)) for m in re.finditer(r'x="(-?\d+)"', diag))`），如果 `min_x >= 50` 则跳过，避免重复运行导致节点越跑越远。
-
----
+传入 `"processId": "已有流程ID"` 即可更新。查询已有 XML：`GET /act/process/extActProcess/queryById?id={id}`（`processXml` 为 base64，需 decode）。详见 [`references/bpmn-deploy-authorize.md`](references/bpmn-deploy-authorize.md)。
 
 ## 错误处理
 
 | 错误 | 解决方案 |
 |------|---------|
-| Token 过期（401/认证失败） | 提示用户重新获取 X-Access-Token |
+| Token 过期（401） | 提示用户重新获取 X-Access-Token |
 | `流程ID重复` | 重新生成时间戳作为 processkey |
-| `不是最新版本` | 先查询最新的 processDefinitionId 再保存 |
-| 中文乱码 | 确认使用 Python urllib（不要用 curl） |
-| 连接超时 | 确认后端地址可达，检查网络 |
+| `不是最新版本` | 先查询最新 processDefinitionId 再保存 |
+| 中文乱码 | 使用 Python urllib（不要用 curl） |
+| `'str' object has no attribute 'get'` | API 返回 `result` 不是 dict，先 `print(type(result))` 确认结构 |
+| `KeyError: 0` | `result` 是 dict 不是 list（如 `approvalRole/rootList`），需 `result['records']` |
+| `bash: bad substitution` | 脚本含 `${...}`，不能 `-c "..."` 执行，必须写 `.py` 文件（规则7） |
+| taskExtendJson 全为 false/0 | `sameMode`/`skipOne` 放在节点顶层而非 `assignee` 内部（规则1修正） |
+| `编码重复或表名已被授权流程！` | 子流程已绑定表单但主流程重复绑定（规则8） |
+| 含 `${...}` 的脚本报 `bad substitution` | bash 展开 shell 变量，改用文件执行（规则7） |
+| Windows 路径被截断 | 避免在 bash 中直接用 `C:\path\to\file`，用 PowerShell 包装或 `/c/path` 格式 |
+| `AttributeError: module 'desform_utils' has no attribute 'get_form_detail'` | 该函数不存在，用 `bc.get_desform_fields()` 或 `du.get_form_fields()` |
+| 编辑 XML 时正则匹配不到节点（"未找到节点"） | XML 使用 `bpmn2:userTask` 命名空间前缀，正则须用 `(?:bpmn2:)?`（规则11） |
+| 发布报 `cvc-complex-type.3.2.2: 不允许出现属性 'groupType'` | `groupType` 缺少 `flowable:` 前缀，或 `candidateUsersExpression` 类型误加了 groupType（规则12） |
+| saveProcess 报"路径不存在" | 路径应为 `/act/designer/api/saveProcess`，Content-Type 须为 `application/x-www-form-urlencoded`（规则13） |
+| 条件值显示为空（"原始JSON数据"缺少值字段） | **双重原因**：① 条件值字段名必须是 `expectedValue` 而非 `value`；② `fieldType` 必须与 DesForm 字段实际类型完全一致。两者任一错误都会导致前端忽略条件值（规则16） |
+| 职级审批节点"职务级别"为空 | `getApplyUserDeptPositionLevel` 参数错误，必须传三个参数 `(sys_org_code, applyUserId, 'positionId')`，不能用 `(execution, 'positionId')`（规则17） |
+| 删除 XML 行后 deploy 报 `cvc-complex-type.2.4.a` 无效内容 | 整行删除时丢失了同行的 `</bpmn2:extensionElements>` 等结束标签。探查时必须用 `repr(line)` 确认行内完整内容，删除时只删目标标签，保留同行其他内容（规则18） |
+| `saveProcess` 成功但提交了损坏的 XML，deploy 失败后再读取已是损坏版本 | `saveProcess` 持久化不依赖 deploy 成功。保存前必须先用 `ET.fromstring()` 本地校验 XML 结构合法性（规则19） |
 
 ## 数据库配置表
 
-流程创建后，可通过以下数据库表进一步配置节点行为、表单绑定和字段权限：
+| 表名 | 说明 |
+|------|------|
+| `ext_act_process` | 流程主表（属性、XML、通知等） |
+| `ext_act_process_form` | 表单绑定（类型、标题表达式等） |
+| `ext_act_process_node` | 节点配置（功能开关） |
+| `ext_act_process_node_auth` | 字段权限 |
 
-| 表名 | 说明 | 用途 |
-|------|------|------|
-| `ext_act_process` | 流程主表 | 流程属性、XML、发起方式、催办/撤回/通知等 |
-| `ext_act_process_form` | 表单绑定 | 流程与业务表单关联，标题表达式，表单类型（1=Online/2=DesForm/3=自定义） |
-| `ext_act_process_node` | 节点配置 | 每个审批节点的功能开关（编辑/抄送/转办/加签/驳回等） |
-| `ext_act_process_node_auth` | 字段权限 | 每个节点上表单字段的显示/隐藏/可编辑/禁用控制 |
-
-详细的字段说明和取值参见 `references/bpmn-db-config.md`。
+详见 `references/bpmn-db-config.md`。
 
 ## 参考文档
 
-- 阅读 `references/bpmn-call-activity.md` 获取调用子流程（callActivity）详细说明
-- 阅读 `references/bpmn-manual-branch.md` 获取手工分支（意见分支）详细说明
-- 阅读 `references/bpmn-templates.md` 获取参考文件索引（已拆分为 8 个子文件）
-
+- `references/bpmn-call-activity.md` — 调用子流程 / 内嵌子流程
+- `references/bpmn-manual-branch.md` — 手工分支（意见分支）
+- `references/bpmn-signal-message-events.md` — 信号与消息事件（6种类型）
+- `references/bpmn-deploy-authorize.md` — 发布、授权、编辑已有流程
+- `references/bpmn-process-config.md` — 高级配置、报表打印
+- `references/bpmn-save-process-api.md` — saveProcess API、XML转义、临时脚本
+- `references/bpmn-templates.md` — 参考文件索引

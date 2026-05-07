@@ -91,6 +91,7 @@
 | **需先 list 拿 ID 再传 --db-source** | `datasource_ops.py create` 不返回 ID 到命令行，需通过 `datasource_ops.py list` 查询 ID 后传给 `comp_ops.py add --db-source` |
 | **datasource_ops.py create 返回值是 ID 字符串** | `result` 直接是数据源 ID 字符串，不是对象（与数据集 create 返回对象不同） |
 | **⚠️ 创建SQL数据集前必须询问用户选择数据源** | 即使刚创建了数据源，也不能自动使用，必须：①`datasource_ops.py list` 列出所有数据源 ②`AskUserQuestion` 让用户选择 ③用选中的 ID 执行 `comp_ops.py add --create-sql --db-source <ID>` |
+| **需要直连 DB 执行 DDL/DML（建表、灌测试数据）时怎么拿密码** | 平台 dataset/parseSql 等接口都只允许 SELECT，无法跑 CREATE/INSERT。但接口 **`GET /drag/onlDragDataSource/queryById?id=<DS_ID>`** 直接返回 `dbPassword` 明文（与 `dbUrl/dbUsername` 同 result 对象）。`datasource_ops.py detail --id <ID> --show-password` 已封装（默认 mask，加 flag 才显示）。拿到后用 pymysql 直连建表/插数据，再用 `dataset_ops.py edit --db-source <ID> --sql ...` 把数据集切到真表。⚠️ 不要把明文密码写入脚本/日志，仅在内存中使用。|
 
 ## 数据集相关
 

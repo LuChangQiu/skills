@@ -358,7 +358,8 @@ api_post({"name": "前端组", "pid": id11, "has_child": "0", ...})
 
 - 根节点 `pid` 传空字符串 `""`（**API 实际存储为字符 `"0"`，数据库中根节点 pid='0'，不是空串也不是 NULL**）
 - 有子节点的 `has_child` 设为 `"1"`，叶子节点设为 `"0"`
-- **pid 和 has_child 字段的 `isShowForm` 必须为 `1`**（设为 0 会导致 API 忽略这两个字段值，树结构无法建立）
+- **pid 字段的 `isShowForm` 必须为 `"1"`**（用户在新增/编辑节点时需要选择父节点）
+- **has_child 字段的 `isShowForm` 和 `isShowList` 都应为 `"0"`**（用户不应感知此字段，前端在新增/删除节点时会自动维护父节点的 has_child 值）；通过 API 直接插入数据时即使 isShowForm=0，传入的 has_child 值也会被正常写入数据库（已实测验证）
 - 如果直接用 SQL 造数据，根节点 pid 必须写 `'0'`（不是 `''` 或 `NULL`），否则前端 `hasQuery=false` 查不到
 
 ---
@@ -665,7 +666,7 @@ DELETE /online/cgform/head/delete?id={视图headId}
 | `Table 'xxx.SYS_CATEGORY' doesn't exist` | MySQL `lower_case_table_names=0`（区分大小写），而框架 XML 用大写表名。解决：cat_tree 的 dictField 留空（不配分类编码），或修改 MySQL 配置为 `lower_case_table_names=1` |
 | `Sign签名校验失败` | `/sys/dict/loadTreeData` 等接口需要签名校验，造数据时改用 `/sys/category/rootList` 和 `/sys/category/childList` 查询分类数据 |
 | 导入增强不生效（数据全部导入无过滤） | 检查 cgJavaType：**import 不支持 http-api**，必须用 `spring`（spring-key）或 `class`（java-class）方式实现 `CgformEnhanceJavaImportInter` 接口 |
-| 树表前端 `hasQuery=false` 查不到数据 | 1. pid/has_child 的 `isShowForm` 必须为 `"1"`；2. 根节点 pid 必须为 `"0"`（字符零），不能是空串或 NULL |
+| 树表前端 `hasQuery=false` 查不到数据 | 1. pid 的 `isShowForm` 必须为 `"1"`（has_child 不需要显示）；2. 根节点 pid 必须为 `"0"`（字符零），不能是空串或 NULL |
 | 主子表 POST 返回「不支持GET请求方法」 | 确认 HTTP method 为 POST，Python 中 `urllib.request.Request` 需显式传 `method='POST'` |
 | `exportXlsOld` 返回空内容（Content-Length: 0） | 该接口使用 chunked 流式输出，仅浏览器环境有效，CLI（curl/python）无法下载。替代方案：用 `getColumns` + `getData` API 查询数据后生成 CSV（见 API 参考文档） |
 | `No static resource online/cgform/head/copyOnlineTable` | 正确格式是 `GET /online/cgform/head/copyOnlineTable/{headId}?tableName={新表名}`，不是 `?code=` |

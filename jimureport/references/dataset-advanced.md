@@ -980,6 +980,11 @@ result = api_request('/jmreport/link/saveAndEdit', link_data)
 | mongodb | MongoDb | _(空)_ | `127.0.0.1:27017/test` |
 | es | Elasticsearch | `/` | `127.0.0.1:9200` |
 
+> **Elasticsearch 数据源使用规范（已验证）：**
+> - `dbType="es"`，`dbDriver="/"`，`dbUrl="host:port"`（**不含 http:// 前缀和尾部 /**）
+> - 数据集 `dbType="0"`（SQL 数据集），`dbDynSql` 使用 **`SELECT * FROM es.索引名`** 格式（必须加 `es.` 前缀，与 MongoDB 的 `mongo.` 规律一致）
+> - `ensure_datasource` 调用示例：`ensure_datasource(session, name="ES数据源", db_type="es", db_driver="/", db_url="192.168.1.6:9200", db_username="elastic", db_password="xxx")`
+
 ### 其他
 
 | dbType | label | 默认 dbDriver | 默认 dbUrl |
@@ -1141,6 +1146,7 @@ result = api_request('/jmreport/link/saveAndEdit', link_data)
 - dbDynSql 中填写的是 Redis 的 key 名称，不是 SQL 语句
 - Redis 中存储的数据必须是 JSON 格式，系统通过解析 JSON 结构自动识别字段
 - 解析和保存流程与普通 SQL 数据集完全一致，只是 dbSource 指向 Redis 数据源
+- **⚠️ Redis JSON 字段名必须全小写**：JimuReport 读取 Redis JSON 时将所有字段名强制转为小写，存入 Redis 的 JSON key、`fieldList` 的 `fieldName`、以及单元格绑定 `#{db.fieldName}` 三处必须统一使用全小写（如 `productname`）。驼峰命名（如 `productName`）会导致该列数据全部为空，而其他全小写字段正常显示。
 
 ---
 

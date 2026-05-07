@@ -228,6 +228,10 @@ result = api_request('/jmreport/link/saveAndEdit', link_data)
 }
 ```
 
+> ⚠️ **删除前置条件**：若该共享数据集已被报表通过 `linkJmReportShareDb` 关联，直接调用此接口会返回 `code:500`，提示「该共享数据集下存在报表引用，无法删除！」。
+> 需先在报表设计器中手动解除所有关联，或直接操作数据库删除 `jimu_report_share_db` 表中对应的关联记录，再重新调用此接口删除。
+> 若无报表引用，可直接删除，无需额外步骤。
+
 ### 报表引用（关联）共享数据集
 
 `POST /jmreport/source/linkJmReportShareDb`

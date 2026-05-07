@@ -18,7 +18,7 @@ YApi Mock 接口管理脚本
 用法示例：
     from yapi_mock import init_yapi, create_mock
 
-    init_yapi(email='jeecgdev@jeecg.org', password='123123@')
+    init_yapi(email='', password='')
     mock_url = create_mock('/staff', '职员信息', [
         {"name": "张三", "salary": 18000},
         {"name": "李四", "salary": 15000},
@@ -185,6 +185,58 @@ def list_mocks():
     for item in items:
         print(f'  [{item["_id"]}] {item["title"]}  path={_BASEPATH}{item["path"]}')
     return items
+
+
+def create_paginated_mock(path, title, data):
+    """
+    创建支持分页的 mock 接口（高级 Mock 脚本实现）。
+
+    分页响应格式（固定规范）：
+      {
+        "data":     当前页记录列表,
+        "total":    总页数（Math.ceil(count / pageSize)）,
+        "count":    总记录数,
+        "pageSize": 每页条数（取自 URL 参数，默认 10）,
+        "pageNo":   当前页码（取自 URL 参数，默认 1）
+      }
+
+    URL 参数：pageNo（页码）、pageSize（每页条数）
+
+    Args:
+        path:  接口路径后缀，不含 basepath，如 '/staff_list_20260429'
+        title: 接口名称
+        data:  完整数据列表（所有记录，分页逻辑由高级脚本处理）
+
+    Returns:
+        完整 mock URL
+    """
+    import json as _json
+    # 1. 创建接口（复用 create_mock 的建接口逻辑）
+    url = create_mock(path, title, data)
+
+    # 2. 找到接口 ID
+    list_r = _request(f'/api/interface/list?project_id={_PROJECT_ID}&page=1&limit=200', method='GET')
+    iface_id = None
+    for item in list_r.get('data', {}).get('list', []):
+        if item.get('path') == path:
+            iface_id = str(item['_id'])
+            break
+    if not iface_id:
+        raise RuntimeError(f'分页 mock 建立后未找到接口 id: path={path}')
+
+    # 3. 写入分页高级脚本
+    data_js = _json.dumps(data, ensure_ascii=False)
+    script = f"""
+var allData = {data_js};
+var pageNo   = parseInt(params.pageNo)   || 1;
+var pageSize = parseInt(params.pageSize) || 10;
+var count    = allData.length;
+var start    = (pageNo - 1) * pageSize;
+var records  = allData.slice(start, Math.min(start + pageSize, count));
+mockJson = {{"data": records, "total": Math.ceil(count / pageSize), "count": count, "pageSize": pageSize, "pageNo": pageNo}};
+"""
+    set_advmock(iface_id, script, enable=True)
+    return url
 
 
 def set_advmock(iface_id: str, script: str, enable: bool = True):

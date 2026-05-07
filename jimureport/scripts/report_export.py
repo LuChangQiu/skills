@@ -96,31 +96,147 @@ def unshare_report(base_url, token, report_id=None, share_id=None, name=None):
 
 # ── 导出 ─────────────────────────────────────────────────────────────
 
-def export_report(base_url, token, report_id, fmt="pdf", output_dir="."):
-    """导出报表为 PDF/Excel/Word。"""
-    fmt_map = {"pdf": "pdf", "excel": "excel", "word": "word"}
-    if fmt not in fmt_map:
+def export_report(base_url, token, report_id, fmt="pdf", output_dir=".",
+                  tenant_id="1000", sheet_id="default"):
+    """
+    导出报表为 PDF/Excel/Word。
+
+    实测接口（POST + 签名）：
+      pdf   → /exportPdfStream
+      excel → /exportAllExcelStream
+      word  → /export/word
+    旧版常见的 /exportPdf、/exportXls、/exportWord (GET) 已不存在，会返回
+    `No static resource jmreport/exportXls.` 类错误。
+    """
+    import time
+    from jimureport_core import _compute_sign
+
+    path_map = {
+        "pdf":   "/exportPdfStream",
+        "excel": "/exportAllExcelStream",
+        "word":  "/export/word",
+    }
+    ext_map = {"pdf": ".pdf", "excel": ".xlsx", "word": ".docx"}
+    if fmt not in path_map:
         print(f"不支持的格式: {fmt}，可选: pdf/excel/word")
         return
 
+    payload = {
+        "excelConfigId": report_id,
+        "sheetId": sheet_id,
+        "queryParam": {
+            "token": token, "tenantId": tenant_id,
+            "pageNo": "1", "pageSize": 10,
+            "customTableTitleSorts": [],
+            "currentPageNo": "1", "currentPageSize": 10,
+        },
+    }
+    headers = {
+        "X-Access-Token":     token,
+        "token":              token,
+        "tenantid":           tenant_id,
+        "jmreport-tenant-id": tenant_id,
+        "X-TIMESTAMP":        str(int(time.time() * 1000)),
+        "X-Sign":             _compute_sign(payload),
+        "Content-Type":       "application/json;charset=UTF-8",
+    }
     sess = requests.Session()
     sess.trust_env = False
-    sess.headers.update({"X-Access-Token": token})
-
-    url = f"{base_url}/exportPdf?reportId={report_id}" if fmt == "pdf" else \
-          f"{base_url}/exportXls?reportId={report_id}" if fmt == "excel" else \
-          f"{base_url}/exportWord?reportId={report_id}"
-
-    resp = sess.get(url, stream=True)
+    resp = sess.post(base_url + path_map[fmt], json=payload, headers=headers,
+                     stream=True, proxies={})
     resp.raise_for_status()
 
-    ext = {"pdf": ".pdf", "excel": ".xlsx", "word": ".docx"}[fmt]
+    ct = resp.headers.get("Content-Type", "")
+    if "application/json" in ct.lower():
+        print(f"导出失败: {resp.text[:300]}")
+        return
+
     os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, f"{report_id}{ext}")
-    with open(path, "wb") as f:
+    out_path = os.path.join(output_dir, f"{report_id}{ext_map[fmt]}")
+    with open(out_path, "wb") as f:
         for chunk in resp.iter_content(8192):
             f.write(chunk)
-    print(f"导出成功: {path}")
+    print(f"导出成功: {out_path}")
+
+
+# ── 导出报表配置（跨环境迁移包，对应 UI「导出报表配置」按钮）──────────
+
+def export_report_config(base_url, token, report_id, output_dir=".",
+                         tenant_id="1000", as_readable=False):
+    """
+    导出报表配置 JSON（用于跨环境迁移 / import 还原）。
+
+    实测接口：GET /jmreport/exportReportConfig?id={id}&token={token}
+    需签名（X-Sign + X-TIMESTAMP，已加入 SIGNED_PATHS）。
+
+    响应：{success, code, result: {file: <base64>}}
+      - file 字段是 base64 编码的迁移包字符串
+      - base64 解码后是 URL-encoded 的 JSON：{"jimu_report_db_list": "...", "jimu_report": "..."}
+      - 这就是 jmreport 的 import 接口可识别的格式
+
+    生成 2 份文件：
+      - <id>_config.json          标准迁移包（可直接 import 还原）
+      - <id>_config.readable.json （可选）展开 URL 编码的可读版本
+    """
+    import time, base64, urllib.parse
+    from jimureport_core import _compute_sign
+
+    params = {"id": report_id, "token": token}
+    headers = {
+        "X-Access-Token":     token,
+        "token":              token,
+        "tenantid":           tenant_id,
+        "jmreport-tenant-id": tenant_id,
+        "X-TIMESTAMP":        str(int(time.time() * 1000)),
+        "X-Sign":             _compute_sign(params),
+        "Accept":             "application/json",
+    }
+    sess = requests.Session(); sess.trust_env = False
+    r = sess.get(base_url + "/exportReportConfig", params=params,
+                 headers=headers, proxies={})
+    r.raise_for_status()
+    body = r.json()
+    if not body.get("success"):
+        print(f"导出失败: {body.get('message')}")
+        return
+
+    file_b64 = body["result"]["file"]
+    decoded = base64.b64decode(file_b64).decode("utf-8")
+
+    os.makedirs(output_dir, exist_ok=True)
+    out_path = os.path.join(output_dir, f"{report_id}_config.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(decoded)
+    print(f"导出成功（迁移包）: {out_path}")
+
+    if as_readable:
+        parsed = json.loads(decoded)
+        readable = {k: json.loads(urllib.parse.unquote(v)) for k, v in parsed.items()}
+        readable_path = os.path.join(output_dir, f"{report_id}_config.readable.json")
+        with open(readable_path, "w", encoding="utf-8") as f:
+            json.dump(readable, f, ensure_ascii=False, indent=2)
+        print(f"可读版本: {readable_path}")
+
+
+def import_report_config(base_url, token, file_path):
+    """
+    导入报表配置（迁移包，对应 UI「导入报表配置」按钮）。
+
+    实测接口：POST /jmreport/importReportConfig (multipart)
+    上传文件内容 = export_report_config 落盘的解码后 url-encoded JSON 字符串
+    （**不是** base64 原文 —— 平台前端 download 行为是先解码再保存）。
+    """
+    if not os.path.exists(file_path):
+        print(f"文件不存在: {file_path}")
+        return
+    session = Session(base_url, token)
+    with open(file_path, "rb") as f:
+        r = session.upload("/importReportConfig",
+                           files={"file": (os.path.basename(file_path), f, "application/json")})
+    if r.get("success"):
+        print(f"导入成功: {r.get('result') or r.get('message')}")
+    else:
+        print(f"导入失败: {r.get('message')} | code={r.get('code')}")
 
 
 # ── 导入 Excel ──────────────────────────────────────────────────────
@@ -175,9 +291,18 @@ def main():
     ex.add_argument("--format", default="pdf", choices=["pdf", "excel", "word"])
     ex.add_argument("--output", default=".")
 
+    ec = sub.add_parser("export-config", help="导出报表配置 JSON（迁移包，可 import 还原）")
+    ec.add_argument("report_id")
+    ec.add_argument("--output", default=".")
+    ec.add_argument("--readable", action="store_true", help="同时生成展开 URL 编码的可读版本")
+    ec.add_argument("--tenant", default="1000")
+
     im = sub.add_parser("import-excel", help="导入 Excel 模板")
     im.add_argument("xlsx_path")
     im.add_argument("--name", default=None)
+
+    ic = sub.add_parser("import-config", help="导入报表配置（迁移包 .json）")
+    ic.add_argument("file_path")
 
     args = p.parse_args()
     if args.cmd == "share":
@@ -186,8 +311,13 @@ def main():
         unshare_report(args.base_url, args.token, report_id=args.report_id, share_id=args.share_id, name=args.name)
     elif args.cmd == "export":
         export_report(args.base_url, args.token, args.report_id, args.format, args.output)
+    elif args.cmd == "export-config":
+        export_report_config(args.base_url, args.token, args.report_id,
+                             args.output, tenant_id=args.tenant, as_readable=args.readable)
     elif args.cmd == "import-excel":
         import_excel(args.base_url, args.token, args.xlsx_path, args.name)
+    elif args.cmd == "import-config":
+        import_report_config(args.base_url, args.token, args.file_path)
     else:
         p.print_help()
 

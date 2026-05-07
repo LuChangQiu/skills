@@ -186,11 +186,15 @@ JStackBar 不乘系列数（同类目叠加，不占额外宽度）。
 - `up: true/false` 自动转 `compareState: "1"/"0"`
 - `suffix` 也可写 `unit`（同义）
 - **⚠️ 高度 `h` 不受控**：组件高度由内部三层（top 标签 / middle 数值 / bottom 对比）内容 + 上下内边距自适应撑起，pos 的 `h` 只是占位不是可视高度。**默认变体内容全显需 180px**（与 defaults 的 `h=180` 对齐）—— 紧邻下方组件的 y 坐标至少预留这段，否则被压盖。若想压缩到更小高度，需手动改 `option.card` / `option.sections` 的 padding 与字号。
-- **⚠️ 变体 2/3 默认带背景图槽位**：
-  - 变体 2（背景模式）/ 变体 3（高亮模式）的 `option.layout.fill.type` 默认是 `"image"`，预留了背景图位置但 **`image.url` 默认为空**——不显式给 url 时会回退到 `color`/`gradient` 渲染，跟变体 1（卡片模式）视觉差异会被抹平
-  - 默认 `image.size` 已统一为 `"100% 100%"`（非等比拉伸至容器满幅，不留白边）
-  - 用法：spec 里写 `"option":{"layout":{"fill":{"image":{"url":"<背景图URL>"}}}}` 就能加背景图（builder 会与 defaults 深度合并）
-  - 变体 3 的卡片层 `option.card.fill.type` 默认 `"none"`，要给单卡片底图需同时改 `card.fill.type:"image"` + `card.fill.image.url`
+- **⚠️ 变体 2/3 背景图（spec_builder 已自动注入默认底图）**：
+  - 变体 2（背景模式）的 `option.layout.fill.type` 默认 `"image"`，变体 3（高亮模式）的 `option.card.fill.type` 默认 `"image"`，但 defaults 中 `image.url` 是空字符串——不显式给 url 时会回退到纯色，跟变体 1 视觉差异被抹平
+  - **handler 已自动填充平台内置素材 `drag/lib/img/bg01.png`**（相对 API_BASE，无需上传），变体 2 写 layout 层、变体 3 写 card 层
+  - 用户覆盖方式（任一即可，优先级从高到低）：
+    - spec 顶层简写：`"bgImageUrl": "<URL>"` （推荐）
+    - 写完整路径：`"option":{"layout":{"fill":{"image":{"url":"<URL>"}}}}`（变体 2）/ `"option":{"card":{"fill":{"image":{"url":"<URL>"}}}}`（变体 3）
+  - 平台 `drag/lib/img/` 下应有 bg01~bgN 系列（与大屏主题背景对应），按需替换文件名
+  - 默认 `image.size` 为 `"100% 100%"`（非等比拉伸至容器满幅，不留白边）
+  - 想完全关闭底图改纯色/渐变：spec 写 `"option":{"layout":{"fill":{"type":"color"}}}` 或 `"type":"gradient"`，handler 检测到非 image 时不覆盖
 
 ### JRingProgress（环形单值进度）
 ```json

@@ -684,9 +684,86 @@ jeecg:
 1. **边距最小值**：`marginX`/`marginY` 建议 ≥ 10mm，小于 10mm 页眉页脚可能显示不全
 2. **套打模式**（`isBackend: True`）：套打时页眉页脚不可用
 3. **页码起始**：`paginationStart: 2` 表示第1页不显示页码，从第2页开始
-4. **水印字号**：只支持固定值 10/12/14/16/18/20/22/24/26/28/36/48/72
+4. **水印字号**：只支持固定值 10/12/14/16/18/20/22/24/26/28/36/48/72。**传非合法值会被引擎降级到最近的合法值**（如 30 → 28），AI 创建打印报表时必须从这个枚举里选，不要凭直觉传 30/32/40 等。
 5. **横向打印**：列数 > 6 时建议 `layout: "landscape"`，实际纸张宽高不变（由打印机处理方向）
 6. **printFootorFixBottom**：开启后打印时表尾固定到每页底部（类似 fixedPrintTailRows 但更简单）
+
+---
+
+## 8.1 固定打印表头/表尾完整方案（必读）
+
+打印场景下"固定表头/表尾"**仅由两类字段联动**实现：顶层数组 + 单元格标记。
+
+### 字段清单（仅这 2 类）
+
+| 字段 | 位置 | 类型 | 作用 |
+|------|------|------|------|
+| `fixedPrintHeadRows` | **design 顶层** | 数组 | 标识哪些行/列范围是表头（**真正生效字段**） |
+| `fixedPrintTailRows` | **design 顶层** | 数组 | 标识哪些行/列范围是表尾（**真正生效字段**） |
+| `fixedHead: 1` | row 内 cell | 整数 | 单元格级别表头标记（生成顶层数组的依据） |
+| `fixedTail: 1` | row 内 cell | 整数 | 单元格级别表尾标记 |
+
+### ⚠️ 不要混淆的独立功能（与"固定打印表头/表尾"无关）
+
+| 字段 | 位置 | 真实作用 | 关系 |
+|------|------|---------|------|
+| `pagingRow: True` | row 级 | **预览页**列头每页重复（屏幕显示行为） | 与打印固定表头**无关**，单设它打印不会固定 |
+| `printConfig.printFootorFixBottom` | printConfig | 打印时**强制**表尾贴页底（独立的"贴底"开关） | 与 fixedPrintTailRows 是两个独立功能，可同时启用也可单独启用 |
+
+> 用户说"固定打印表头/表尾"时，AI 只需配置上面 2 类字段；不要顺手加 `pagingRow` 和 `printFootorFixBottom`，那是用户没要求的额外行为。
+
+### 顶层数组结构
+
+```python
+"fixedPrintHeadRows": [
+    {"sri": 1, "sci": 1, "eri": 1, "eci": 10}   # 表头：row code 1，col 1~10
+],
+"fixedPrintTailRows": [
+    {"sri": 3, "sci": 1, "eri": 3, "eci": 10}   # 表尾：row code 3，col 1~10
+]
+```
+
+| 字段 | 含义 | 注意 |
+|------|------|------|
+| `sri` | 起始 row（**code 行号**，即 `rows` dict 的 key 整数化，0-indexed） | 不是 UI 行号；UI 行号 = code 行号 + 1 |
+| `eri` | 结束 row（含） | 跨多行表头时 `eri = sri + N - 1` |
+| `sci` | 起始 col（**1-indexed**，col0 是留白列不计） | |
+| `eci` | 结束 col（含） | 通常是数据区最后一列 |
+
+### 完整写法（推荐：显式传，不依赖引擎自动生成）
+
+```python
+# 1. row 内 cell 加 fixedHead/fixedTail 标记
+rows = {
+    "1": {"height": 35, "cells": {
+        "1": {"text": "年级", "style": S_HEAD, "fixedHead": 1},
+        # ... 其他列同样加 fixedHead: 1
+    }},
+    "3": {"height": 35, "cells": {
+        "1": {"text": "—— 表尾 ——", "style": S_FOOT, "merge": [0, 9], "fixedTail": 1},
+        # ... 其他列同样加 fixedTail: 1
+    }},
+}
+
+# 2. design 顶层显式传两个数组（关键！）
+session.request("/save", base_save(
+    report_id, designer,
+    rows=rows, cols=cols, styles=styles, merges=merges, chartList=[],
+    fixedPrintHeadRows=[{"sri": 1, "sci": 1, "eri": 1, "eci": 10}],
+    fixedPrintTailRows=[{"sri": 3, "sci": 1, "eri": 3, "eci": 10}],
+    printConfig={..., "printFootorFixBottom": True},
+))
+```
+
+### 常见误区
+
+| 误区 | 后果 | 正确做法 |
+|------|------|---------|
+| 只在 cell 上加 `fixedHead:1`，不传顶层 `fixedPrintHeadRows` | 引擎扫单元格自动生成数组，但某些版本/时机不扫，打印时表头不固定 | 显式传顶层数组 |
+| `sri`/`eri` 误用 UI 行号（如标题在 UI row 1 写 sri:1，但其实 code row 是 0） | 范围错位，固定到了别的行 | 用 `rows` dict 的 key 整数（code 行号） |
+| `sci`/`eci` 含 col0（留白列）写 `sci:0` | 表头范围多一空列 | col0 不参与，从 sci:1 起 |
+| 设了 `printFootorFixBottom: True` 又抱怨表尾位置怪 | 这个开关**强制**表尾贴页底，与数据区中间留空 | 想表尾紧跟数据用 `fixedPrintTailRows`；想表尾贴页底用 `printFootorFixBottom`；不要混淆 |
+| 表尾行没加 `fixedTail:1` 只设了顶层数组 | 引擎渲染时不识别该行为表尾 | cell 标记 + 顶层数组**两者都要** |
 
 ---
 

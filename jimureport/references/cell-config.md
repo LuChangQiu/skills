@@ -453,7 +453,7 @@ JSON 字符串，数组格式：
     "style": 0,
     "customEditConf": {
         "apiUrl": "<api_base>/test/customCellEdit",
-        "eventParams": "eyJ0aW1lIjogIjIwMjYtMDQtMDggMTg6MTM6MTAifQ=="
+        "eventParams": "{}"
     }
 }
 ```
@@ -462,13 +462,25 @@ JSON 字符串，数组格式：
 |------|------|------|
 | `customEditConf` | object | 自定义编辑配置，放在 cell 对象内 |
 | `customEditConf.apiUrl` | string | 请求地址（点击单元格时调用） |
-| `customEditConf.eventParams` | string | 请求参数（Base64 编码的 JSON 字符串） |
+| `customEditConf.eventParams` | string | 请求参数（明文 JSON 字符串）。**默认 `"{}"`**。**系统在保存时自动做 Base64 编码**，AI **不要**自己用 `base64.b64encode(...)` 加密 |
 
-### eventParams 编码方式
+### eventParams 写法规则（必读，避免重复踩坑）
+
+> **AI 直传明文 JSON 字符串。** 系统在 `/save` 入库时自动 base64 编码，落库后即 `eyJ...` 形式。
+> AI 自己 base64 编码会被**二次编码**，预览触发请求时解码出来是乱码。
+
+| 场景 | 写法（AI 直接写这个值） |
+|------|--------------------|
+| 没有业务参数（默认） | `"eventParams": "{}"` |
+| 有业务参数 | `"eventParams": '{"action":"updateEntryDate","field":"entry_date"}'`（直接 `json.dumps(params)`，**不要 base64**） |
 
 ```python
-import json, base64
-params = {"time": "2026-04-08 18:13:10"}
-event_params = base64.b64encode(json.dumps(params, ensure_ascii=False).encode("utf-8")).decode("utf-8")
-# → "eyJ0aW1lIjogIjIwMjYtMDQtMDggMTg6MTM6MTAifQ=="
+# ✅ 正确
+import json
+event_params = json.dumps({"action": "updateEntryDate"}, ensure_ascii=False)
+# → '{"action": "updateEntryDate"}'   ← 直接传给 customEditConf.eventParams
+
+# ❌ 禁止
+import base64
+event_params = base64.b64encode(json.dumps(...).encode("utf-8")).decode("utf-8")  # 系统会再编码一次，导致乱码
 ```

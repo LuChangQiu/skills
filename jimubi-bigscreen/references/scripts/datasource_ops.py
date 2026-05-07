@@ -329,6 +329,14 @@ def cmd_detail(args):
     print(f'  驱动:     {ds.get("dbDriver", "?")}')
     print(f'  JDBC URL: {ds.get("dbUrl", "?")}')
     print(f'  用户名:   {ds.get("dbUsername", "?")}')
+    if getattr(args, 'show_password', False):
+        # ⚠️ /drag/onlDragDataSource/queryById 接口直接返回明文密码（dbPassword 字段）
+        # 默认不打印；显式 --show-password 才显示，避免误泄到日志/截屏
+        print(f'  密码:     {ds.get("dbPassword", "?")}')
+    else:
+        pwd = ds.get('dbPassword') or ''
+        masked = ('*' * len(pwd)) if pwd else '(empty)'
+        print(f'  密码:     {masked}  (加 --show-password 查看明文)')
     print(f'  创建时间: {ds.get("createTime", "?")}')
     print(f'  更新时间: {ds.get("updateTime", "?")}')
 
@@ -553,6 +561,8 @@ def main():
     p_detail = subparsers.add_parser('detail', help='查看数据源详情')
     add_common(p_detail)
     p_detail.add_argument('--id', required=True, help='数据源 ID')
+    p_detail.add_argument('--show-password', action='store_true', dest='show_password',
+                          help='显示数据库明文密码（接口本身返回 dbPassword，需直连 DB 执行 DDL 时使用；默认隐藏）')
 
     # create
     p_create = subparsers.add_parser('create', help='创建新数据源')

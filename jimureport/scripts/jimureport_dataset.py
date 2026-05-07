@@ -55,10 +55,13 @@ def save_db(
     api_url: str = "",
     api_method: str = "0",
     api_convert: str = "",
+    java_type: str = "",
+    java_value: str = "",
 ) -> str:
     """
     保存（新增/更新）数据集，返回数据集 ID。
-    db_type: "0"=SQL / "1"=API / "3"=JSON / "4"=共享
+    db_type: "0"=SQL / "1"=API / "2"=JavaBean / "3"=JSON / "4"=共享
+    JavaBean 专用：java_type="spring-key", java_value=Bean名称
     """
 
     payload: dict = {
@@ -81,6 +84,9 @@ def save_db(
     if db_type == "1":
         payload["apiUrl"]    = api_url or sql
         payload["apiMethod"] = api_method
+    if db_type == "2":
+        payload["javaType"]  = java_type or "spring-key"
+        payload["javaValue"] = java_value
     if db_id:
         payload["id"] = db_id
     for attempt in range(3):
@@ -95,11 +101,28 @@ def save_db(
 
 
 def update_db(session: Session, db_id: str, **fields) -> None:
-    """轻量更新数据集单个或多个字段，比 save_db 快 ~300x。"""
+    """
+    轻量更新数据集单个或多个字段，比 save_db 快 ~300x。
+
+    传 paramList 时若新列表含与原表已有 paramName 相同的项，必须保留原项的 `id`，
+    否则后端按 (jimuReportHeadId + paramName) 唯一约束插入冲突 → 整事务回滚，
+    连 dbDynSql/其它字段也跟着保存失败（响应仍可能显示 success）。
+    """
     result = session.get(f"/loadDbData/{db_id}")["result"]
     db = result["reportDb"]
     db["fieldList"] = result["fieldList"]
-    db["paramList"] = result["paramList"] or []
+    existing_params = result.get("paramList") or []
+    db["paramList"] = existing_params
+
+    if "paramList" in fields:
+        existing_id_by_name = {p["paramName"]: p.get("id") for p in existing_params}
+        merged = []
+        for p in fields["paramList"]:
+            if p.get("id") is None and p.get("paramName") in existing_id_by_name:
+                p = {**p, "id": existing_id_by_name[p["paramName"]]}
+            merged.append(p)
+        fields = {**fields, "paramList": merged}
+
     db.update(fields)
     session.request("/saveDb", db)
 

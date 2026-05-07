@@ -99,6 +99,35 @@
 | 表达式文本列加空格前缀 | 展示表达式字符串时，cell text 加空格前缀防止 `=` 开头被引擎求值 |
 | 行高设置 | `rows['N']['height'] = 60`，必须在 get_report 后修改再 save，不能单独 save height |
 
+## 条件隐藏行 / 列
+
+**不要用 `rowcolor()` 或 `case()` 实现行隐藏**，那只是视觉遮盖，行仍占用布局空间。
+
+正确方式：在 `base_save` 传 `hidden` 参数。
+
+```python
+base_save(report_id, designer,
+    rows=rows, cols=cols, styles=styles, merges=merges, chartList=[],
+    hidden={
+        "rows": [],
+        "cols": [],
+        "conditions": {
+            "rows": {
+                "5:5": "empData.salary>5000"   # key="行索引:行索引"，value=条件表达式
+            },
+            "cols": {}
+        }
+    }
+)
+```
+
+| 字段 | 说明 |
+|------|------|
+| `conditions.rows` key | `"rowIdx:rowIdx"`（0-indexed，单行写成 `"5:5"`，多行写成 `"5:7"`） |
+| `conditions.rows` value | 条件表达式，**不加 `=` 前缀**，如 `"empData.salary>5000"` |
+| `conditions.cols` | 同理，按列索引条件隐藏 |
+| 单元格内容 | 保持正常绑定（`${db.field}` / `#{db.field}`），无需任何表达式 |
+
 ---
 
 # 单元格聚合函数

@@ -257,10 +257,12 @@ def parallel_fill_charts(session: Session, charts: list[dict]) -> list[dict]:
                         for n, v in zip(x_data, y_data)
                     ]
             else:
-                if isinstance(cfg.get("xAxis"), dict) and cfg["xAxis"].get("type") != "value":
-                    cfg["xAxis"]["data"] = x_data
-                elif isinstance(cfg.get("yAxis"), dict) and cfg["yAxis"].get("type") == "category":
+                # 优先正向判断：yAxis 是分类轴（横向图/象形图）→ 更新 yAxis.data
+                # 避免依赖 xAxis.type 缺省时的负向判断导致误填
+                if isinstance(cfg.get("yAxis"), dict) and cfg["yAxis"].get("type") == "category":
                     cfg["yAxis"]["data"] = x_data
+                elif isinstance(cfg.get("xAxis"), dict) and cfg["xAxis"].get("type") != "value":
+                    cfg["xAxis"]["data"] = x_data
                 if cfg.get("series"):
                     cfg["series"][0]["data"] = y_data
 

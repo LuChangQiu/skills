@@ -86,25 +86,33 @@ rows = {
 
 ## 3. 条件隐藏行/列
 
+> 完整规范见 `references/misc-config.md` §「隐藏行与隐藏列」。下面只列条件隐藏要点。
+
 ### 数据结构
 
 ```python
 "hidden": {
-    "rows": ["1:1"],                  # 登记要控制的行范围（0-based，起:止，闭区间）
-    "cols": ["1:1"],                  # 登记要控制的列范围
+    "rows": [],          # 静态隐藏（始终隐藏），与条件隐藏完全独立
+    "cols": [],
     "conditions": {
         "rows": {
-            "1:1": "person.xingming=='张三'"   # aviator 表达式
+            "2:2": "person.xingming=='张三'"   # 满足表达式时隐藏 rows["2"]
         },
         "cols": {
-            "1:1": "person.xingming=='张三'"
+            "2:2": "person.xingming=='张三'"   # 满足表达式时隐藏 cols["2"]
         }
     }
 }
 ```
 
-> **关键约束：条件行/列必须同时登记到 `hidden.rows`/`hidden.cols` 中。**
-> 只在 `conditions` 里加，不在 `rows`/`cols` 里登记，条件不会生效。
+> **关键约束（实测验证）：条件隐藏只放 `conditions.rows` / `conditions.cols`，不要同时加到 `hidden.rows` / `hidden.cols` 列表 —— 加了就变成始终隐藏。**
+
+### 范围 key 规则
+
+`"起:止"` 闭区间，**index 直接对应 `rows` / `cols` dict 的 key 数字**，不是 0-based 物理位置：
+
+- 报表 `rows` 从 key `"1"` 开始时，第 1 行（rows["1"]）→ `"1:1"`，第 2 行（rows["2"]）→ `"2:2"`
+- 报表 `cols` 中 col0 留白，则 `cols["1"]` = B 列 → `"1:1"`，`cols["2"]` = C 列 → `"2:2"`
 
 ### 条件表达式（aviator 语法）
 
@@ -113,29 +121,23 @@ rows = {
 | 字段等于某值 | `"person.xingming=='张三'"` |
 | 字段大于某值 | `"person.age>18"` |
 | 字段不等于 | `"person.dept!='技术部'"` |
-| 始终隐藏（等效静态隐藏） | `"1==1"` |
 | 复合条件 AND | `"person.dept=='技术部'&&person.age>30"` |
 | 复合条件 OR | `"person.dept=='技术部'||person.dept=='产品部'"` |
 
 字段引用格式：`数据集编码.字段名`（与 saveDb 中的 `dbCode` 和 `fieldName` 一致）
 
-### 设置条件隐藏
+### 设置条件隐藏（只写 conditions，不写 rows/cols）
 
 ```python
-hidden = sheet.get("hidden", {"rows": [], "cols": [], "conditions": {"rows": {}, "cols": {}}})
-hidden.setdefault("conditions", {})
-hidden["conditions"].setdefault("rows", {})
+hidden = sheet.setdefault("hidden", {"rows": [], "cols": [], "conditions": {"rows": {}, "cols": {}}})
+hidden.setdefault("conditions", {}).setdefault("rows", {})
 hidden["conditions"].setdefault("cols", {})
 
-# 设置行条件
-if "1:1" not in hidden["rows"]:
-    hidden["rows"].append("1:1")
-hidden["conditions"]["rows"]["1:1"] = "person.xingming=='张三'"
+# 隐藏 rows["2"]（第二行）
+hidden["conditions"]["rows"]["2:2"] = "person.xingming=='张三'"
 
-# 设置列条件（年龄列 B列 index=1）
-if "1:1" not in hidden["cols"]:
-    hidden["cols"].append("1:1")
-hidden["conditions"]["cols"]["1:1"] = "person.xingming=='张三'"
+# 隐藏 cols["2"]（C 列，例如年龄列）
+hidden["conditions"]["cols"]["2:2"] = "person.xingming=='张三'"
 
 sheet["hidden"] = hidden
 ```
@@ -143,13 +145,8 @@ sheet["hidden"] = hidden
 ### 取消条件隐藏
 
 ```python
-# 取消行条件
-hidden["rows"] = [r for r in hidden["rows"] if r != "1:1"]
-hidden["conditions"]["rows"].pop("1:1", None)
-
-# 取消列条件
-hidden["cols"] = [c for c in hidden["cols"] if c != "1:1"]
-hidden["conditions"]["cols"].pop("1:1", None)
+hidden["conditions"]["rows"].pop("2:2", None)   # 取消行条件
+hidden["conditions"]["cols"].pop("2:2", None)   # 取消列条件
 ```
 
 ---

@@ -631,7 +631,11 @@ export const formSchema: FormSchema[] = [
   //   label: '状态',
   //   field: 'status',
   //   component: 'JDictSelectTag',
-  //   componentProps: { dictCode: 'dict_code', placeholder: '请选择状态' },
+  //   componentProps: {
+  //     dictCode: 'dict_code',
+  //     placeholder: '请选择状态',
+  //     getPopupContainer: () => document.body,
+  //   },
   // },
 
   // --- 关联表字典下拉 ---
@@ -639,7 +643,13 @@ export const formSchema: FormSchema[] = [
   //   label: '类型',
   //   field: 'type',
   //   component: 'JDictSelectTag',
-  //   componentProps: { dictCode: 'tableName,textField,codeField', placeholder: '请选择类型' },
+  //   componentProps: {
+  //     dictCode: 'tableName,
+  //     textField,
+  //     codeField',
+  //     placeholder: '请选择类型',
+  //     getPopupContainer: () => document.body,
+  //   },
   // },
 
   // --- Switch ---
@@ -655,7 +665,13 @@ export const formSchema: FormSchema[] = [
   //   label: '日期',
   //   field: 'dateField',
   //   component: 'DatePicker',
-  //   componentProps: { showTime: false, valueFormat: 'YYYY-MM-DD', placeholder: '请选择日期' },
+  //   componentProps: {
+  //     showTime: false,
+  //     valueFormat: 'YYYY-MM-DD',
+  //     placeholder: '请选择日期',
+  //     style: 'width:100%',
+  //     getPopupContainer: () => document.body,
+  //   },
   // },
 
   // --- 日期时间选择 ---
@@ -663,7 +679,13 @@ export const formSchema: FormSchema[] = [
   //   label: '日期时间',
   //   field: 'datetimeField',
   //   component: 'DatePicker',
-  //   componentProps: { showTime: true, valueFormat: 'YYYY-MM-DD HH:mm:ss', placeholder: '请选择日期时间' },
+  //   componentProps: {
+  //     showTime: true,
+  //     valueFormat: 'YYYY-MM-DD HH:mm:ss',
+  //     placeholder: '请选择日期时间',
+  //     style: 'width:100%',
+  //     getPopupContainer: () => document.body,
+  //   },
   // },
 
   // --- 文本域 ---
@@ -706,7 +728,10 @@ export const formSchema: FormSchema[] = [
   //   label: '负责人',
   //   field: 'userId',
   //   component: 'JSelectUserByDept',
-  //   componentProps: { labelKey: 'realname', isRadioSelection: true },  // 单选
+  //   componentProps: {
+  //     labelKey: 'realname',
+  //     isRadioSelection: true,
+  //   },  // 单选
   // },
   // {
   //   label: '负责人（多选）',
@@ -735,13 +760,20 @@ export const formSchema: FormSchema[] = [
   //   label: '分类',
   //   field: 'categoryField',
   //   component: 'JCategorySelect',
-  //   componentProps: { pcode: 'B03' },                  // 单选（默认）
+  //   componentProps: {
+  //     pcode: 'B03',
+  //     getPopupContainer: () => document.body,
+  //   },                  // 单选（默认）
   // },
   // {
   //   label: '分类（多选）',
   //   field: 'categoryField',
   //   component: 'JCategorySelect',
-  //   componentProps: { pcode: 'B03', multiple: true },  // 多选
+  //   componentProps: {
+  //     pcode: 'B03',
+  //     multiple: true,
+  //     getPopupContainer: () => document.body,
+  //   },  // 多选
   // },
 
   // --- 自定义树选择（JTreeSelect）---
@@ -750,7 +782,15 @@ export const formSchema: FormSchema[] = [
   //   label: '树选择',
   //   field: 'treeField',
   //   component: 'JTreeSelect',
-  //   componentProps: { dict: 'sys_category,name,id', pidField: 'pid', pidValue: '0', multiple: false },
+  //   componentProps: {
+  //     dict: 'sys_category,
+  //     name,
+  //     id',
+  //     pidField: 'pid',
+  //     pidValue: '0',
+  //     multiple: false,
+  //     getPopupContainer: () => document.body,
+  //   },
   // },
 
   // --- 搜索选择 ---
@@ -759,7 +799,13 @@ export const formSchema: FormSchema[] = [
   //   label: '搜索',
   //   field: 'searchField',
   //   component: 'JSearchSelect',
-  //   componentProps: { dict: 'tableName,textField,codeField', placeholder: '请选择' },
+  //   componentProps: {
+  //     dict: 'tableName,
+  //     textField,
+  //     codeField',
+  //     placeholder: '请选择',
+  //     getPopupContainer: () => document.body,
+  //   },
   // },
 
   // --- 字典多选（JCheckbox）---
@@ -776,7 +822,11 @@ export const formSchema: FormSchema[] = [
   //   label: '下拉多选',
   //   field: 'multiField',
   //   component: 'JSelectMultiple',
-  //   componentProps: { dictCode: 'dict_code', triggerChange: true },
+  //   componentProps: {
+  //     dictCode: 'dict_code',
+  //     triggerChange: true,
+  //     getPopupContainer: () => document.body,
+  //   },
   // },
 
   // --- Popup弹窗（JPopup）---
@@ -805,7 +855,10 @@ export const formSchema: FormSchema[] = [
   //   label: 'Popup回填',
   //   field: 'popupBackField',
   //   component: 'Input',
-  //   componentProps: { disabled: true, placeholder: '由Popup自动回填' },
+  //   componentProps: {
+  //     disabled: true,
+  //     placeholder: '由Popup自动回填',
+  //   },
   // },
 
   // --- Popup字典（JPopupDict）---
@@ -815,17 +868,29 @@ export const formSchema: FormSchema[] = [
   //   label: 'Popup字典',
   //   field: 'popDictField',
   //   component: 'JPopupDict',
-  //   componentProps: { dictCode: 'report_user,realname,id', multi: false },  // 单选
+  //   componentProps: {
+  //     dictCode: 'report_user,
+  //     realname,
+  //     id',
+  //     multi: false,
+  //   },  // 单选
   // },
 ];
 
 // 高级查询配置
 export const superQuerySchema = {
-  // fieldName: { title: '字段名', order: 0, view: 'text' },
-  // status: { title: '状态', order: 1, view: 'list', dictCode: 'dict_code' },
-  // dateField: { title: '日期', order: 2, view: 'date' },
-  // datetimeField: { title: '日期时间', order: 3, view: 'datetime' },
-  // quantity: { title: '数量', order: 4, view: 'number' },
+  // fieldName: { title: '字段名', order: 0, view: 'text', type: 'string' },
+  // status: { title: '状态', order: 1, view: 'list', type: 'string', dictCode: 'dict_code' },
+  // dateField: { title: '日期', order: 2, view: 'date', type: 'string' },
+  // datetimeField: { title: '日期时间', order: 3, view: 'datetime', type: 'string' },
+  // quantity: { title: '数量', order: 4, view: 'number', type: 'number' },
+  // yearVal: { title: '年', order: 5, view: 'date', type: 'string', fieldExtendJson: "{\"picker\":\"year\"}" },
+  // quarterVal: { title: '季度', order: 6, view: 'date', type: 'string', fieldExtendJson: "{\"picker\":\"quarter\"}" },
+  // monthVal: { title: '月', order: 7, view: 'date', type: 'string', fieldExtendJson: "{\"picker\":\"month\"}" },
+  // weekVal: { title: '周', order: 8, view: 'date', type: 'string', fieldExtendJson: "{\"picker\":\"week\"}" },
+  // popupField: { title: 'Popup弹窗', order: 9, view: 'popup', type: 'string', code: 'report_code', orgFields: 'source_field', destFields: 'target_field', popupMulti: false },
+  // popDictField: { title: 'Popup字典', order: 10, view: 'popup_dict', type: 'string', code: 'report_code', orgFields: 'source_field', destFields: 'target_field', popupMulti: false },
+  // provinceCityArea: { title: '省市区', order: 11, view: 'pca', type: 'string' },
 };
 ```
 
@@ -834,11 +899,16 @@ export const superQuerySchema = {
 - int/double/BigDecimal → `number`
 - date → `date`
 - datetime → `datetime`
+- time(时间) → `time`
 - 字典字段(list/radio/checkbox) → `list`, 带 `dictCode`
 - 关联表字典 → `list_multi` 或 `sel_search`, 带 `dictTable/dictCode/dictText`
 - switch → `radio`
 - user_select → `sel_user`
 - dept_select → `sel_depart`
+- JPopup → `popup`, 需要 `code/orgFields/destFields/popupMulti`
+- JPopupDict → `popup_dict`, 需要 `code/orgFields/destFields/popupMulti`
+- JAreaLinkage(省市区) → `pca`
+- DatePicker year/quarter/month/week → `date` + `fieldExtendJson: "{\"picker\":\"year\"}"`（picker 可为 year/quarter/month/week）
 
 ---
 
@@ -917,14 +987,14 @@ export const superQuerySchema = {
         schemas: searchFormSchema,
         autoSubmitOnEnter: true,
         showAdvancedButton: true,
-        fieldMapToNumber: [
-          // 数字/时间范围查询映射
-          // ['fieldName', ['fieldName_begin', 'fieldName_end']],
-        ],
         fieldMapToTime: [
-          // 日期范围查询映射
-          // ['dateField', ['dateField_begin', 'dateField_end'], 'YYYY-MM-DD'],
-          // ['datetimeField', ['datetimeField_begin', 'datetimeField_end'], 'YYYY-MM-DD HH:mm:ss'],
+          // 日期范围(RangePicker): ['dateField', ['dateField_begin', 'dateField_end'], 'YYYY-MM-DD']
+          // 时间范围(RangeTime):   ['timeField', ['timeField_begin', 'timeField_end'], 'HH:mm:ss']
+          // ⚠️ RangeTime 也用 fieldMapToTime，不要用 fieldMapToNumber！
+        ],
+        fieldMapToNumber: [
+          // 数值范围(JRangeNumber): ['numField', ['numField_begin', 'numField_end']]
+          // ⚠️ 只有 JRangeNumber 组件才用 fieldMapToNumber，时间/日期一律用 fieldMapToTime！
         ],
       },
       actionColumn: {
@@ -1907,48 +1977,7 @@ function searchReset() {
 
 ### A12. 菜单权限 SQL
 
-```sql
--- 注意：该页面对应的前台目录为 views/{{viewDir}} 文件夹下
--- 如果你想更改到其他目录，请修改sql中component字段对应的值
-
--- 主菜单
--- ⚠️ is_leaf 必须为 0（第15个值）：有按钮子级时 is_leaf=1 会导致按钮在权限树中不可见
-INSERT INTO sys_permission(id, parent_id, name, url, component, component_name, redirect, menu_type, perms, perms_type, sort_no, always_show, icon, is_route, is_leaf, keep_alive, hidden, hide_tab, description, status, del_flag, rule_flag, create_by, create_time, update_by, update_time, internal_or_external)
-VALUES ('{{timestamp}}01', NULL, '{{description}}', '/{{entityPackagePath}}/{{entityName_uncap}}List', '{{viewDir}}/{{entityName}}List', NULL, NULL, 0, NULL, '1', 0.00, 0, NULL, 1, 0, 0, 0, 0, NULL, '1', 0, 0, 'admin', '{{today}} 00:00:00', NULL, NULL, 0);
-
--- 新增
-INSERT INTO sys_permission(id, parent_id, name, url, component, is_route, component_name, redirect, menu_type, perms, perms_type, sort_no, always_show, icon, is_leaf, keep_alive, hidden, hide_tab, description, create_by, create_time, update_by, update_time, del_flag, rule_flag, status, internal_or_external)
-VALUES ('{{timestamp}}02', '{{timestamp}}01', '添加{{description}}', NULL, NULL, 0, NULL, NULL, 2, '{{entityPackage}}:{{tableName}}:add', '1', NULL, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '{{today}} 00:00:00', NULL, NULL, 0, 0, '1', 0);
-
--- 编辑
-INSERT INTO sys_permission(id, parent_id, name, url, component, is_route, component_name, redirect, menu_type, perms, perms_type, sort_no, always_show, icon, is_leaf, keep_alive, hidden, hide_tab, description, create_by, create_time, update_by, update_time, del_flag, rule_flag, status, internal_or_external)
-VALUES ('{{timestamp}}03', '{{timestamp}}01', '编辑{{description}}', NULL, NULL, 0, NULL, NULL, 2, '{{entityPackage}}:{{tableName}}:edit', '1', NULL, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '{{today}} 00:00:00', NULL, NULL, 0, 0, '1', 0);
-
--- 删除
-INSERT INTO sys_permission(id, parent_id, name, url, component, is_route, component_name, redirect, menu_type, perms, perms_type, sort_no, always_show, icon, is_leaf, keep_alive, hidden, hide_tab, description, create_by, create_time, update_by, update_time, del_flag, rule_flag, status, internal_or_external)
-VALUES ('{{timestamp}}04', '{{timestamp}}01', '删除{{description}}', NULL, NULL, 0, NULL, NULL, 2, '{{entityPackage}}:{{tableName}}:delete', '1', NULL, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '{{today}} 00:00:00', NULL, NULL, 0, 0, '1', 0);
-
--- 批量删除
-INSERT INTO sys_permission(id, parent_id, name, url, component, is_route, component_name, redirect, menu_type, perms, perms_type, sort_no, always_show, icon, is_leaf, keep_alive, hidden, hide_tab, description, create_by, create_time, update_by, update_time, del_flag, rule_flag, status, internal_or_external)
-VALUES ('{{timestamp}}05', '{{timestamp}}01', '批量删除{{description}}', NULL, NULL, 0, NULL, NULL, 2, '{{entityPackage}}:{{tableName}}:deleteBatch', '1', NULL, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '{{today}} 00:00:00', NULL, NULL, 0, 0, '1', 0);
-
--- 导出excel
-INSERT INTO sys_permission(id, parent_id, name, url, component, is_route, component_name, redirect, menu_type, perms, perms_type, sort_no, always_show, icon, is_leaf, keep_alive, hidden, hide_tab, description, create_by, create_time, update_by, update_time, del_flag, rule_flag, status, internal_or_external)
-VALUES ('{{timestamp}}06', '{{timestamp}}01', '导出excel_{{description}}', NULL, NULL, 0, NULL, NULL, 2, '{{entityPackage}}:{{tableName}}:exportXls', '1', NULL, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '{{today}} 00:00:00', NULL, NULL, 0, 0, '1', 0);
-
--- 导入excel
-INSERT INTO sys_permission(id, parent_id, name, url, component, is_route, component_name, redirect, menu_type, perms, perms_type, sort_no, always_show, icon, is_leaf, keep_alive, hidden, hide_tab, description, create_by, create_time, update_by, update_time, del_flag, rule_flag, status, internal_or_external)
-VALUES ('{{timestamp}}07', '{{timestamp}}01', '导入excel_{{description}}', NULL, NULL, 0, NULL, NULL, 2, '{{entityPackage}}:{{tableName}}:importExcel', '1', NULL, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '{{today}} 00:00:00', NULL, NULL, 0, 0, '1', 0);
-
--- 角色授权（admin角色）
-INSERT INTO sys_role_permission (id, role_id, permission_id, data_rule_ids, operate_date, operate_ip) VALUES ('{{timestamp}}08', 'f6817f48af4fb3af11b9e8bf182f618b', '{{timestamp}}01', NULL, '{{today}} 00:00:00', '127.0.0.1');
-INSERT INTO sys_role_permission (id, role_id, permission_id, data_rule_ids, operate_date, operate_ip) VALUES ('{{timestamp}}09', 'f6817f48af4fb3af11b9e8bf182f618b', '{{timestamp}}02', NULL, '{{today}} 00:00:00', '127.0.0.1');
-INSERT INTO sys_role_permission (id, role_id, permission_id, data_rule_ids, operate_date, operate_ip) VALUES ('{{timestamp}}10', 'f6817f48af4fb3af11b9e8bf182f618b', '{{timestamp}}03', NULL, '{{today}} 00:00:00', '127.0.0.1');
-INSERT INTO sys_role_permission (id, role_id, permission_id, data_rule_ids, operate_date, operate_ip) VALUES ('{{timestamp}}11', 'f6817f48af4fb3af11b9e8bf182f618b', '{{timestamp}}04', NULL, '{{today}} 00:00:00', '127.0.0.1');
-INSERT INTO sys_role_permission (id, role_id, permission_id, data_rule_ids, operate_date, operate_ip) VALUES ('{{timestamp}}12', 'f6817f48af4fb3af11b9e8bf182f618b', '{{timestamp}}05', NULL, '{{today}} 00:00:00', '127.0.0.1');
-INSERT INTO sys_role_permission (id, role_id, permission_id, data_rule_ids, operate_date, operate_ip) VALUES ('{{timestamp}}13', 'f6817f48af4fb3af11b9e8bf182f618b', '{{timestamp}}06', NULL, '{{today}} 00:00:00', '127.0.0.1');
-INSERT INTO sys_role_permission (id, role_id, permission_id, data_rule_ids, operate_date, operate_ip) VALUES ('{{timestamp}}14', 'f6817f48af4fb3af11b9e8bf182f618b', '{{timestamp}}07', NULL, '{{today}} 00:00:00', '127.0.0.1');
-```
+见 `references/ref-menu-sql.md`（专用模板文件，Step 4 第 3 轮前强制读取）。
 
 ---
 
@@ -3727,7 +3756,7 @@ views/{{viewDir}}/
 | **文件/图片需要 token** | `JVxeTypes.file/image` 必须设置 `token:true, responseName:'message'` |
 | **popup 用 popupCode** | JVxeTable 的 Popup 使用 `popupCode`（不是 `code`），多选通过 `props: { multi: true }` |
 | **width 是字符串** | JVxeColumn 的 width 格式为 `'200px'`（字符串），不是数字 |
-| **校验用 validateRules** | 使用 `validateRules` 数组（不是 `dynamicRules` 函数），pattern 支持正则字符串和特殊值（`'only'` = 唯一） |
+| **校验用 validateRules** | 使用 `validateRules` 数组（不是 `dynamicRules` 函数）。`pattern` 直接写 fieldValidType 短码即可（`'m'`/`'e'`/`'url'`/`'p'`/`'s'`/`'n'`/`'z'`/`'money'`/`'n6-16'`/`'s6-18'`/`'*6-16'`），JVxeTable 内部维护 `online→regexp` 映射表会自动匹配正则。`'only'` 触发唯一值校验。自定义正则无对应 online 码时才原样传正则字符串。完整映射见 SKILL.md 的 JVxeTable 校验规则章节。 |
 | **子表 API 导出为 URL 字符串** | `export const xxxList = Api.xxxList`（导出字符串），不是 `export const xxxList = (params) => defHttp.get(...)` |
 | **一对一 FormSchema 需要隐藏 id 字段** | `{ label: '', field: 'id', component: 'Input', show: false }` 必须加在 FormSchema 首位 |
 | **多子表 Service 参数** | 有多个子表时 `saveMain/updateMain` 参数对应增加，ServiceImpl 中需分别处理每个子表的删除和插入 |

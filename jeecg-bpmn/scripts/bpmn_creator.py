@@ -129,10 +129,12 @@ def build_condition_b64(conditions, logic='and'):
     """
     将条件列表转换为 base64 编码的 JSON，用于 flowUtil.evaluateExpression。
 
-    conditions 格式:
+    conditions 格式（input 用 "value" 键，函数自动转换为前端所需的 "expectedValue"）:
     [
         {"field": "integer_xxx", "fieldType": "integer", "fieldName": "请假天数", "operator": "gt", "value": "3"}
     ]
+    ⚠️ fieldType 必须与 DesForm 字段实际类型完全一致（用 bc.get_desform_fields() 返回的 info['type']），
+       否则前端规范化时会丢弃 expectedValue。
     logic: 'and'（全部满足）或 'or'（任一满足），默认 'and'
     """
     cond_list = []
@@ -142,7 +144,7 @@ def build_condition_b64(conditions, logic='and'):
             'field': c['field'],
             'fieldType': c.get('fieldType', 'string'),
             'fieldName': c.get('fieldName', c['field']),
-            'expectedValue': str(c['value']),
+            'expectedValue': str(c.get('value', c.get('expectedValue', ''))),
         })
     payload = [{'logic': logic, 'conditions': cond_list}]
     json_str = json.dumps(payload, ensure_ascii=False)
@@ -150,9 +152,9 @@ def build_condition_b64(conditions, logic='and'):
 
 
 def build_condition_expression(conditions, logic='and'):
-    """构建完整的条件表达式字符串。logic: 'and' 或 'or'"""
+    """构建完整的条件表达式字符串。logic: 'and' 或 'or'（第三参数与 logic 一致）"""
     b64 = build_condition_b64(conditions, logic)
-    return f"${{flowUtil.evaluateExpression(execution, '{b64}', 'and')}}"
+    return f"${{flowUtil.evaluateExpression(execution, '{b64}', '{logic}')}}"
 
 
 # ====== taskExtendJson 构建 ======
@@ -802,6 +804,11 @@ def gen_call_activity(node):
         elem_var = cs.get('elementVariable', 'assigneeUserId')
         lines.append(f'        <flowable:in source="{elem_var}" target="{elem_var}" />')
         lines.append('        <flowable:out source="applyUserId" target="applyUserId" />')
+    # 自定义 in/out 变量映射（inVars / outVars）
+    for v in node.get('inVars', []):
+        lines.append(f'        <flowable:in source="{v["source"]}" target="{v["target"]}" />')
+    for v in node.get('outVars', []):
+        lines.append(f'        <flowable:out source="{v["source"]}" target="{v["target"]}" />')
     lines.append('      </bpmn2:extensionElements>')
     for fid in node.get('_incoming', []):
         lines.append(f'      <bpmn2:incoming>{fid}</bpmn2:incoming>')
@@ -966,9 +973,59 @@ def _detect_parallel_blocks(nodes, flows, node_map):
         join_id = next(iter(joins))
         if len(incoming.get(join_id, [])) != len(targets):
             continue
-        if not all(ch for ch in branches):
-            continue
+        non_empty = [ch for ch in branches if ch]
+        # 并行网关要求所有分支非空；包容网关允许空链（default flow 直达 join）
+        if n['type'] == 'parallelGateway':
+            if not all(ch for ch in branches):
+                continue
+        else:
+            # inclusiveGateway：至少一条非空分支才值得横向展开
+            if not non_empty:
+                continue
         blocks[nid] = {'join': join_id, 'branches': branches}
+    return blocks
+
+
+def _detect_exclusive_branches(sorted_nodes, flows, node_map):
+    """检测排他网关 3+ 条出线的水平展开模式。
+
+    返回 {gateway_id: {'branches': [[chain_ids], ...], 'flow_targets': {target_id: flow_obj}}}
+    每条分支链追踪到汇聚点（多入度节点或 endEvent）为止。
+    空链表示该出线直达汇聚点（如 default→end）。
+    """
+    outgoing, incoming = {}, {}
+    for f in flows:
+        outgoing.setdefault(f['source'], []).append(f)
+        incoming.setdefault(f['target'], []).append(f['source'])
+
+    blocks = {}
+    for n in sorted_nodes:
+        nid = n['id']
+        if n['type'] != 'exclusiveGateway':
+            continue
+        out_flows = outgoing.get(nid, [])
+        if len(out_flows) < 3:
+            continue
+
+        branches = []
+        for of in out_flows:
+            chain = []
+            cur = of['target']
+            while cur in node_map:
+                cn = node_map[cur]
+                # 多入度节点是汇聚点 → 停止
+                if len(incoming.get(cur, [])) > 1:
+                    break
+                if cn['type'] == 'endEvent':
+                    break
+                chain.append(cur)
+                nexts = [f['target'] for f in outgoing.get(cur, [])]
+                if len(nexts) != 1:
+                    break
+                cur = nexts[0]
+            branches.append(chain)
+
+        blocks[nid] = {'branches': branches}
     return blocks
 
 
@@ -976,22 +1033,92 @@ def _detect_parallel_blocks(nodes, flows, node_map):
 PARALLEL_COL_GAP = 80
 
 
+def _topo_sort_nodes(nodes, flows):
+    """基于流程拓扑对节点排序（忽略反向边/环路）。
+
+    反向边判定启发式：目标节点在声明顺序中早于源节点（如"退回→草稿"）。
+    使用 Kahn 算法，同层按声明顺序稳定排序，确保视觉顺序自然。
+    同时对多入度非网关节点（多条路径汇聚）使用"最晚前驱优先"策略，
+    保证该节点在所有正向前驱都处理后才出现。
+    """
+    node_ids = [n['id'] for n in nodes]
+    decl_order = {nid: i for i, nid in enumerate(node_ids)}
+    id_to_node = {n['id']: n for n in nodes}
+    valid_ids = set(node_ids)
+
+    # 只建立正向边（跳过反向边：target 在声明顺序中比 source 靠前）
+    fwd_outgoing = {nid: [] for nid in node_ids}
+    in_degree = {nid: 0 for nid in node_ids}
+
+    for f in (flows or []):
+        src, tgt = f.get('source', ''), f.get('target', '')
+        if src not in valid_ids or tgt not in valid_ids or src == tgt:
+            continue
+        if decl_order.get(tgt, 0) < decl_order.get(src, 0):
+            continue   # 反向边，跳过
+        fwd_outgoing[src].append(tgt)
+        in_degree[tgt] += 1
+
+    # Kahn 算法：队列中按声明顺序选最靠前的节点
+    from collections import deque
+    ready = sorted(
+        [nid for nid in node_ids if in_degree[nid] == 0],
+        key=lambda x: decl_order[x]
+    )
+    result = []
+    visited = set()
+
+    while ready:
+        nid = ready.pop(0)
+        if nid in visited:
+            continue
+        visited.add(nid)
+        result.append(nid)
+        for tgt in fwd_outgoing[nid]:
+            if tgt in visited:
+                continue
+            in_degree[tgt] -= 1
+            if in_degree[tgt] <= 0:
+                # 插入 ready 队列，保持声明顺序
+                pos = next(
+                    (i for i, q in enumerate(ready) if decl_order[q] > decl_order[tgt]),
+                    len(ready)
+                )
+                ready.insert(pos, tgt)
+
+    # 剩余未处理节点（真实环路，异常情况）按声明顺序追加
+    processed = set(result)
+    for nid in node_ids:
+        if nid not in processed:
+            result.append(nid)
+
+    return [id_to_node[nid] for nid in result if nid in id_to_node]
+
+
 def calc_layout(nodes, flows=None):
     """计算所有节点的位置。
 
-    - 默认：节点按输入顺序垂直堆叠居中于 CENTER_X。
+    - 先做拓扑排序（忽略反向边），保证节点按流程逻辑从上到下排列。
+    - 默认：主线节点垂直堆叠居中于 CENTER_X。
     - 当识别到「并行/包容网关 split → 多条链 → 同一 join」的经典模式时，
       将各条分支链在 split 下方**横向并排**，join 位于分支底部正下方。
     """
     positions = {}
-    node_map = {n['id']: n for n in nodes}
+    # 拓扑排序，避免声明顺序与流程逻辑顺序不一致导致位置错乱
+    sorted_nodes = _topo_sort_nodes(nodes, flows) if flows else list(nodes)
+    node_map = {n['id']: n for n in sorted_nodes}
 
-    parallel_blocks = _detect_parallel_blocks(nodes, flows, node_map) if flows else {}
+    parallel_blocks = _detect_parallel_blocks(sorted_nodes, flows, node_map) if flows else {}
+    exclusive_blocks = _detect_exclusive_branches(sorted_nodes, flows, node_map) if flows else {}
 
     # 属于并行块内部（分支链节点 + join）→ 不参与主线垂直推进
     inner_ids = set()
     join_ids = {blk['join'] for blk in parallel_blocks.values()}
     for blk in parallel_blocks.values():
+        for chain in blk['branches']:
+            inner_ids.update(chain)
+    # 排他网关分支节点也不参与主线垂直推进
+    for blk in exclusive_blocks.values():
         for chain in blk['branches']:
             inner_ids.update(chain)
 
@@ -1016,36 +1143,78 @@ def calc_layout(nodes, flows=None):
             branches = blk['branches']
             join_id = blk['join']
 
-            # 每条分支列的宽度取本列最宽节点
-            col_widths = []
-            for chain in branches:
-                mw = 100
-                for cid in chain:
-                    mw = max(mw, _get_node_size(node_map[cid])['w'])
-                col_widths.append(mw)
+            # 过滤空链（包容网关的 default flow 直达 join，无中间节点）
+            non_empty = [ch for ch in branches if ch]
+            if not non_empty:
+                # 所有分支都是空链（极端情况），只放 join
+                join_node = node_map[join_id]
+                jsize = _get_node_size(join_node)
+                join_y = positions[nid]['bottom'] + VERTICAL_GAP
+                positions[join_id] = _make_pos(CENTER_X - jsize['w'] / 2, join_y, jsize['w'], jsize['h'], cx=CENTER_X)
+                y = positions[join_id]['bottom'] + VERTICAL_GAP
+            else:
+                # 每条非空分支列的宽度取本列最宽节点
+                col_widths = []
+                for chain in non_empty:
+                    mw = 100
+                    for cid in chain:
+                        mw = max(mw, _get_node_size(node_map[cid])['w'])
+                    col_widths.append(mw)
 
-            total_w = sum(col_widths) + PARALLEL_COL_GAP * (len(branches) - 1)
-            start_x = CENTER_X - total_w / 2
-            branch_top_y = positions[nid]['bottom'] + VERTICAL_GAP
+                total_w = sum(col_widths) + PARALLEL_COL_GAP * (len(non_empty) - 1)
+                start_x = CENTER_X - total_w / 2
+                branch_top_y = positions[nid]['bottom'] + VERTICAL_GAP
 
-            x_cursor = start_x
-            for i, chain in enumerate(branches):
-                col_cx = x_cursor + col_widths[i] / 2
-                cy = branch_top_y
-                for cid in chain:
-                    sc = _get_node_size(node_map[cid])
-                    positions[cid] = _make_pos(col_cx - sc['w'] / 2, cy, sc['w'], sc['h'], cx=col_cx)
-                    cy += sc['h'] + VERTICAL_GAP
-                x_cursor += col_widths[i] + PARALLEL_COL_GAP
+                x_cursor = start_x
+                for i, chain in enumerate(non_empty):
+                    col_cx = x_cursor + col_widths[i] / 2
+                    cy = branch_top_y
+                    for cid in chain:
+                        sc = _get_node_size(node_map[cid])
+                        positions[cid] = _make_pos(col_cx - sc['w'] / 2, cy, sc['w'], sc['h'], cx=col_cx)
+                        cy += sc['h'] + VERTICAL_GAP
+                    x_cursor += col_widths[i] + PARALLEL_COL_GAP
 
-            # 放置 join：所有分支链底部之下，水平居中
-            join_node = node_map[join_id]
-            jsize = _get_node_size(join_node)
-            max_bottom = max(positions[cid]['bottom'] for chain in branches for cid in chain)
-            join_y = max_bottom + VERTICAL_GAP
-            positions[join_id] = _make_pos(CENTER_X - jsize['w'] / 2, join_y, jsize['w'], jsize['h'], cx=CENTER_X)
+                # 放置 join：所有非空分支链底部之下，水平居中
+                join_node = node_map[join_id]
+                jsize = _get_node_size(join_node)
+                max_bottom = max(positions[cid]['bottom'] for chain in non_empty for cid in chain)
+                join_y = max_bottom + VERTICAL_GAP
+                positions[join_id] = _make_pos(CENTER_X - jsize['w'] / 2, join_y, jsize['w'], jsize['h'], cx=CENTER_X)
 
-            y = positions[join_id]['bottom'] + VERTICAL_GAP
+                y = positions[join_id]['bottom'] + VERTICAL_GAP
+        elif nid in exclusive_blocks:
+            # 排他网关 3+ 分支：将非空分支链水平展开
+            blk = exclusive_blocks[nid]
+            branches = blk['branches']
+            non_empty = [ch for ch in branches if ch]
+            if non_empty:
+                col_widths = []
+                for chain in non_empty:
+                    mw = 100
+                    for cid in chain:
+                        mw = max(mw, _get_node_size(node_map[cid])['w'])
+                    col_widths.append(mw)
+
+                total_w = sum(col_widths) + PARALLEL_COL_GAP * (len(non_empty) - 1)
+                start_x = CENTER_X - total_w / 2
+                branch_top_y = positions[nid]['bottom'] + VERTICAL_GAP
+
+                x_cursor = start_x
+                for i, chain in enumerate(non_empty):
+                    col_cx = x_cursor + col_widths[i] / 2
+                    cy = branch_top_y
+                    for cid in chain:
+                        sc = _get_node_size(node_map[cid])
+                        positions[cid] = _make_pos(col_cx - sc['w'] / 2, cy, sc['w'], sc['h'], cx=col_cx)
+                        cy += sc['h'] + VERTICAL_GAP
+                    x_cursor += col_widths[i] + PARALLEL_COL_GAP
+
+                # y 推进到所有分支底部之下
+                max_bottom = max(positions[cid]['bottom'] for ch in non_empty for cid in ch)
+                y = max_bottom + VERTICAL_GAP
+            else:
+                y += size['h'] + VERTICAL_GAP
         else:
             y += size['h'] + VERTICAL_GAP
 
@@ -1293,24 +1462,28 @@ def calc_layout_manual_branch(config):
         # Row2: 非结束目标 → 链式节点 → 结束
         current_x = adj_target_x
         for tid in non_end_targets:
-            tw, th = MB_TASK_W, MB_TASK_H
+            tnode = node_map.get(tid, {})
+            tsize = _get_node_size(tnode)
+            tw, th = tsize['w'], tsize['h']
             positions[tid] = {
-                'x': current_x, 'y': row2_y,
+                'x': current_x, 'y': row2_cy - th / 2,
                 'w': tw, 'h': th,
                 'cx': current_x + tw / 2,
                 'cy': row2_cy,
-                'bottom': row2_y + th,
+                'bottom': row2_cy + th / 2,
             }
             current_x += tw + node_gap
 
         for cid in chain_nodes:
-            cw, ch = MB_TASK_W, MB_TASK_H
+            cnode = node_map.get(cid, {})
+            csize = _get_node_size(cnode)
+            cw, ch = csize['w'], csize['h']
             positions[cid] = {
-                'x': current_x, 'y': row2_y,
+                'x': current_x, 'y': row2_cy - ch / 2,
                 'w': cw, 'h': ch,
                 'cx': current_x + cw / 2,
                 'cy': row2_cy,
-                'bottom': row2_y + ch,
+                'bottom': row2_cy + ch / 2,
             }
             current_x += cw + node_gap
 
@@ -1402,12 +1575,14 @@ def calc_layout_manual_branch(config):
                     adj_end_x = new_end_x
                     adj_merge_x = adj_target_x + tw + 30
             else:
+                tsize = _get_node_size(target_node)
+                tw, th = tsize['w'], tsize['h']
                 positions[tid] = {
                     'x': adj_target_x, 'y': y,
-                    'w': MB_TASK_W, 'h': MB_TASK_H,
-                    'cx': adj_target_x + MB_TASK_W / 2,
-                    'cy': y + MB_TASK_H / 2,
-                    'bottom': y + MB_TASK_H,
+                    'w': tw, 'h': th,
+                    'cx': adj_target_x + tw / 2,
+                    'cy': y + th / 2,
+                    'bottom': y + th,
                 }
 
         for n in nodes:
@@ -1550,6 +1725,437 @@ def gen_edge_xml_manual_branch(flow, positions, config):
     return '\n'.join(lines)
 
 
+# ====== 复杂竖向布局（手工分支 + 下游网关 + 多结束事件）======
+
+def _detect_complex_vertical(config):
+    """检测是否为「复杂竖向布局」模式。
+
+    条件：已检测到手工分支（_manualBranch）+ 下游含排他网关或调用子流程 + 2 个以上结束事件。
+    水平布局在此场景下会导致节点堆叠，需改用竖向布局 + 右侧偏置侧支。
+    """
+    if '_manualBranch' not in config:
+        return False
+    nodes = config['nodes']
+    has_gw_or_call = any(n['type'] in ('exclusiveGateway', 'callActivity') for n in nodes)
+    multi_end = sum(1 for n in nodes if n['type'] == 'endEvent') >= 2
+    return has_gw_or_call and multi_end
+
+
+def _bfs_depths(nodes, flows):
+    """从 startEvent 出发 BFS，计算每个节点的最大深度（避免后向边干扰）。"""
+    from collections import deque
+    adj = {}
+    for f in flows:
+        adj.setdefault(f['source'], []).append(f['target'])
+
+    depth = {}
+    start_ids = [n['id'] for n in nodes if n['type'] == 'startEvent']
+    q = deque()
+    for sid in start_ids:
+        depth[sid] = 0
+        q.append(sid)
+
+    while q:
+        nid = q.popleft()
+        d = depth[nid]
+        for nxt in adj.get(nid, []):
+            if depth.get(nxt, -1) < d + 1:
+                depth[nxt] = d + 1
+                q.append(nxt)
+
+    return depth
+
+
+def calc_layout_complex_vertical(config):
+    """计算「复杂竖向布局」节点坐标。
+
+    布局规则：
+    - 主链节点（从 start 贪心追踪深度最大路径到主 endEvent）竖向居中排列（cx=CENTER_X）
+    - 侧链节点（不在主链上）排列在 cx=620，Y 与其最近主链祖先中心对齐
+    """
+    nodes = config['nodes']
+    flows = config['flows']
+    node_map = {n['id']: n for n in nodes}
+    SIDE_CX = 620
+
+    # 计算 BFS 深度
+    depth = _bfs_depths(nodes, flows)
+
+    # 找主结束节点（深度最大的 endEvent）
+    end_nodes = [n for n in nodes if n['type'] == 'endEvent']
+    main_end = max(end_nodes, key=lambda n: depth.get(n['id'], 0))
+
+    # 贪心构建主链：每步选深度最大的下一节点
+    adj = {}
+    for f in flows:
+        adj.setdefault(f['source'], []).append(f['target'])
+
+    start_node = next((n for n in nodes if n['type'] == 'startEvent'), None)
+    if not start_node:
+        return calc_layout_manual_branch(config)  # 兜底
+
+    main_chain = []
+    visited_chain = set()
+    current = start_node['id']
+    while current:
+        main_chain.append(current)
+        visited_chain.add(current)
+        nexts = [nxt for nxt in adj.get(current, []) if nxt not in visited_chain]
+        if not nexts:
+            break
+        current = max(nexts, key=lambda n: depth.get(n, 0))
+
+    if main_end['id'] not in visited_chain:
+        main_chain.append(main_end['id'])
+    main_chain_set = set(main_chain)
+
+    # 找侧链节点，确定各侧节点的最近主链祖先（用于对齐 Y）
+    parent_map = {}
+    for f in flows:
+        if f['target'] not in parent_map:
+            parent_map[f['target']] = f['source']
+
+    side_nodes = [n for n in nodes if n['id'] not in main_chain_set]
+    side_parent = {}
+    for sn in side_nodes:
+        pid = parent_map.get(sn['id'])
+        while pid and pid not in main_chain_set:
+            pid = parent_map.get(pid)
+        if pid:
+            side_parent[sn['id']] = pid
+
+    # 竖向布局主链
+    positions = {}
+    y = START_Y
+    for nid in main_chain:
+        node = node_map.get(nid)
+        if not node:
+            continue
+        size = _get_node_size(node)
+        x = CENTER_X - size['w'] / 2
+        positions[nid] = _make_pos(x, y, size['w'], size['h'], cx=CENTER_X)
+        y += size['h'] + VERTICAL_GAP
+
+    # 侧链节点 — cx=620，Y 与主链父节点中心对齐
+    extra_y = y
+    for sn in side_nodes:
+        snid = sn['id']
+        pid = side_parent.get(snid)
+        if pid and pid in positions:
+            parent_pos = positions[pid]
+            size = _get_node_size(sn)
+            sy = parent_pos['cy'] - size['h'] / 2
+            sx = SIDE_CX - size['w'] / 2
+            positions[snid] = _make_pos(sx, sy, size['w'], size['h'], cx=SIDE_CX)
+        else:
+            # 兜底：放在主链底部右侧
+            size = _get_node_size(sn)
+            positions[snid] = _make_pos(SIDE_CX - size['w'] / 2, extra_y,
+                                        size['w'], size['h'], cx=SIDE_CX)
+            extra_y += size['h'] + VERTICAL_GAP
+
+    return positions
+
+
+def gen_edge_xml_complex_vertical(flow, positions, node_map):
+    """生成「复杂竖向布局」的 BPMNEdge XML。
+
+    路由规则（cx 容差 ±30 判断归属）：
+    - 主→主（cx≈CENTER_X → cx≈CENTER_X）：垂直直连（src底部 → tgt顶部）
+    - 主→侧（cx≈CENTER_X → cx≈620）：水平线（src右边缘 → tgt左边缘，Y=src.cy）
+    - 侧→主（cx≈620 → cx≈CENTER_X）：L 形（src底部 → 转 tgt.cy → tgt右边缘）
+    - 其他：回退到 gen_edge_xml 默认逻辑
+    """
+    SIDE_CX = 620
+    TOL = 30
+
+    fid = flow['id']
+    src_pos = positions[flow['source']]
+    tgt_pos = positions[flow['target']]
+    src_cx = src_pos['cx']
+    tgt_cx = tgt_pos['cx']
+
+    is_src_main = abs(src_cx - CENTER_X) < TOL
+    is_tgt_main = abs(tgt_cx - CENTER_X) < TOL
+    is_src_side = abs(src_cx - SIDE_CX) < TOL
+    is_tgt_side = abs(tgt_cx - SIDE_CX) < TOL
+
+    lines = [f'      <bpmndi:BPMNEdge id="edge_{fid}" bpmnElement="{fid}">']
+    label_x = label_y = None
+
+    if is_src_main and is_tgt_main:
+        # 主→主：垂直直连
+        lines.append(f'        <di:waypoint x="{src_cx}" y="{src_pos["bottom"]}" />')
+        lines.append(f'        <di:waypoint x="{tgt_cx}" y="{tgt_pos["y"]}" />')
+    elif is_src_main and is_tgt_side:
+        # 主→侧：水平线
+        src_right = src_pos['x'] + src_pos['w']
+        tgt_left = tgt_pos['x']
+        lines.append(f'        <di:waypoint x="{src_right}" y="{src_pos["cy"]}" />')
+        lines.append(f'        <di:waypoint x="{tgt_left}" y="{src_pos["cy"]}" />')
+        if flow.get('name'):
+            label_x = (src_right + tgt_left) / 2
+            label_y = src_pos['cy'] - 17
+    elif is_src_side and is_tgt_main:
+        # 侧→主：L 形（src底 → 折转 → tgt右边缘）
+        tgt_right = tgt_pos['x'] + tgt_pos['w']
+        lines.append(f'        <di:waypoint x="{src_cx}" y="{src_pos["bottom"]}" />')
+        lines.append(f'        <di:waypoint x="{src_cx}" y="{tgt_pos["cy"]}" />')
+        lines.append(f'        <di:waypoint x="{tgt_right}" y="{tgt_pos["cy"]}" />')
+    else:
+        # 回退：标准逻辑
+        if abs(src_cx - tgt_cx) > 5 and tgt_pos['y'] >= src_pos['bottom']:
+            mid_y = src_pos['bottom'] + (tgt_pos['y'] - src_pos['bottom']) / 2
+            lines.append(f'        <di:waypoint x="{src_cx}" y="{src_pos["bottom"]}" />')
+            lines.append(f'        <di:waypoint x="{src_cx}" y="{mid_y}" />')
+            lines.append(f'        <di:waypoint x="{tgt_cx}" y="{mid_y}" />')
+            lines.append(f'        <di:waypoint x="{tgt_cx}" y="{tgt_pos["y"]}" />')
+        else:
+            lines.append(f'        <di:waypoint x="{src_cx}" y="{src_pos["bottom"]}" />')
+            lines.append(f'        <di:waypoint x="{tgt_cx}" y="{tgt_pos["y"]}" />')
+
+    if flow.get('name') and label_x is not None:
+        lines.append(
+            f'      <bpmndi:BPMNLabel>'
+            f'<dc:Bounds x="{label_x}" y="{label_y}" width="44" height="14" />'
+            f'</bpmndi:BPMNLabel>'
+        )
+
+    lines.append(f'      </bpmndi:BPMNEdge>')
+    return '\n'.join(lines)
+
+
+# ====== 水平多行布局（手工分支 + 并行/排他网关）======
+
+def _find_hmr_merge_depth(split_nid, outs, adj_out, adj_in, depth):
+    """找到分叉节点最近的合并点深度（BFS 找入度≥2的节点）。"""
+    from collections import deque
+    split_d = depth.get(split_nid, 0)
+    q = deque(outs)
+    visited = set()
+    while q:
+        nid = q.popleft()
+        if nid in visited:
+            continue
+        visited.add(nid)
+        nd = depth.get(nid, 0)
+        if nd > split_d and len(adj_in.get(nid, [])) >= 2:
+            return nd
+        for nxt in adj_out.get(nid, []):
+            if nxt not in visited:
+                q.append(nxt)
+    return 9999
+
+
+def _hmr_propagate(start_nid, row_val, stop_depth, row_map, adj_out, adj_in, depth, node_map):
+    """从 start_nid 出发向后传播行标记，遇到 stop_depth 或 merge 点停止。"""
+    from collections import deque
+    q = deque([start_nid])
+    visited = set()
+    while q:
+        nid = q.popleft()
+        if nid in visited:
+            continue
+        visited.add(nid)
+        nd = depth.get(nid, 0)
+        if nd >= stop_depth and nid != start_nid:
+            continue
+        in_count = len(adj_in.get(nid, []))
+        if in_count > 1 and nid != start_nid:
+            continue  # 合并点，停止传播
+        if row_map.get(nid, 0) == 0:  # 仅覆盖 MAIN 节点
+            row_map[nid] = row_val
+        for nxt in adj_out.get(nid, []):
+            q.append(nxt)
+
+
+def _detect_horizontal_multirow(config):
+    """检测是否需要「水平多行布局」：手工分支 + 含并行或排他网关。"""
+    if '_manualBranch' not in config:
+        return False
+    nodes = config['nodes']
+    return any(n['type'] in ('parallelGateway', 'exclusiveGateway') for n in nodes)
+
+
+def calc_layout_horizontal_multirow(config):
+    """水平多行布局：主链居中(cy=300)，上偏置行(cy=120)，下偏置行(cy=480)。
+
+    适用场景：手工分支 + 并行网关 或 手工分支 + 排他网关（含任意结束事件数量）。
+
+    布局规则：
+    - 排他网关（分叉）：最短出线分支（绕过分支）→ UPPER 行
+    - 并行网关（分叉）：两条出线分别 → UPPER 行和 LOWER 行
+    - 手工分支源节点：非结束出线节点 → UPPER 行
+    - 其余节点：MAIN 行（cy=300）
+    """
+    MAIN_CY  = 330
+    UPPER_CY = 120
+    LOWER_CY = 540
+    W_GAP    = 60   # 相邻节点间水平间距
+
+    nodes = config['nodes']
+    flows = config['flows']
+    nm = {n['id']: n for n in nodes}
+
+    adj_out = {}
+    adj_in  = {}
+    for f in flows:
+        adj_out.setdefault(f['source'], []).append(f['target'])
+        adj_in.setdefault(f['target'], []).append(f['source'])
+
+    depth = _bfs_depths(nodes, flows)
+
+    # ---- 1. 分配行标记 (1=UPPER, 0=MAIN, -1=LOWER) ----
+    row_map = {n['id']: 0 for n in nodes}
+    mb_src_id = config.get('_manualBranch', {}).get('sourceId', '')
+
+    for n in sorted(nodes, key=lambda x: depth.get(x['id'], 0)):
+        nid   = n['id']
+        ntype = n['type']
+        outs  = adj_out.get(nid, [])
+        if len(outs) < 2:
+            continue
+
+        base        = row_map.get(nid, 0)
+        sorted_outs = sorted(outs, key=lambda t: depth.get(t, 0))
+
+        if ntype == 'parallelGateway':
+            # 分叉并行网关：两支分别上移/下移一行（无论是否同时也是汇合点）
+            merge_d = _find_hmr_merge_depth(nid, outs, adj_out, adj_in, depth)
+            _hmr_propagate(sorted_outs[0],  base + 1, merge_d, row_map, adj_out, adj_in, depth, nm)
+            _hmr_propagate(sorted_outs[-1], base - 1, merge_d, row_map, adj_out, adj_in, depth, nm)
+
+        elif ntype == 'exclusiveGateway' and len(adj_in.get(nid, [])) <= 1:
+            # 条件网关（分叉，非汇合）：最短出线分支（绕过节点）上移一行
+            merge_d = depth.get(sorted_outs[-1], 9999)
+            _hmr_propagate(sorted_outs[0], base + 1, merge_d, row_map, adj_out, adj_in, depth, nm)
+
+        elif nid == mb_src_id:
+            # 手工分支源：非结束出线节点上移一行
+            non_end = [t for t in outs if nm.get(t, {}).get('type') != 'endEvent']
+            for t in non_end:
+                _hmr_propagate(t, base + 1, 9999, row_map, adj_out, adj_in, depth, nm)
+
+    # ---- 2. 计算列坐标（按 BFS 深度分桶，同深度节点共享同一列中心 X）----
+    depth_groups: dict = {}
+    for n in nodes:
+        d = depth.get(n['id'], 0)
+        depth_groups.setdefault(d, []).append(n['id'])
+
+    max_d = max(depth_groups.keys()) if depth_groups else 0
+
+    col_cx: dict = {}
+    x_cur = 68  # startEvent 左边缘起始
+    for d in range(max_d + 1):
+        if d not in depth_groups:
+            continue
+        col_w = max(_get_node_size(nm[nid])['w'] for nid in depth_groups[d])
+        col_cx[d] = x_cur + col_w / 2
+        x_cur += col_w + W_GAP
+
+    # ---- 3. 放置坐标 ----
+    ROW_CY = {1: UPPER_CY, 0: MAIN_CY, -1: LOWER_CY}
+    positions: dict = {}
+
+    for n in nodes:
+        nid  = n['id']
+        d    = depth.get(nid, 0)
+        r    = row_map.get(nid, 0)
+        cy   = ROW_CY.get(r, MAIN_CY)
+        cx   = col_cx.get(d, 68 + d * 120)
+        size = _get_node_size(n)
+        w, h = size['w'], size['h']
+        positions[nid] = _make_pos(cx - w / 2, cy - h / 2, w, h, cx=cx)
+
+    return positions
+
+
+def gen_edge_xml_horizontal_multirow(flow, positions, config):
+    """水平多行布局的连线 XML：同行水平直连，跨行 L 形路由（右出→折→左进）。"""
+    fid     = flow['id']
+    src_pos = positions.get(flow['source'])
+    tgt_pos = positions.get(flow['target'])
+    if not src_pos or not tgt_pos:
+        return gen_edge_xml(flow, positions)
+
+    src_right = src_pos['x'] + src_pos['w']
+    tgt_left  = tgt_pos['x']
+    src_cy    = src_pos['cy']
+    tgt_cy    = tgt_pos['cy']
+
+    same_row  = abs(src_cy - tgt_cy) < 5
+    has_label = bool(flow.get('name'))
+    label_x = label_y = None
+
+    lines = [f'      <bpmndi:BPMNEdge id="edge_{fid}" bpmnElement="{fid}">']
+
+    if same_row:
+        lines.append(f'        <di:waypoint x="{int(src_right)}" y="{int(src_cy)}" />')
+        lines.append(f'        <di:waypoint x="{int(tgt_left)}" y="{int(tgt_cy)}" />')
+        if has_label:
+            label_x = (src_right + tgt_left) / 2
+            label_y = src_cy - 17
+    else:
+        # 跨行路由：根据源/目标是否为网关、水平间距，选择正交路由策略
+        is_src_gw = (src_pos.get('w', 100) == 50)   # parallelGateway/exclusiveGateway w=50
+        is_tgt_gw = (tgt_pos.get('w', 100) == 50)
+        going_up  = tgt_cy < src_cy
+        horiz_gap = tgt_left - src_right
+
+        def _wp(x, y):
+            return f'        <di:waypoint x="{int(x)}" y="{int(y)}" />'
+
+        if is_src_gw and going_up:
+            # 网关向上出：从网关顶部出 → 横走到目标 cy → 进入目标左侧
+            lines += [_wp(src_pos['cx'], src_pos['y']), _wp(src_pos['cx'], tgt_cy), _wp(tgt_left, tgt_cy)]
+            if has_label:
+                label_x = (src_pos['cx'] + tgt_left) / 2
+                label_y = tgt_cy - 17
+        elif is_src_gw and not going_up:
+            # 网关向下出：从网关底部出 → 横走到目标 cy → 进入目标左侧
+            lines += [_wp(src_pos['cx'], src_pos['bottom']), _wp(src_pos['cx'], tgt_cy), _wp(tgt_left, tgt_cy)]
+            if has_label:
+                label_x = (src_pos['cx'] + tgt_left) / 2
+                label_y = tgt_cy + 5
+        elif is_tgt_gw and going_up:
+            # 目标是网关（在上方）：从源右侧出 → 横到目标 cx → 进入目标底部
+            lines += [_wp(src_right, src_cy), _wp(tgt_pos['cx'], src_cy), _wp(tgt_pos['cx'], tgt_pos['bottom'])]
+            if has_label:
+                label_x = (src_right + tgt_pos['cx']) / 2
+                label_y = src_cy - 17
+        elif is_tgt_gw and not going_up:
+            # 目标是网关（在下方）：从源右侧出 → 横到目标 cx → 进入目标顶部
+            lines += [_wp(src_right, src_cy), _wp(tgt_pos['cx'], src_cy), _wp(tgt_pos['cx'], tgt_pos['y'])]
+            if has_label:
+                label_x = (src_right + tgt_pos['cx']) / 2
+                label_y = src_cy - 17
+        elif horiz_gap >= 30:
+            # 水平间距足够：标准 Z 形路由（中点折返）
+            mid_x = (src_right + tgt_left) / 2
+            lines += [_wp(src_right, src_cy), _wp(mid_x, src_cy), _wp(mid_x, tgt_cy), _wp(tgt_left, tgt_cy)]
+            if has_label:
+                label_x = mid_x
+                label_y = (src_cy + tgt_cy) / 2 - 7
+        else:
+            # 水平间距过小（<30px）：绕到目标右侧后折入，避免窄 Z 形斜线
+            turn_x  = max(tgt_pos['cx'], src_right + 40)
+            entry_y = tgt_pos['y'] if not going_up else tgt_pos['bottom']
+            lines += [_wp(src_right, src_cy), _wp(turn_x, src_cy), _wp(turn_x, entry_y)]
+            if has_label:
+                label_x = turn_x
+                label_y = (src_cy + entry_y) / 2 - 7
+
+    if has_label and label_x is not None:
+        lines.append(
+            f'      <bpmndi:BPMNLabel>'
+            f'<dc:Bounds x="{int(label_x)}" y="{int(label_y)}" width="44" height="14" />'
+            f'</bpmndi:BPMNLabel>'
+        )
+
+    lines.append(f'      </bpmndi:BPMNEdge>')
+    return '\n'.join(lines)
+
+
 # ====== 主构建逻辑 ======
 
 def build_bpmn_xml(config):
@@ -1647,10 +2253,43 @@ def build_bpmn_xml(config):
     # 过滤掉不支持的节点，避免 layout/shape 时 KeyError
     supported_nodes = [n for n in nodes if n['id'] not in _unsupported_ids]
 
-    # 计算布局（手工分支使用水平布局，其他使用垂直布局）
+    # 计算布局
+    # - 手工分支 + 并行/排他网关 → 水平多行布局（主链居中，分支上/下偏置行）
+    # - 手工分支 + 排他网关/调用子流程 + 多结束事件 → 复杂竖向布局（主链 + 右侧偏置侧支）
+    # - 普通手工分支 → 水平布局
+    # - 其他 → 标准垂直布局
     is_manual_branch = '_manualBranch' in config
-    if is_manual_branch:
+    is_horizontal_multirow = is_manual_branch and _detect_horizontal_multirow(config)
+    is_complex_vertical = (is_manual_branch and not is_horizontal_multirow
+                           and _detect_complex_vertical(config))
+
+    def _fill_missing(positions, supported_nodes, flows):
+        """补充布局未定位的节点（兜底）。"""
+        missing = [n for n in supported_nodes if n['id'] not in positions]
+        if missing:
+            max_bottom = max((pos['bottom'] for pos in positions.values()), default=START_Y)
+            extra_pos = calc_layout(missing, flows)
+            offset_y = max_bottom + VERTICAL_GAP - START_Y
+            for nid, pos in extra_pos.items():
+                positions[nid] = {
+                    'x': pos['x'],
+                    'y': pos['y'] + offset_y,
+                    'w': pos['w'],
+                    'h': pos['h'],
+                    'cx': pos['cx'],
+                    'cy': pos['cy'] + offset_y,
+                    'bottom': pos['bottom'] + offset_y,
+                }
+
+    if is_horizontal_multirow:
+        positions = calc_layout_horizontal_multirow(config)
+        _fill_missing(positions, supported_nodes, flows)
+    elif is_complex_vertical:
+        positions = calc_layout_complex_vertical(config)
+        _fill_missing(positions, supported_nodes, flows)
+    elif is_manual_branch:
         positions = calc_layout_manual_branch(config)
+        _fill_missing(positions, supported_nodes, flows)
     else:
         positions = calc_layout(supported_nodes, flows)
 
@@ -1660,10 +2299,15 @@ def build_bpmn_xml(config):
         shape_xmls.append(gen_shape_xml(node, positions[node['id']]))
 
     edge_xmls = []
+    _node_map_for_edge = {n['id']: n for n in nodes}
     for flow in flows:
         if flow['source'] in _unsupported_ids or flow['target'] in _unsupported_ids:
             continue
-        if is_manual_branch:
+        if is_horizontal_multirow:
+            edge_xmls.append(gen_edge_xml_horizontal_multirow(flow, positions, config))
+        elif is_complex_vertical:
+            edge_xmls.append(gen_edge_xml_complex_vertical(flow, positions, _node_map_for_edge))
+        elif is_manual_branch:
             edge_xmls.append(gen_edge_xml_manual_branch(flow, positions, config))
         else:
             edge_xmls.append(gen_edge_xml(flow, positions))
@@ -1723,12 +2367,25 @@ def build_bpmn_xml(config):
         if timer_target and timer_target in positions:
             tgt_pos = positions[timer_target]
             timer_flow_id = timer.get('timerFlowId') or f'flow_{event_id}'
-            ex = task_pos['x'] + task_pos['w'] / 2 + 12 + 18  # 边界事件右边缘
+            ex = task_pos['x'] + task_pos['w'] / 2 + 12 + 18  # 边界事件中心 x
             ey = task_pos['y'] + task_pos['h'] - 18 + 18       # 边界事件中心 y
+            # 正交路由：避免对角线穿越节点
+            route_y = (ey + tgt_pos['y']) / 2
+            if abs(ey - tgt_pos['cy']) < 20:
+                # 同高度：直连
+                wps = [(ex, ey), (tgt_pos['cx'], tgt_pos['cy'])]
+            elif ey < tgt_pos['cy']:
+                # 定时器在目标上方：右出 → 下折到 route_y → 横到目标 cx → 进入目标顶部
+                wps = [(ex, ey), (ex, route_y), (tgt_pos['cx'], route_y), (tgt_pos['cx'], tgt_pos['y'])]
+            else:
+                # 定时器在目标下方：绕到所有节点上方路由，避免穿越
+                y_above = min(pos['y'] for pos in positions.values()) - 40
+                x_far   = max(tgt_pos['x'] + tgt_pos['w'], ex) + 40
+                wps = [(ex, ey), (x_far, ey), (x_far, y_above), (tgt_pos['cx'], y_above), (tgt_pos['cx'], tgt_pos['y'])]
+            wp_xml = '\n'.join(f'        <di:waypoint x="{int(x)}" y="{int(y)}" />' for x, y in wps)
             boundary_edge_xmls.append(
                 f'      <bpmndi:BPMNEdge id="edge_{timer_flow_id}" bpmnElement="{timer_flow_id}">\n'
-                f'        <di:waypoint x="{ex}" y="{ey}" />\n'
-                f'        <di:waypoint x="{tgt_pos["cx"]}" y="{tgt_pos["y"]}" />\n'
+                f'{wp_xml}\n'
                 f'      </bpmndi:BPMNEdge>'
             )
 
@@ -1833,8 +2490,26 @@ def build_nodes_str(nodes, is_sub_process=False, is_countersign_sub=False):
     return ''.join(parts)
 
 
-def config_start_node_form(api_base, token, process_id, start_form):
-    """配置子流程 start 节点的 PC 表单地址（必须在发布之前调用）。
+def _build_form_url_pair(form_type, form_code, mode):
+    """根据表单类型、编码、模式生成 PC 端和移动端 URL 对。
+
+    Returns:
+        (pc_url, mobile_url)
+    """
+    if form_type == 'desform':
+        pc_url = '{{DOMAIN_URL}}/desform/%s/%s/${BPM_DES_DATA_ID}?token={{TOKEN}}&taskId={{TASKID}}&skip=false' % (mode, form_code)
+        mobile_url = '{{DOMAIN_URL}}/desform/%s/%s/${BPM_DES_DATA_ID}?token={{TOKEN}}&taskId={{TASKID}}' % (mode, form_code)
+    elif form_type == 'online':
+        pc_url = 'super/bpm/process/components/OnlineFormOpt' if mode == 'edit' else 'super/bpm/process/components/OnlineFormDetail'
+        mobile_url = 'check/onlineForm/flowedit'
+    else:
+        pc_url = ''
+        mobile_url = ''
+    return pc_url, mobile_url
+
+
+def config_start_node_form(api_base, token, process_id, start_form, node_code=None):
+    """配置子流程 start 节点的 PC 和移动端表单地址（必须在发布之前调用）。
 
     start_form 格式:
     {
@@ -1842,19 +2517,23 @@ def config_start_node_form(api_base, token, process_id, start_form):
         "formCode": "form_code",     # DesForm 编码（formType=desform 时必填）
         "mode": "detail"             # detail=查看（默认） / edit=编辑
     }
+
+    node_code: 指定要配置的节点 processNodeCode（默认 'start'）。
+               子流程若 start 节点 id 非 'start'（如 'bg_start'），需传入实际 id。
+               ⚠️ 踩坑：bpmn_creator.py 生成的 BPMN 中 startEvent id 即为 processNodeCode，
+               自定义 id（如 bg_start）会导致此函数默认找不到节点。
     """
     form_type = start_form.get('formType', 'desform')
     form_code = start_form.get('formCode', '')
     mode = start_form.get('mode', 'detail')
 
-    if form_type == 'desform':
-        url = '{{DOMAIN_URL}}/desform/' + mode + '/' + form_code + '/${BPM_DES_DATA_ID}?token={{TOKEN}}&taskId={{TASKID}}&skip=false'
-    elif form_type == 'online':
-        url = 'super/bpm/process/components/OnlineFormOpt' if mode == 'edit' else 'super/bpm/process/components/OnlineFormDetail'
-    else:
+    url, mobile_url = _build_form_url_pair(form_type, form_code, mode)
+    if not url:
         url = start_form.get('url', '')
+    if not mobile_url:
+        mobile_url = start_form.get('urlMobile', '')
 
-    # 通过 API 查询 start 节点并更新
+    # 通过 API 查询所有节点并找到目标节点
     result = api_request(api_base, token,
                          f'/act/process/extActProcessNode/list?processId={process_id}&pageNo=1&pageSize=50',
                          method='GET')
@@ -1862,25 +2541,42 @@ def config_start_node_form(api_base, token, process_id, start_form):
     if isinstance(records, dict):
         records = records.get('records', [])
 
-    start_node = None
-    for n in records:
-        if n.get('processNodeCode') == 'start':
-            start_node = n
-            break
+    # 查找目标节点：优先用指定 code，其次找第一个 startEvent 类节点（code='start' 或含 'start'）
+    target_node = None
+    if node_code:
+        for n in records:
+            if n.get('processNodeCode') == node_code:
+                target_node = n
+                break
+    else:
+        # 先尝试精确匹配 'start'
+        for n in records:
+            if n.get('processNodeCode') == 'start':
+                target_node = n
+                break
+        # 再尝试匹配任何含 'start' 的节点（如 bg_start）
+        if not target_node:
+            for n in records:
+                if 'start' in (n.get('processNodeCode') or '').lower():
+                    target_node = n
+                    break
 
-    if not start_node:
+    if not target_node:
         print(f'  [警告] 未找到 start 节点记录，跳过表单地址配置')
+        print(f'  现有节点: {[n.get("processNodeCode") for n in records]}')
         return False
 
-    start_node['modelAndView'] = url
+    found_code = target_node.get('processNodeCode', '')
+    target_node['modelAndView'] = url
+    target_node['modelAndViewMobile'] = mobile_url
     update_result = api_request(api_base, token,
                                 '/act/process/extActProcessNode/edit',
-                                data=start_node, method='PUT')
+                                data=target_node, method='PUT')
     if update_result.get('success'):
-        print(f'  start 节点表单地址配置成功: {url}')
+        print(f'  [{found_code}] 表单地址配置成功: {url}')
         return True
     else:
-        print(f'  [警告] start 节点配置失败: {update_result.get("message", "")}，尝试通过数据库配置...')
+        print(f'  [警告] [{found_code}] 配置失败: {update_result.get("message", "")}')
         return False
 
 
@@ -2412,7 +3108,15 @@ def expand_config(config):
                 break  # 只支持一个手工分支源
 
     # 自动检测需要绕行的流（从网关出发但不连接到紧邻的下一个节点）
+    # 先检测哪些排他网关有 3+ 条出线（这些会用水平展开布局，不需要绕行）
     if '_manualBranch' not in config:
+        _excl_gw_outcount = {}
+        for f in config['flows']:
+            src = f['source']
+            if src in node_map and node_map[src]['type'] == 'exclusiveGateway':
+                _excl_gw_outcount[src] = _excl_gw_outcount.get(src, 0) + 1
+        _excl_spread_gws = {gid for gid, cnt in _excl_gw_outcount.items() if cnt >= 3}
+
         node_ids = [n['id'] for n in config['nodes']]
         for flow in config['flows']:
             if 'bypass' not in flow:
@@ -2420,7 +3124,10 @@ def expand_config(config):
                 tgt_idx = node_ids.index(flow['target']) if flow['target'] in node_ids else -1
                 src_node = config['nodes'][src_idx] if src_idx >= 0 else None
                 # 仅排他网关需要"绕行"布局；并行/包容网关由水平分支布局 + L 形连线自动处理
+                # 排他网关 3+ 出线时用水平展开布局，也不需要绕行
                 if src_node and src_node['type'] == 'exclusiveGateway':
+                    if flow['source'] in _excl_spread_gws:
+                        continue  # 3+ 分支用水平展开，跳过绕行标记
                     if tgt_idx >= 0 and tgt_idx != src_idx + 1:
                         flow['bypass'] = True
 
@@ -2463,18 +3170,21 @@ def main():
         sys.exit(1)
 
     process_id = result.get('obj') or config.get('processId', '')
-    # obj=null 说明是更新操作，按 processKey 查询真实 ID
+    # obj=null 说明是更新操作（key 已存在），按 processKey 精确查询真实 ID
     if not process_id:
         process_key = config['processKey']
         try:
             import urllib.parse as _up
-            q = _up.urlencode({'pageNo': 1, 'pageSize': 5})
+            q = _up.urlencode({'pageNo': 1, 'pageSize': 20})
             qr = api_request(args.api_base, args.token,
                              f'/act/process/extActProcess/list?{q}', method='GET')
             for rec in (qr.get('result') or {}).get('records', []):
-                if rec.get('processName') == config['processName']:
+                if rec.get('processKey') == process_key:
                     process_id = rec.get('id', '')
+                    print(f'  [fallback] obj=null，按 processKey 查得 ID: {process_id}')
                     break
+            if not process_id:
+                print(f'  [警告] 按 processKey={process_key} 未找到流程ID')
         except Exception as _e:
             print(f'  [警告] 查询流程ID失败: {_e}')
 
@@ -2486,8 +3196,17 @@ def main():
     print(f'  流程Key:  {config["processKey"]}')
 
     # 子流程：配置 start 节点表单地址（必须在发布之前）
+    # 优先使用显式指定的 startNodeForm；若未指定，则从 draftNodeForm 自动推导（detail 模式）
     start_form = config.get('startNodeForm')
-    if start_form and config.get('isSubProcess') and process_id:
+    if not start_form and config.get('isSubProcess') and config.get('draftNodeForm'):
+        _dnf = config['draftNodeForm']
+        start_form = {
+            'formType': _dnf.get('formType', 'desform'),
+            'formCode': _dnf.get('formCode', ''),
+            'mode': 'detail',  # start 节点默认只读查看模式
+        }
+        print(f'\n[自动推导] 未指定 startNodeForm，从 draftNodeForm 推导 start 节点表单（detail 模式）')
+    if start_form and (config.get('isSubProcess') or config.get('isCountersignSubProcess')) and process_id:
         print(f'\n正在配置 start 节点表单地址（发布前）...')
         config_start_node_form(args.api_base, args.token, process_id, start_form)
 
@@ -2510,12 +3229,9 @@ def main():
             _dnf_type = draft_node_form.get('formType', 'desform')
             _dnf_code = draft_node_form.get('formCode', '')
             _dnf_mode = draft_node_form.get('mode', 'edit')
-            if _dnf_type == 'desform':
-                _dnf_url = '{{DOMAIN_URL}}/desform/%s/%s/${BPM_DES_DATA_ID}?token={{TOKEN}}&taskId={{TASKID}}&skip=false' % (_dnf_mode, _dnf_code)
-                form_url_config = {'modelAndView': _dnf_url, 'modelAndViewMobile': 'check/desForm/flowedit'}
-            elif _dnf_type == 'online':
-                _dnf_url = 'super/bpm/process/components/OnlineFormOpt' if _dnf_mode == 'edit' else 'super/bpm/process/components/OnlineFormDetail'
-                form_url_config = {'modelAndView': _dnf_url, 'modelAndViewMobile': 'check/onlineForm/flowedit'}
+            _pc_url, _mobile_url = _build_form_url_pair(_dnf_type, _dnf_code, _dnf_mode)
+            if _pc_url:
+                form_url_config = {'modelAndView': _pc_url, 'modelAndViewMobile': _mobile_url}
         if form_config:
             form_type = str(form_config.get('formType', ''))
             if form_type == '1':
@@ -2527,9 +3243,10 @@ def main():
             elif form_type == '2':
                 # DesForm 设计器表单
                 form_code = form_config.get('formTableName', '') or form_config.get('relationCode', '')
+                _pc_url, _mobile_url = _build_form_url_pair('desform', form_code, 'edit')
                 form_url_config = {
-                    'modelAndView': '{{DOMAIN_URL}}/desform/edit/%s/${BPM_DES_DATA_ID}?token={{TOKEN}}&taskId={{TASKID}}&skip=false' % form_code,
-                    'modelAndViewMobile': 'check/desForm/flowedit',
+                    'modelAndView': _pc_url,
+                    'modelAndViewMobile': _mobile_url,
                 }
             elif form_type == '3':
                 # 自定义开发表单 — 从 formLink.formUrl 或自动推导
@@ -2561,9 +3278,11 @@ def main():
             print(f'\n已设置节点表单可编辑: {", ".join(updated_nodes)}')
             if form_addr:
                 print(f'  表单地址: {form_addr}')
-            # 草稿节点配置在发布后修改，必须重新发布才能生效
+            # 草稿节点 formEditStatus=1 需要重新发布才能激活。
+            # ⚠️ 重要：字段权限（saveOrUpdateBatch）必须在此次 redeploy 之后再配置，
+            # 否则 deploy 会清空权限记录。（已实测：saveOrUpdateBatch→deploy 顺序会丢失权限）
             if not args.no_deploy:
-                print(f'\n草稿节点配置已更新，重新发布流程...')
+                print(f'\n草稿节点配置已更新，重新发布流程以激活 formEditStatus...')
                 redeploy_result = deploy_process(args.api_base, args.token, process_id)
                 if redeploy_result.get('success'):
                     print(f'  流程重新发布成功')

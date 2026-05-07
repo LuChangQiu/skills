@@ -30,6 +30,7 @@ from jimureport_chart import (
 from jimureport_link import create_link, parallel_create_links
 from jimureport_datasource import (
     resolve_db_source, find_datasource, ensure_datasource, get_ds_connection, query_mysql,
+    execute_ds,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "update_chart_config", "parallel_fill_charts",
     "create_link", "parallel_create_links",
     "resolve_db_source", "find_datasource", "ensure_datasource", "get_ds_connection", "query_mysql",
+    "execute_ds",
 ]

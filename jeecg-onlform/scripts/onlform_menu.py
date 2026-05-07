@@ -11,11 +11,17 @@ config.json 格式:
   "action": "mount",
   "tableName": "test_order_main",
   "menuName": "测试订单主表",
-  "parentId": "",
+  "parentId": "xxx",
+  "menuType": 1,
   "sortNo": 1,
   "keepAlive": false,
   "roleCode": "admin"
 }
+
+menuType 说明（可不填，脚本自动推导）:
+  - 0: 一级菜单（顶级，无 parentId）
+  - 1: 子菜单（有 parentId，默认）
+  - 2: 按钮权限（有 parentId，会额外传 status 字段）
 
 2. 开启已有菜单的缓存路由:
 {
@@ -187,14 +193,16 @@ def grant_menu_to_role(api_base: str, token: str, role_id: str, menu_id: str) ->
     resp = api_request(api_base, token,
                        f'/sys/permission/queryRolePermission?roleId={role_id}',
                        method='GET')
-    perm_ids: List[str] = resp.get('result', []) or []
+    raw_ids: List[str] = resp.get('result', []) or []
+    perm_ids: List[str] = list(dict.fromkeys(raw_ids))  # 去重并保留顺序
     if menu_id in perm_ids:
         return {'success': True, 'message': '菜单已授权，无需重复操作'}
+    last_perm_ids = list(perm_ids)  # 授权前的权限集，作为 lastpermissionIds 传给后端
     perm_ids.append(menu_id)
     return api_request(api_base, token, '/sys/permission/saveRolePermission', {
         'roleId': role_id,
         'permissionIds': ','.join(perm_ids),
-        'lastpermissionIds': ''
+        'lastpermissionIds': ','.join(last_perm_ids)
     })
 
 
@@ -202,10 +210,11 @@ def grant_menu_to_role(api_base: str, token: str, role_id: str, menu_id: str) ->
 
 def mount_to_menu(api_base: str, token: str, config: dict) -> dict:
     """将 Online 表单挂载到系统菜单"""
+    import time as _t
     table_name = config['tableName']
     keep_alive = config.get('keepAlive', False)
     parent_id = config.get('parentId', '')
-    sort_no = config.get('sortNo', 1)
+    sort_no = config['sortNo'] if 'sortNo' in config else (int(_t.time()) - 1777530600) % 999999
     role_code = config.get('roleCode', '')
 
     # Step 1: 查询表单信息
@@ -229,20 +238,26 @@ def mount_to_menu(api_base: str, token: str, config: dict) -> dict:
         menu_id = existing['id']
     else:
         # Step 2: 创建菜单
+        # menuType: 有 parentId 默认为 1(子菜单)，否则为 0(一级菜单)；config 可显式指定（如 2=按钮权限）
+        menu_type = config.get('menuType', 1 if parent_id else 0)
         menu_data = {
             'name': menu_name,
             'url': preview_url,
             'component': '1',
             'componentName': component_name,
             'keepAlive': keep_alive,
-            'menuType': 0,
+            'menuType': menu_type,
             'sortNo': sort_no,
-            'status': '1',
             'route': False,
+            'hidden': 0,
+            'hideTab': 0,
+            'alwaysShow': False,
             'internalOrExternal': False,
         }
         if parent_id:
             menu_data['parentId'] = parent_id
+        if menu_type == 2:
+            menu_data['status'] = '1'
 
         resp = create_menu(api_base, token, menu_data)
         if not resp.get('success'):
@@ -347,9 +362,10 @@ def enable_cache_for_menu(api_base: str, token: str, config: dict) -> dict:
     component_name = URL_KEY_TO_COMPONENT[url_key]
 
     # 更新业务菜单
+    existing_menu_type = target.get('menuType', 0)
     edit_data = {
         'id': target['id'],
-        'menuType': target.get('menuType', 0),
+        'menuType': existing_menu_type,
         'name': target['name'],
         'url': target['url'],
         'component': target.get('component', '1'),
@@ -357,15 +373,16 @@ def enable_cache_for_menu(api_base: str, token: str, config: dict) -> dict:
         'icon': target.get('icon'),
         'sortNo': target.get('sortNo', 1),
         'route': target.get('route', False),
-        'hidden': target.get('hidden', False),
-        'hideTab': target.get('hideTab', False),
+        'hidden': target.get('hidden', 0),
+        'hideTab': target.get('hideTab', 0),
         'keepAlive': True,
         'alwaysShow': target.get('alwaysShow', False),
         'internalOrExternal': target.get('internalOrExternal', False),
-        'status': target.get('status', '1'),
     }
     if target.get('parentId'):
         edit_data['parentId'] = target['parentId']
+    if existing_menu_type == 2:
+        edit_data['status'] = target.get('status', '1')
 
     resp = edit_menu(api_base, token, edit_data)
     if not resp.get('success'):

@@ -19,21 +19,99 @@ SELECT ... FROM t WHERE 1=1
 - `${param}` — 用户查询参数；`#{sysUserCode}` — 系统变量，两者不可混用
 - 解析字段时用不含 FreeMarker 的纯 SQL（`LIMIT 1`），避免解析失败
 
-### paramList 字段值对照（按控件类型速查）
+## 报表字段（fieldList）vs 报表参数（paramList）权威规范
 
-| 控件 | widgetType | searchMode | searchFormat | dictCode |
-|------|-----------|-----------|--------------|---------|
-| 文本输入框 | `"String"` | `1` | `""` | 空 |
-| 模糊查询输入框 | `"String"` | `5` | `""` | 空 |
-| 日期选择 | `"date"` | `1` | `"yyyy-MM-dd"` | 空 |
-| 日期时间 | `"date"` | `1` | `"yyyy-MM-dd HH:mm:ss"` | 空 |
-| 年月 | `"date"` | `1` | `"yyyy-MM"` | 空 |
-| 日期范围 | `"date"` | `2` | `"yyyy-MM-dd"` | 空 |
-| **下拉单选** | `"String"` | **`4`** | `""` | 字典编码/SQL/API |
-| **下拉多选** | `"String"` | **`3`** | `""` | 字典编码/SQL/API |
+> 依据：积木报表前端源码 `data_source_setting.ftl` Tab1（字段明细 fieldList）、Tab2（报表参数 paramList）下拉枚举与列定义。两者在 UI 层就是不同的表单，可选值不相同，**别用同一套规则套**。
 
-> **注意：参数不支持范围查询和模糊查询。**
-> 日期范围须拆成两个独立参数（`_begin` / `_end`）；模糊匹配在 SQL 中手写 `LIKE '%${x}%'`。
+### 1. 字段名差异
+
+| | fieldList（字段明细） | paramList（报表参数） |
+|---|---|---|
+| 标识列 | `fieldName` / `fieldText` | `paramName` / `paramTxt` |
+| 默认值列 | `searchValue` | `paramValue` |
+| 与 SQL 关系 | 字段直接对应 SQL 查询出的列 | 自由变量，SQL 里通过 `${paramName}` 引用，**完全由 SQL 控制匹配逻辑** |
+
+### 2. `widgetType` 下拉枚举（源码硬编码）
+
+| widgetType | fieldList | paramList |
+|---|---|---|
+| `"number"` 数值 | ✅ | ✅ |
+| `"string"` 字符（**注意是小写**） | ✅ | ✅ |
+| `"date"` 日期 | ✅ | ✅ |
+| `"richText"` 富文本 | ✅ | ❌ |
+
+> 源码用的都是小写值；老文档里的 `"String"` 大写是 Java 实体序列化后的形式，**新建时统一用小写**避免歧义。
+
+### 3. `searchMode` 下拉枚举（源码硬编码——这是踩坑根源）
+
+| searchMode | 含义 | fieldList | paramList |
+|---|---|---|---|
+| `1` 输入框 | 普通文本输入 | ✅ | ✅ |
+| `4` 下拉单选 | 须配 dictCode（字典/SQL/API） | ✅ | ✅ |
+| `3` 下拉多选 | 须配 dictCode | ✅ | ✅ |
+| `6` 下拉树 | 须在 code/编码栏配接口地址 | ✅ | ✅ |
+| `7` 自定义下拉框 | JS 增强 | ✅ | ✅ |
+| **`2` 范围查询** | 引擎自动拆 `_begin`/`_end` | ✅ | **❌ UI 没这个选项** |
+| **`5` 模糊查询** | 引擎自动包 `%` 通配符 | ✅ | **❌ UI 没这个选项** |
+
+> ⚠️ **关键差异**：paramList 的 searchMode 下拉**根本没有 2 和 5**——通过 API 强写进去虽然能存，但前端不会渲染对应控件，引擎也不一定按预期处理（实测 `searchMode=2` 会把空值字面量塞进 SQL 触发 `Incorrect DATE value`）。
+
+### 4. 范围 / 模糊查询的正确做法
+
+#### 4.1 用 fieldList（引擎接管，零 SQL）
+
+```python
+field_list = [
+    {"fieldName": "name",        "fieldText": "姓名",   "widgetType": "string", "orderNum": 1,
+     "searchFlag": 1, "searchMode": 5},                                      # 模糊
+    {"fieldName": "create_time", "fieldText": "创建时间","widgetType": "date",  "orderNum": 2,
+     "searchFlag": 1, "searchMode": 2, "searchFormat": "yyyy-MM-dd"},        # 范围
+]
+# SQL 不需要写 WHERE，引擎自动拼
+```
+
+#### 4.2 用 paramList（SQL 自写，模式留空）
+
+```python
+param_list = [
+    {"paramName": "order_name",       "paramTxt": "订单名称",
+     "widgetType": "string", "searchFlag": 1, "searchMode": None},          # 模糊：SQL 自写 LIKE
+    {"paramName": "apply_date_begin", "paramTxt": "申请日期(起)",
+     "widgetType": "date",   "searchFlag": 1, "searchMode": None,
+     "searchFormat": "yyyy-MM-dd"},
+    {"paramName": "apply_date_end",   "paramTxt": "申请日期(止)",
+     "widgetType": "date",   "searchFlag": 1, "searchMode": None,
+     "searchFormat": "yyyy-MM-dd"},
+]
+```
+
+```sql
+WHERE order_name LIKE CONCAT('%', IFNULL(NULLIF('${order_name}', ''), ''), '%')
+  AND apply_date >= IFNULL(NULLIF('${apply_date_begin}', ''), '1900-01-01')
+  AND apply_date <= IFNULL(NULLIF('${apply_date_end}',   ''), '9999-12-31')
+```
+
+> 范围必须**手工拆成两个独立 paramName**（`xxx_begin` / `xxx_end`），不是写 `searchMode=2` 让引擎自拆——paramList UI 没有这个能力。
+
+### 5. 选 fieldList 还是 paramList？
+
+| 场景 | 推荐 |
+|---|---|
+| 单数据集，查询条件就是 SQL 列本身，不想写 FreeMarker | **fieldList** + searchMode=2/5 引擎托管 |
+| 复杂 SQL（多表 JOIN、子查询、子参数）需要细粒度控制 | **paramList** + SQL 手写 + searchMode 留空 |
+| 同名字段在多张表里冲突 | **paramList** 起独立别名 |
+| 范围或模糊匹配 + 默认值兜底全部数据 | **paramList** + `IFNULL(NULLIF(...))` 模板 |
+
+### 6. 共同列含义
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `searchFlag` | `1`=启用查询/`0`=不启用 | 启用了才会渲染查询控件 |
+| `searchValue` (fieldList) / `paramValue` (paramList) | string | 默认值，支持 `=dateStr(...)` 表达式、`a\|b` 范围分隔 |
+| `searchFormat` | string | 日期格式：`yyyy-MM-dd` / `yyyy-MM-dd HH:mm:ss` / `yyyy-MM` |
+| `dictCode` | string | 下拉选项数据源：字典编码 / SQL / API |
+| `extJson` | JSON 字符串 | 控件扩展配置：`{"selectSearchPageSize":20}` 等 |
+| `orderNum` | int | 排序 |
 
 ---
 
@@ -251,10 +329,17 @@ http://localhost:8085/jmreport/view/{reportId}?name=scott&age=25
 
 ### 6.10 querySetting
 
-> **注意：** `querySetting` 在 save 接口的 JSON 中是 **字符串**（JSON.stringify 后的值），不是对象。
+> **注意：** 调用 `/save` 时 `querySetting` 必须是 **dict 对象**，**禁止 `json.dumps()` 包成字符串**。
+> 写成字符串时 /save 仍返回 `success:true`，但前端不解析 → `izOpenQueryBar` / `izDefaultQuery` 全部失效（查询栏不展开等）。
+> GET 报表时 jsonStr 内 querySetting 显示为字符串，是 jsonStr 整体二次 JSON 化的副产品，与入参格式无关。
 
-```json
-"querySetting": "{\"izOpenQueryBar\":true,\"izDefaultQuery\":true}"
+```python
+# 正确：dict
+base_save(report_id, designer, ...,
+    querySetting={"izOpenQueryBar": True, "izDefaultQuery": True})
+
+# 错误：字符串（前端不解析，配置失效）
+querySetting=json.dumps({"izOpenQueryBar": True, "izDefaultQuery": True})
 ```
 
 | 设置 | 默认值 | 说明 |
@@ -301,8 +386,8 @@ field_list = [
 |------|------|
 | `loopBlockList` | 循环块定义（含 `loopTime` 分栏次数） |
 | `zonedEditionList` | 分版区域定义 |
-| `fixedPrintHeadRows` | 固定打印表头 |
-| `fixedPrintTailRows` | 固定打印表尾 |
+| `fixedPrintHeadRows` | 固定打印表头（数组 `[{sri,sci,eri,eci}]`，详见 `misc-config.md` §8.1） |
+| `fixedPrintTailRows` | 固定打印表尾（数组 `[{sri,sci,eri,eci}]`，详见 `misc-config.md` §8.1） |
 | `groupField` | 分组字段 |
 | `isGroup` | 是否启用分组 |
 | `submitHandlers` | 填报提交处理器 |

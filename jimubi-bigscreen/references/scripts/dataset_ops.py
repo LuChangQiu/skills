@@ -606,7 +606,15 @@ def _apply_binding(target, dataset_id, dataset_name, dataset_type,
         cfg['dataSetApi']    = ds_rec.get('querySql', '')
         cfg['dataSetMethod'] = ds_rec.get('apiMethod', 'get')
         cfg['dataSetIzAgent'] = ds_rec.get('izAgent', '0')
-    else:
+    elif dataset_type in ('FILES', 'singleFile'):
+        # 文件数据集：dataSetApi 写入 SQL 语句（jmf.xxx 表名）便于前端展示，method=GET
+        ds_detail = bi_utils._request('GET', '/drag/onlDragDatasetHead/queryById',
+                                       params={'id': dataset_id})
+        ds_rec = ds_detail.get('result') or {}
+        cfg['dataSetApi']    = ds_rec.get('querySql', '')
+        cfg['dataSetMethod'] = 'GET'
+        cfg['dataSetIzAgent'] = '1'
+    else:  # sql / json
         cfg['dataSetApi']    = ''
         cfg['dataSetMethod'] = ''
         cfg['dataSetIzAgent'] = '1'
@@ -859,7 +867,9 @@ def main():
     p_bind.add_argument('--comp-name', required=True, help='组件名称')
     p_bind.add_argument('--dataset-id', required=True, help='数据集 ID')
     p_bind.add_argument('--dataset-name', required=True, help='数据集名称')
-    p_bind.add_argument('--dataset-type', required=True, choices=['sql', 'api'], help='数据集类型')
+    p_bind.add_argument('--dataset-type', required=True,
+                        choices=['sql', 'api', 'json', 'singleFile', 'FILES'],
+                        help='数据集类型（FILES/singleFile=文件数据集，SQL 写在数据集 querySql；不在 choices 内的会被 argparse 拒绝）')
     p_bind.add_argument('--mapping', default='', help='类型A: 顶层 dataMapping，格式 "维度=name,数值=value"（filed 必须是 defaults 里的中文语义键）')
     p_bind.add_argument('--field-map', default='', help='类型B.1（JStatsSummary 类）: option.fieldMap，格式 "label=title,value=amt,unit=tail"')
     p_bind.add_argument('--header-keys', default='', help='类型B.2（JScrollBoard 类）: option.header[*].key，格式 "c1,c2,c3"')

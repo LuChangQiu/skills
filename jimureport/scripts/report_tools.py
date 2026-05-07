@@ -197,15 +197,20 @@ def update_label(session, report_id, label_config, chart_index=0):
 
 
 def upload_image(session, file_path):
-    """上传图片，返回服务端路径。"""
+    """
+    上传图片，返回 (raw_message, full_symbol_url)。
+    raw_message: 服务端返回原始路径（本地存储为 'jimureport/xxx.png'，OSS 为完整 http URL）
+    full_symbol_url: 直接可用的图标 URL；本地存储拼为 image://{BASE_URL}/img/{message}，OSS 直返
+    """
     with open(file_path, "rb") as f:
-        result = session.upload("/upload/image",
+        result = session.upload("/upload",
                                 files={"file": (os.path.basename(file_path), f)})
-    if result.get("success"):
-        path = result["result"]
-        print(f"上传成功: {path}")
-        return path
-    raise RuntimeError(f"上传失败: {result.get('message')}")
+    if not result.get("success"):
+        raise RuntimeError(f"上传失败: {result.get('message')}")
+    msg = result["message"]
+    full = msg if msg.startswith("http") else f"image://{session.base_url}/img/{msg}"
+    print(f"上传成功: {msg}")
+    return msg, full
 
 
 # ── CLI ──────────────────────────────────────────────────────────────

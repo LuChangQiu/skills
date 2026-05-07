@@ -526,8 +526,32 @@ JDynamicBar 等也使用 `option.series[${index}].itemStyle.color`
 
 ## 个性排名设置 (RankingStyle) - JFlashList 组件
 
-> ⚠️ **`option.title` 为字符串类型**（不是 ECharts title dict），`option.titleShow` 为独立布尔值控制显隐。
-> 禁止将 `title` 转为 `{show, text, textStyle}` 结构，否则模板渲染输出 `[object Object]`。
+> 🚨 **三大隐藏陷阱**（实测 2026-04-30，AI 按 ECharts 直觉踩坑后补录）：
+> 1. **`option.title` 是【字符串】**（默认 `"排名统计"`），不是 ECharts title dict。误传 `{show, text, textStyle}` → 前端 Vue 模板 `{{ option.title }}` 把对象 `JSON.stringify` 后整段 `{"show":true,"text":"..."}` 当文本贴出来，溢出容器形成"漏 JSON"错觉。显隐用 `option.titleShow`（boolean），颜色字号用 `option.titleColor` / `option.titleSize`。
+> 2. **只渲染前 4 条**（组件内 `result.slice(0,4)`，按 value 降序）。给 8/10 条 mock 数据后 5/6 条被静默丢弃。
+> 3. **容器最小宽度 ≥240px**。<200px 时长名称（≥10 汉字）被强制单字竖排堆叠——序号块 + numberSize 数值带走 ~80px，可用名称区 <130px 撑不下"火灾突发-海淀清河"这种 11 字串。解决：加宽到 240+ 或把 name 简化到 6-8 字（"火灾·海淀"格式）。
+
+✅ 正确写法：
+```json
+{
+  "type": "JFlashList",
+  "pos": [x, y, 240, 250],
+  "data": [{"name": "火灾·海淀", "value": 4}, {"name": "燃气·丰台", "value": 4}],
+  "option": {
+    "title": "应急事件实时",
+    "titleShow": true,
+    "titleColor": "#ff4d4f",
+    "titleSize": 14
+  }
+}
+```
+
+❌ 错误写法（漏 JSON 串）：
+```json
+"option": {
+  "title": {"show": true, "text": "应急事件实时", "textStyle": {"color": "#ff4d4f"}}
+}
+```
 
 | 说明 | 配置路径 | 类型 | 备注 |
 |------|---------|------|------|

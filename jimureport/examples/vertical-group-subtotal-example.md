@@ -68,11 +68,22 @@ jsonStr 顶层需要两个属性：
         "3": { "style": 17, "text": "#{vegvkdueqw.sex}" },
         "4": { "style": 17, "text": "#{vegvkdueqw.age}" },
         "5": { "style": 17, "text": "#{vegvkdueqw.name}" },
-        "6": { "style": 17, "text": "#{vegvkdueqw.salary}" }
+        "6": {
+            "style": 17,
+            "text": "#{vegvkdueqw.salary}",
+            "aggregate": "select",
+            "subtotal": "-1",
+            "funcname": "SUM",
+            "subtotalText": ""
+        }
     },
     "height": 54
 }
 ```
+
+> 🚨 **数值列必须默认 `funcname=SUM`（强制规则）**：分组列只要带了 `subtotal:"groupField"`，就会在分组切换处生成"合计/小计"行。此时**所有数值列**（金额、数量、薪水、销售额、库存等）必须同时配置 `aggregate:"select"` + `subtotal:"-1"` + `funcname:"SUM"`，**否则小计行的数值单元格全部空白**（看到"合计"标签但右边空白即此问题）。
+>
+> 如果用户明确说"不要合计行"，则把分组列的 `subtotal` 改为 `"-1"`、`subtotalText` 改为 `""`，**不允许出现"显示了合计标签但数值列空白"的折中状态**。
 
 ### 3. 分组单元格属性详解
 

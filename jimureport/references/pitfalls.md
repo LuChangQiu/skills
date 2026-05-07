@@ -23,8 +23,7 @@
 
 | 坑 | 现象 | 解决 |
 |----|------|------|
-| dbCode 纯数字 | `#{1775.field}` 预览全空 | **所有类型**数据集 dbCode 禁止纯数字；用字母开头驼峰如 `schoolJf`，禁止 `gen_code()` 直接作为 dbCode |
-| dbCode 含保留字/特殊字符 | 保存异常或绑定失败（如 `returnOrder` 含 `return`） | 只用纯字母+数字驼峰；**禁止** `return/for/if/while` 等 JS/Java 保留字，禁止 `_/-/.` |
+| dbCode 格式非法 | 预览全空、保存异常或绑定失败 | dbCode 规则：**只含字母和数字，且不能以数字或 `_` 开头**；推荐字母开头驼峰如 `employeeDs`；**禁止** `gen_code()` 直接作为 dbCode（它生成纯数字串）；**禁止** JS/Java 保留字（`return/for/if/while` 等）；**禁止** `_/-/.` 等特殊字符 |
 | rows/cols 被 json.dumps | 设计器空白 | 只 dumps designerObj，rows/cols/styles 传 dict |
 | isPage:"1" + 分组 | 合并/合计不完整 | 分组报表数据集 isPage:"0" |
 | dbSource 传名称不传 ID | 数据源下拉不显示 | 先 getDataSourceByPage 查 ID |
@@ -36,10 +35,14 @@
 | save_db 返回值误用 | `r["result"]["id"]` TypeError | `save_db()` 直接返回 ID 字符串，直接 `db_id = save_db(...)` |
 | save_db 修改已有仍新增 | 每次调 save_db 都 INSERT 新行 | **更新**已有数据集用 `update_db(session, db_id, ...)`，而非再次调 save_db |
 | 修改数据集单个字段用 save_db 全量重传 | 代码繁琐 | 用 `update_db(session, db_id, isPage="1")`；内部先取回原始数据，只改指定字段 |
+| update_db 传新 paramList 没带原项 id | 响应 `success:true` 但 dbDynSql/paramList 都没落库 | 后端按 `(jimuReportHeadId + paramName)` 唯一约束 INSERT 冲突 → 整事务回滚连带 dbDynSql 也丢。**新 paramList 含与原表同 paramName 的项必须保留原 id**；`update_db` 已自动按 paramName 回填原 id，但手写 `/saveDb` payload 时务必自查 |
+| paramList `searchMode` 与 SQL 自写条件**重复处理**导致查询失效 | 模糊查不到、日期范围报 `Incorrect DATE value: ''` 等 | **当 SQL 里自己用 FreeMarker `${param}` + `IFNULL/NULLIF` 兜底处理空值时，paramList 的 `searchMode` 一律留 null（不设）**——不让引擎对值做任何加工。误用现象：`searchMode=5`（模糊）引擎会自动给值加 `%`，跟手写 `LIKE CONCAT('%','${x}','%')` 重复加；`searchMode=2`（日期范围）引擎把空值渲染成 `''` 字面量塞进 SQL（不是 `?` 占位绑定），`IFNULL('', default)` 抓不住空串报 `Incorrect DATE value`。**日期范围必须拆成两个独立参数 `xxx_begin` / `xxx_end`（widgetType=date，searchMode=null）**，别用 `searchMode=2` 让引擎自动拆。模板：`WHERE col LIKE CONCAT('%', IFNULL(NULLIF('${col}', ''), ''), '%') AND date_col >= IFNULL(NULLIF('${date_begin}', ''), '1900-01-01') AND date_col <= IFNULL(NULLIF('${date_end}', ''), '9999-12-31')` |
 | JSON json_data 传 list/dict | `Cannot deserialize value of type java.lang.String` | 必须 `json.dumps({"data": raw_list}, ensure_ascii=False)`；`json_data` 是**字符串** |
 | JSON jsonData 单对象而非数组 | 字段解析失败或预览无数据 | 必须 `{"data": [...]}`，即使只有一条也包在数组里 |
 | JSON jsonData 裸数组 | `#{db.field}` 全部为空 | 引擎从 `data` 键取行；裸数组找不到 `data`，全空；正确：`{"data": [...]}` |
 | JSON 数据集绑定多系列/数组值图表 | legend 显示 undefined，只渲染一个点 | scatter.bubble/radar 等复杂静态数据必须用 `_NONE()`（不绑数据集），config 里的静态数据才能直接渲染 |
+| **API 数据集 YApi mock 未加 data 包裹** | 字段无法解析或预览无数据 | 无论 `isList:"0"`（对象）还是 `isList:"1"`（集合），mock 返回数据必须包裹在 `{"data": [...]}` 中；对象类型引擎取 `data[0]`，集合类型取整个 `data` 数组；直接返回裸对象/裸数组均导致字段解析失败 |
+| **条件隐藏行用 rowcolor() 实现** | 行仍占空间，视觉残留，非真正隐藏 | 必须用 `hidden.conditions.rows`：`base_save(..., hidden={"rows":[],"cols":[],"conditions":{"rows":{"rowIdx:rowIdx":"dbCode.field>value"},"cols":{}}})`；key 格式为 `"行索引:行索引"`（0-indexed），value 为不带 `=` 的条件表达式；单元格内容保持正常绑定，无需任何表达式 |
 | API 分页缺分页参数 | 不分页或字段解析失败 | api_url 末尾带 `?pageSize='${pageSize}'&pageNo='${pageNo}'`，param_list 加两条 searchFlag=0 分页参数，默认值不能留空 |
 | API 数据集图表调 /qurestSql | 返回 0 行 | API 数据集必须调 `/qurestApi`，返回值路径 `resp["result"]["data"]`；SQL 才用 `/qurestSql` |
 | save_db 省略 field_list | TypeError（必填参数缺失） | 第6个位置参数 field_list 为必填；每个字段含 `fieldName/fieldText/widgetType/isShow/isQuery` |
@@ -54,6 +57,7 @@
 
 | 坑 | 现象 | 解决 |
 |----|------|------|
+| map.simple 图表背景色设置 | 首次创建时 ECharts config 根级的 `backgroundColor` 被后端过滤丢失；`backgroud.enabled/color` 在初次创建时未启用则无效 | 正确做法：**创建时**设 `"backgroud": {"enabled": True, "color": "#颜色值", "image": ""}` 来启用容器背景色；**patch 已有报表时**用 `get_report` → 修改 `chart["backgroud"]["enabled"]=True` 并同时在 config 根级加 `"backgroundColor":"#颜色值"` → `base_save` 回写，两者均可持久化 |
 | 图表 linkIds 放顶层 | 钻取/联动无效 | 放 extData 内部 |
 | 联动目标图表无默认值 | 初始页面图表空白 | paramList 必须设 paramValue |
 | bar.multi 用 apiStatus:"1" | 图表渲染异常 | 静态数据必须用 apiStatus:"0" |
@@ -61,6 +65,7 @@
 | 图表 extData.id 为 None | 预览图表不渲染/消失 | `chartId` 和 `id` 必须同时赋值为 `layer_id` |
 | 只改 `color[]` 设置颜色 | 颜色不生效 | 饼图改3处(data[i].itemStyle/label/colors[])，柱形图改2处(series[i].itemStyle/colors[]) |
 | **用切片/改数据集类型限制图表数据条数** | 数据集被破坏，API 类型变 JSON 后动态查询失效 | **⚠️ 禁止**改数据集类型或切片数据；图表 config 根级设 `"dataFilter":{"filterCount":N}`，对应 UI「数据过滤→显示X轴前N项」，引擎渲染时自动截取 |
+| **横向图/象形图 xAxis 缺 `"type":"value"`** | `parallel_fill_charts` 把分类名称错误填入 xAxis，柱子全挤左侧 | 象形图/横向柱图 xAxis **必须**显式写 `"type":"value"`，yAxis 显式写 `"type":"category"`；fill 逻辑优先用 yAxis.type=="category" 正向判断，缺省 type 会误命中 xAxis 分支 |
 | 象形图 symbol URL 拼错 | 图标看不到 | upload 返回 `message="jimureport/x.png"`；symbol 写 `f"image://{BASE_URL}/img/{message}"` |
 | 象形图用 symbolClip 补全 | 补全不生效 | 补全背景虚影用 `"double": True`，不是 symbolClip |
 | 雷达图 series 传空字符串 | 系列属性「请选择」，legend 显示 undefined | SQL `'' AS type` 只是占位，chart_entry series 仍必须填 `"type"` |
@@ -73,6 +78,9 @@
 | API 图表字段名不是 name/value | 设计器「运行」后图表空白 | extData 设 `"isCustomPropName": True`，`xText` 设实际分类字段名，`yText` 设实际值字段名 |
 | JavaBean 图表调 /qurestSql 回填 | 返回 result:null | JavaBean 不支持设计态填充；/qurestSql/Api/Bean 均无效；**创建 JavaBean 图表时跳过回填** |
 | SQL 图表 config 无初始数据 | 设计器 ECharts 空白 | 创建 SQL 图表后必须调 `/qurestSql` 回填：转换后写入 config.xAxis.data/series[i].data/legend.data 再 /save |
+| SQL/API 散点图用 `parallel_fill_charts` 回填 | scatter.simple 只见一行点贴在 y 轴/x 轴；scatter.bubble 多系列错位 | `parallel_fill_charts` 默认把单系列图按 `cfg.series[0].data = y_data`（1D）回填，散点图 data 必须是 `[[x,y], ...]` 二元对。**scatter.simple / scatter.bubble 必须自定义回填**：单系列 `series[0].data = [[r[axisX], r[axisY]] for r in rows]`；多系列按 series 字段分组，每系列独立 `[[x,y]]` 数组并设 `legend.data` |
+| 图表「启用背景」只改 `chart.backgroud` | 背景色 UI 显示已启用但实际渲染没出现 | 图表背景**存两份**且必须同步：`chartList[i].backgroud.color`（积木存储字段，注意拼写少 n）+ `config.backgroundColor`（ECharts 根级，**真正控制渲染**）。设计器 UI 手动改时两处自动同步；AI 走 patch 必须**两处一起写**，否则 backgroud.enabled=true 也不出效果。颜色支持 `#hex` / `rgba(r,g,b,a)` |
+| **map.scatter `geo.map` 用了 `"100000"`** | 预览页面图表完全空白（设计页正常）；`"100000"` 是 `map.simple` 区域地图的内部编码，ECharts 不识别 | `map.scatter` 的 `geo.map` 必须用 `"china"`（字符串）；同时**禁止**带 `mapCode/mapName/mapLevel/mapType` 字段——这四个字段是 `map.simple` 专用，加在 `map.scatter` 上会导致地图无法加载 |
 
 ---
 
@@ -98,6 +106,8 @@
 | 纵横组合缺二级子列表头 | 月份列下无子列标题 | 需4行布局：标题行+双层表头行+数据行；row2 静态表头 `merge:[1,0]` 纵跨2行，groupRight `merge:[0,N-1]` 横跨N子列 |
 | 纵横组合 merges 只写标题 | 静态表头不合并，与子列行错位 | 必须同时写 `"B3:B4"` 跨行 + `"D3:F3"` 月份模板跨列，三处缺一不可 |
 | groupRight 月份列头字母序错误 | "10月"排在"1月"前面 | 月份字段用零填充：`CONCAT(LPAD(month_no,2,'0'),'月')` → "01月"~"12月" |
+| 条件隐藏行/列被同时加到 hidden.rows/cols | 设置后变成"始终隐藏"，条件不生效（永远隐藏） | 条件隐藏**只放** `hidden.conditions.rows` / `hidden.conditions.cols`，**禁止**同时往 `hidden.rows` / `hidden.cols` 列表里加同样的 key——`hidden.rows/cols` 是静态隐藏机制，与条件机制独立，混用会被引擎当成始终隐藏 |
+| hidden 范围 key 误用 0-based 物理位置 | 隐藏行/列错位（隐藏了表头而非数据行） | 范围 key 直接对应 `rows` / `cols` dict 的 **key 数字**，不是 0-based 物理位置：rows 从 `"1"` 开始时，rows["2"] → `"2:2"`；cols["2"] → `"2:2"`。详见 `references/misc-config.md` §「隐藏行与隐藏列」 |
 
 ---
 
@@ -131,6 +141,8 @@
 | save 返回值取错路径 | `resp.get("id")` 返回 None | 正确路径：`resp["result"]["id"]` |
 | 预览/设计器 URL 用 `?id=` | 页面可能加载但报表为空 | 正确格式：`/jmreport/view/{id}` 和 `/jmreport/index/{id}`（路径参数） |
 | getDataSourceByPage GET 签名失败 | `签名校验失败，参数有误！` | GET 签名必须先把 `token` 加入 params，再对完整 params 计算 X-Sign |
+| `Session.get('/getDataSourceByPage?pageNo=1')` 签名失败 | 报错 `签名验证失败: 签名参数不存在`；改 POST 又报 405 | **`Session.request` 签名只在 `data` 是 dict 时生效**——把参数拼在 path 里 querystring，函数 `data=None` 直接跳过签名。所有 SIGNED_PATHS（含 `/getDataSourceByPage`、`/getDataSourceById`、`/queryFieldBySql`、`/executeSelectApi`、`/loadTableData`、`/testConnection`、`/dictCodeSearch`、`/download/image`）调用必须用：`s.request('/getDataSourceByPage', {'pageNo':1,'pageSize':100}, method='GET')`，**不能** `s.get('/getDataSourceByPage?pageNo=1')`，**不能**改 POST（接口仅支持 GET，会 405）|
+| 改数据源凭密码用 /initDataSource | 取不到 dbUrl/dbUsername/dbPassword，只有 id+name | `/initDataSource` 是免签名简版，仅返回 `id+name`；**修改数据源（重命名/改密码）必须用 `/getDataSourceByPage`** 拿全字段（dbUrl/dbDriver/dbUsername/dbPassword），再 POST `/addDataSource` 带 id 编辑回写 |
 | executeSelectApi 调用方式 | 接口不通 | POST + query string，不是 JSON body；result 直接是 fieldList 数组；用 `parse_api(session, url)` |
 | 修改已有报表用 `**design` | design 含 name 等字段冲突，图表消失 | 始终显式传 `rows=design['rows'], cols=design['cols'], styles=..., merges=..., chartList=...` |
 | rpbar 用 json.dumps 字符串 | 保存成功但预览工具条设置不生效 | rpbar 必须用 **dict 对象**，不能 `json.dumps()`；字段名是 `rpbar` 不是 rqbar |
@@ -169,6 +181,11 @@
 | 建表数据库与 JimuReport 默认数据源不一致 | `Table 'xxx.table' doesn't exist` | JimuReport 默认数据源连的库才是 dbSource="" 时的目标；**建表必须在该库**，不确定先看 application.yml。指定 dbSource 时先调 `get_ds_connection(session, ds_id)` 确认目标 host/port/db，再决定在哪个 Docker 容器建表 |
 | 用户指定 API URL 时擅自调 create_mock | 原有 mock 数据被覆盖 | 用户提供了完整 API URL 直接填 `save_db(api_url=...)`；**禁止**调 init_yapi/create_mock |
 | pymysql SUM() 返回 Decimal 导致 json.dumps 报错 | `TypeError: Object of type Decimal is not JSON serializable`，出现在把查询结果直接放入 ECharts config 时 | `cur.fetchall()` 的 SUM/AVG 列返回 `decimal.Decimal`；构建图表初始数据时必须显式转型：`int(r[1])` 或 `float(r[1])` |
+| **Redis 数据源 JSON 字段名驼峰不渲染** | 列数据全部为空，其他全小写字段正常 | JimuReport 读取 Redis JSON 时将字段名**强制转小写**；存入 Redis 的 JSON key 必须全小写（如 `productname`），`fieldList` 的 `fieldName` 和单元格绑定 `#{db.fieldName}` 也必须保持全小写一致；驼峰（如 `productName`）会导致绑定失败 |
+| **Redis 数据源 `dbType` 用 `"Redis"` 或 `"REDIS"`** | 前端「数据源类型」下拉显示空，驱动类也显示空 | `addDataSource` 的 `dbType` 必须用全小写 **`"redis"`**；`"Redis"`/`"REDIS"` 后端能存但前端枚举匹配失败显示空。完整参数：`db_type="redis", db_driver="redis.clients.jedis.Jedis", db_url="host:port"`（已通过用户手动验证） |
+| **MongoDB 数据集 SQL 不加 `mongo.` 前缀** | `/queryFieldBySql` 报 `Object 'xxx' not found`；预览无数据 | MongoDB 数据源的 SQL **必须**用 `select * from mongo.集合名` 格式；直接写 `select * from 集合名` 会被 Calcite 适配器报找不到对象。同时 Calcite 需要集合中至少存在一条文档才能解析字段 |
+| **Elasticsearch 数据集 SQL 不加 `es.` 前缀** | 预览无数据或报错 | ES 数据源的 SQL **必须**用 `SELECT * FROM es.索引名` 格式，与 MongoDB 的 `mongo.` 前缀规律一致；直接写 `SELECT * FROM 索引名` 不生效（已通过用户手动验证） |
+| **Elasticsearch 数据源 `dbUrl` 含 `http://` 前缀** | `addDataSource` 报完整性约束错误或连接失败 | ES dbUrl 必须只写 `host:port`（如 `192.168.1.6:9200`），**不含** `http://` 前缀和尾部 `/`；`dbDriver` 填 `"/"`，`dbType` 用 `"es"` |
 
 ---
 
@@ -200,6 +217,7 @@
 | 文本参数 widgetType 用 "text" | 控件渲染异常 | 应为 `"string"`，不是 `"text"` |
 | 下拉控件 widgetType 用 "sel_search" | 控件渲染异常 | 下拉单选：`widgetType:"String"` + `searchMode:4`；下拉多选：`widgetType:"String"` + `searchMode:3` |
 | DBSUM/DBAVERAGE 不出数 | 预览结果为空 | `base_save` 必须同时传 `dbexps=["=DBSUM(ds.field)",...]`（见 §API接口 详解） |
+| `querySetting` 传 JSON 字符串 | `/save` 返回 success:true，但 `izOpenQueryBar/izDefaultQuery` 前端不生效（查询栏不展开等） | `base_save` override 时必须传 **dict**（如 `querySetting={"izOpenQueryBar": True, "izDefaultQuery": True}`），**禁止 `json.dumps()` 包成字符串**。GET 报表时 jsonStr 内嵌套显示为字符串是 jsonStr 二次 JSON 化的副产品，与 /save 入参格式无关 |
 
 ---
 
@@ -212,6 +230,7 @@
 | 创建表达式报表前读多余文件 | 超时 | 表达式报表：只读 `references/expressions.md`；**严禁** grep/Read jimureport_utils.py 查签名 |
 | 「全图表/所有图表」绕开一键脚本手拼 JSON | 25 张图表手写几百行 JSON，反复出错 | 命中「全图表」「图表大全」「测试三种数据集」时，**第一反应**直接 `python scripts/generate_all_reports.py ...` |
 | 一键脚本被中断后原样重发等审批 | 用户拒绝后重发 N 次，每次等几十秒 | 用户中断后**立刻读反馈消息找原因**，按反馈修改后再执行；不能盲目重发 |
+| 上下文已含命令信息却仍 `--help` 探查 | share / unshare / copy / delete 等子命令已在本会话 grep 或调用过，又多花 1-2 秒查 `--help` | **有上下文就直接调 API/CLI**：本会话已经 grep 过源码、用过同名子命令、看过 SKILL「工具脚本」表，参数清楚就一步执行；只有真正不确定（如新增/陌生子命令）才查 `--help`。常用确定参数：`unshare --name`/`copy <id> <new_name>`/`delete <id>`/`share --name --validity --lock --password`/`share_report(verify="0")` 关闭 token 校验 |
 
 | 文本参数 widgetType | 控件渲染异常 | 应为 `"string"`，不是 `"text"` |
 | LIKE 模糊查询写法 | 必须用 `LIKE CONCAT('%','${x}','%')`，不能用 `LIKE '%${x}%'`；后者 `${x}` 展开为 JDBC 占位符后嵌在字符串字面量里无法绑定 |

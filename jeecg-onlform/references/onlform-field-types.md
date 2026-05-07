@@ -134,18 +134,19 @@ Online 业务表示例：`dictTable="user_info_demo"`, `dictField="id"`, `dictTe
 | `${规则编码}` | 编码规则(自动流水号)，规则编码通过 `GET /sys/fillRule/list` 查询获取 | 是 |
 | `${规则编码?onl_watch=field1,field2}` | 编码规则+字段监听，field1/field2 变化时自动重新生成 | 是 |
 | `${规则编码?onl_watch=field1&自定义参数=xxx}` | 编码规则+自定义参数，参数会传到后台编码规则中解析 | 是 |
-| `{{JS表达式}}` | 前端JS表达式（通过 `new Function` 执行），如 `{{+new Date()}}` | 是 |
+| `{{JS表达式}}` | 前端JS表达式（通过 `new Function` 执行），如 `{{Math.random()}}` | 是 |
 | `{{自定义方法()}}` | 调用 `src/utils/desform/customExpression.ts` 中 export 的方法 | 是 |
 | 纯字符串 | 直接赋值(如 "Y", "10") | 所有操作 |
 
 **表达式混用规则：**
-- `#{}`、`{{}}`、纯字符串**可以混合使用**（如 `#{sysUserName}-{{dayjs().format('YYYYMMDD')}}`）
+- `#{}`、`{{}}`、纯字符串**可以混合使用**（如 `#{sysUserName}-{{Math.random()}}`）
 - `${填值规则}` **只能和纯字符串混用**，与 `#{}` 或 `{{}}` 混用则不解析
 - `${填值规则}` 一个字段只能写一个，多个不解析
-- `{{}}` 内通过 `new Function` 执行，必须写能直接返回值的表达式（如 `{{+new Date()}}`、`{{Math.random()}}`、`{{1+1}}`），不能写语句（如 `var x=1`）
+- `{{}}` 内通过 `new Function` 执行，必须写能直接返回值的表达式（如 `{{Math.random()}}`、`{{1+1}}`），不能写语句（如 `var x=1`）
 - 复杂逻辑需在 `src/utils/desform/customExpression.ts` 中定义方法并 export，然后用 `{{方法名()}}` 调用
 - **内置可用示例**：`{{demoFieldDefVal_getAddress('海淀区')}}`、`{{sayHi('李四')}}`（源码已 export 这两个方法）
-- **注意**：`dayjs` 等第三方库在 `new Function` 作用域中不可用，应使用原生JS如 `{{+new Date()}}` 或 `{{new Date().toISOString().slice(0,10)}}`
+- **注意**：`dayjs` 等第三方库在 `new Function` 作用域中不可用
+- **⚠️ date/datetime/time 控件的当前时间默认值必须用 `#{date}`/`#{datetime}`/`#{time}`，不能用 `{{+new Date()}}` —— 后者返回毫秒整数，MySQL datetime 列会报 Data truncation 错误**
 
 ### Step 3.7: 扩展配置推导 (fieldExtendJson)
 

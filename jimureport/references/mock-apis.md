@@ -54,7 +54,19 @@ Base: `http://api.jeecg.com/mock/26/` 或 `https://api.jeecg.com/mock/26/`
 
 ## 四、分页数据集（支持 `pageNo` / `pageSize`）
 
-分页接口返回 `{data:[...], total:总页数, count:总记录数}`
+分页接口响应格式（固定规范）：
+
+```json
+{
+  "data":     [...],   // 当前页记录
+  "total":    7,       // 总页数 = Math.ceil(count / pageSize)
+  "count":    32,      // 总记录数
+  "pageSize": 5,       // 每页条数（来自 URL 参数，默认 10）
+  "pageNo":   2        // 当前页码（来自 URL 参数，默认 1）
+}
+```
+
+创建分页 mock 用 `create_paginated_mock(path, title, data)`，无需手动写高级脚本。
 
 | 路径 | 说明 | 关键字段 | 总数 |
 |------|------|---------|------|
