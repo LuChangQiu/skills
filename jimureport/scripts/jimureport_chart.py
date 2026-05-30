@@ -10,27 +10,6 @@ from jimureport_core import Session, col_letter
 from jimureport_report import get_report, base_save
 
 
-def pick_chart_axes(field_list: list[dict]) -> tuple[str, str]:
-    """
-    从 parse_api / parse_sql 返回的 field_list 中自动选出 (axis_x, axis_y)。
-    优先按字段名语义关键词匹配，避免按 widgetType 猜测选错 ID/日期字段。
-    返回 (类别字段名, 数值字段名)。
-    """
-    LABEL_KW = ("name", "product", "category", "type", "spec", "title", "label", "item", "goods")
-    VALUE_KW = ("price", "amount", "total", "count", "qty", "value", "num", "sum", "sales", "revenue")
-
-    names = [f["fieldName"] for f in field_list]
-
-    axis_x = next(
-        (n for kw in LABEL_KW for n in names if kw in n.lower()),
-        names[0],
-    )
-    axis_y = next(
-        (n for kw in VALUE_KW for n in names if kw in n.lower() and n != axis_x),
-        next((n for n in names if n != axis_x), names[-1]),
-    )
-    return axis_x, axis_y
-
 
 def chart_entry(
     layer_id: str,

@@ -129,8 +129,8 @@
 | 日期时间 | 不填（normal） | `datetime` |
 | 图片 URL | `img` | 不填 |
 | Base64 图片 | `base64Img` | 不填 |
-| 条形码 | `barcode` | 不填 |
-| 二维码 | `qrcode` | 不填 |
+| 条形码 | `barcode` | 不填 | **只写 display，不加 config** |
+| 二维码 | `qrcode` | 不填 | **只写 display，不加 config** |
 | 富文本 HTML | `richText` | 不填 |
 | 普通文本 | 不填（normal） | 不填 |
 
@@ -288,9 +288,13 @@ cell = {
 
 ## displayConfig 单元格组件
 
+> **⚠️ 2026-05-22 实测：`displayConfig + config` 方式会创建 floating overlay 叠加层，覆盖表头和其他行，布局完全错乱。**
+> **正确做法：只用 `"display":"barcode"` / `"display":"qrcode"` 直接内联渲染，不加 `"config"` 字段，payload 里不传 `displayConfig`。**
+> 下方 displayConfig 配置仅供参考，实际生成报表时禁止使用。
+
 用于在普通单元格中渲染条码、二维码、图片。
 
-### 使用方式
+### 使用方式（⚠️ 禁止使用，见上方警告）
 
 1. 在 `displayConfig` 中定义配置（key 为配置ID）
 2. 在单元格中通过 `"display": "barcode"/"qrcode"` + `"config": "配置ID"` 引用

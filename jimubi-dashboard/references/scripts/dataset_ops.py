@@ -131,12 +131,29 @@ def cmd_list(args):
         print(f'{i+1:<4} {ds_id:<24} {code:<20} {name:<20} {data_type:<8} {db_source:<24}')
 
 
+def _get_example_group_id():
+    """获取「示例数据集」分组 ID，不存在则创建"""
+    groups_resp = bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup')
+    for g in groups_resp.get('result', []):
+        if g.get('name') == '示例数据集' and g.get('dataType') is None:
+            return g.get('id', '0')
+    # 不存在则创建
+    bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup', data={'groupName': '示例数据集'})
+    groups_resp2 = bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup')
+    for g in groups_resp2.get('result', []):
+        if g.get('name') == '示例数据集' and g.get('dataType') is None:
+            return g.get('id', '0')
+    return '0'
+
+
 def cmd_create_sql(args):
     """创建 SQL 数据集"""
     field_list = _parse_fields(args.fields)
     if not field_list:
         print('错误: 至少需要一个字段定义')
         return
+
+    parent_id = _get_example_group_id()
 
     payload = {
         'name': args.name,
@@ -145,6 +162,7 @@ def cmd_create_sql(args):
         'dbSource': args.db_source,
         'querySql': args.sql,
         'datasetItemList': field_list,
+        'parentId': parent_id,
     }
 
     result = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=payload)
@@ -165,6 +183,8 @@ def cmd_create_api(args):
         print('错误: 至少需要一个字段定义')
         return
 
+    parent_id = _get_example_group_id()
+
     payload = {
         'name': args.name,
         'code': args.code,
@@ -174,6 +194,7 @@ def cmd_create_api(args):
         'apiMethod': args.method,
         'izAgent': str(args.agent),
         'datasetItemList': field_list,
+        'parentId': parent_id,
     }
 
     result = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=payload)

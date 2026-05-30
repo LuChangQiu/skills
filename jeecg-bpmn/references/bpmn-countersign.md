@@ -37,6 +37,8 @@
 
 > **注意：** XML 中 `>=` 需要写成 `&gt;=`，如 `${nrOfCompletedInstances/nrOfInstances&gt;=0.6}`
 
+> **投票比例限制（countersign_proportion）：** 系统 UI 下拉只提供10的整数倍：**10%/20%/30%/40%/50%/60%/70%/80%/90%/100%**，对应小数 `0.1`~`1.0`。不支持任意小数（如 0.75、0.33 等）。`bpmn_creator.py` 已内置验证，传入非整数倍会报 `ValueError`。
+
 ## 3. 顺序会签 vs 并行会签
 
 | 对比项 | 并行会签（isSequential="false"） | 顺序会签（isSequential="true"） |

@@ -1229,7 +1229,7 @@ for gw_id in ['gw_par', 'gw_par_join', 'gw_incl_join']:
 |------|------|--------|------|
 | `sequential` | 否 | `false` | `true`=串行，`false`=并行 |
 | `rule` | 否 | `countersign_all` | `countersign_all`/`countersign_one`/`countersign_half`/`countersign_proportion`/`countersign_custom` |
-| `proportion` | 否 | - | 仅 `countersign_proportion` 时有效 |
+| `proportion` | 否 | - | 仅 `countersign_proportion` 时有效；**只能是10的整数倍百分比**：10/20/30/40/50/60/70/80/90/100（对应小数 0.1~1.0）；脚本自动将整数百分比转换为小数（如75→无效，70→"0.7"） |
 | `auditorUserType` | 是 | - | `candidateUsers`/`candidatePosts`/`candidateDepts`/`candidateGroups`/`candidateApprovalGroups`/`candidateDeptPositions`/`formData`/`customUser` |
 | `auditorUserIds` | 条件 | - | `candidateUsers` 时，如 `["admin","jeecg"]` |
 | `auditorPostIds` | 条件 | - | `candidatePosts` 时 |
@@ -1448,6 +1448,8 @@ set_node_field_permissions(api_base, token, process_id, 'task_draft', 'form_code
 ```
 
 > **⚠️ 关键顺序：** `deploy_process` → `edit_node_config` → `deploy_process`（再发布） → `set_node_field_permissions`（deploy 后才保存权限）
+
+> **⚠️ `set_node_field_permissions` 不支持 formType=3（自定义开发表单）：** 该函数内部走 `get_desform_fields`，对 formType=3 始终返回 `{'success': False, 'errors': ['无法获取表单字段信息']}`。**formType=3 必须直接构造 batch_data 调用 `saveOrUpdateBatch` API，并额外完成 sys_permission 注册+授权 + 前端 data.ts 三处改动。** 详见 `references/bpmn-field-permissions.md` 末尾「自定义开发单表完整配置流程」章节。
 
 ### OA 审批意见字段配置规范
 

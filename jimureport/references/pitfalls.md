@@ -8,10 +8,12 @@
 |-------------|-----|--------|
 | 预览全空 / `#{}` 不渲染 / dbCode / jsonData / fieldList / save_db 报错 | §数据集保存 | 15 |
 | 图表空白 / extData / series / apiStatus / colors / qurest | §图表渲染 | 60 |
+| 图表重叠/覆盖表格 / 折线图盖住表头 / chart row=1 / chart_bottom 位置 / virtualCellRange | §图表渲染 | 60 |
 | 样式不生效 / border / merge / merges / col0 / align / 留白 | §样式布局 | 88 |
 | GBK崩溃 / ModuleNotFoundError / python -c / deadlock / sleep 浪费 | §脚本执行 | 115 |
 | 404 / 签名失败 / Session / report_urls / make_designer / 参数名 | §API接口 | 138 |
 | Access denied / 连接失败 / dbSource / 密码 / 建表库不对 | §数据库数据源 | 176 |
+| ES Object not found / parse failed / Calcite 保留字 / position 转义 / creator 不适用 ES / es. 前缀 | §数据库数据源 | 176 |
 | 循环块不展开 / loopBlock / 主子表错位 / zonedEdition / loopTime | §循环块分组 | 189 |
 | UPPER / CEIL / DBSUM / LIKE / FreeMarker / widgetType / 下拉控件 / 范围查询控件不渲染 / searchMode=2 / update_db snake_case | §表达式查询控件 | 210 |
 | 执行太慢 / 多读文件 / 一键脚本被拒后重发 | §执行效率 | 226 |
@@ -86,6 +88,7 @@
 | 图表「启用背景」只改 `chart.backgroud` | 背景色 UI 显示已启用但实际渲染没出现 | 图表背景**存两份**且必须同步：`chartList[i].backgroud.color`（积木存储字段，注意拼写少 n）+ `config.backgroundColor`（ECharts 根级，**真正控制渲染**）。设计器 UI 手动改时两处自动同步；AI 走 patch 必须**两处一起写**，否则 backgroud.enabled=true 也不出效果。颜色支持 `#hex` / `rgba(r,g,b,a)` |
 | **map.scatter `geo.map` 用了 `"100000"`** | 预览页面图表完全空白（设计页正常）；`"100000"` 是 `map.simple` 区域地图的内部编码，ECharts 不识别 | `map.scatter` 的 `geo.map` 必须用 `"china"`（字符串）；同时**禁止**带 `mapCode/mapName/mapLevel/mapType` 字段——这四个字段是 `map.simple` 专用，加在 `map.scatter` 上会导致地图无法加载 |
 | **图表 row 行号与数据行展开冲突（重叠/折叠）** | 图表标题或内容叠加在数据行上，图表和表格混在一起 | 图表 `row` 是**绝对坐标**，数据行展开时不推移其他行，而是直接用后续行号填充。例如数据行在 row=4，共4条数据，实际占用 row=4~7；图表若设在 row=6 则与第3条数据重叠。**正确做法**：`chart_start_row = 数据起始行 + max_data_rows + 缓冲`（至少 +3）。分页时用 `chart_start_row = 数据起始行 + page_size + 缓冲`。virtualCellRange 只放第一行锚点 `[[chart_start_row-1, 0]]`（0-based） |
+| **🚨 图表绝对禁止与表格重叠（chart_bottom/chart_top 布局）** | 折线图/柱图覆盖在标题+表头+数据行之上（图表 `row=1` 落在表头行，按 height(px) 绝对浮动渲染，盖住整张表） | **图表 `row` 必须放在表格所有行（标题+表头+数据，含数据展开行）的下方，不得为 1。** 计算：`chart_row = 表格最后一行索引 + 1`（明细列表含展开则 `+ page_size`）。同时三处必须同步：① `chart["row"]=chart_row`；② `chart["virtualCellRange"]=[[chart_row, c] for c in range(col_start, col_end+1)]`；③ rows 里新增 `rows[str(chart_row)]={"cells":{str(c):{"text":" ","virtual":layer_id} for c in ...}}` 锚定占位 + 图表下方一行留白行。patch 已有重叠报表同此三步。chart_top 同理：表格 row 整体下移到图表 height 对应行数之后 |
 
 ---
 
@@ -194,6 +197,8 @@
 | **MongoDB 数据集 SQL 不加 `mongo.` 前缀** | `/queryFieldBySql` 报 `Object 'xxx' not found`；预览无数据 | MongoDB 数据源的 SQL **必须**用 `select * from mongo.集合名` 格式；直接写 `select * from 集合名` 会被 Calcite 适配器报找不到对象。同时 Calcite 需要集合中至少存在一条文档才能解析字段 |
 | **Elasticsearch 数据集 SQL 不加 `es.` 前缀** | 预览无数据或报错 | ES 数据源的 SQL **必须**用 `SELECT * FROM es.索引名` 格式，与 MongoDB 的 `mongo.` 前缀规律一致；直接写 `SELECT * FROM 索引名` 不生效（已通过用户手动验证） |
 | **Elasticsearch 数据源 `dbUrl` 含 `http://` 前缀** | `addDataSource` 报完整性约束错误或连接失败 | ES dbUrl 必须只写 `host:port`（如 `192.168.1.6:9200`），**不含** `http://` 前缀和尾部 `/`；`dbDriver` 填 `"/"`，`dbType` 用 `"es"` |
+| **Elasticsearch 字段名与 Calcite SQL 保留关键字冲突** | `parse failed: Encountered "position ," at line 1` SQL 解析报错，数据集无法保存 | Calcite 将 `POSITION`/`DATE`/`VALUE`/`TIME`/`TYPE`/`YEAR`/`LEFT`/`RIGHT`/`RANK` 等视为 SQL 函数/关键字；字段名冲突时必须用反引号转义：`` SELECT `position`, `date` FROM es.索引名 ``；`SELECT *` 完全不受影响（不逐列列出，Calcite 不校验列名） |
+| **ES/MongoDB/Redis 数据集用普通 `"0"` dbType + 手写 SQL 时忘加 schema 前缀** | `parse_sql` 报 `Object '索引名' not found` | creator 原生支持 `dbType:"es"/"mongo"/"mongodb"/"redis"`，自动补前缀；或在 JSON 配置中用简写字段 `esIndex`/`mongoCollection` 代替写全 SQL；手动写 SQL 则必须带前缀（`FROM es.索引名` / `FROM mongo.集合名`） |
 
 ---
 

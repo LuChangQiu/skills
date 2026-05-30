@@ -36,6 +36,7 @@
 | YApi Mock 完整流程 | §完整工作流：YApi Mock |
 | 弹窗/联动/钻取场景特殊坑 | §弹窗场景：bi_utils.save_page + query_page |
 | SQL 表名来源 / dataset_ops.py edit | §SQL数据集表名必须来自真实数据库 / §dataset_ops.py edit 不写入字段列表 |
+| SQL FreeMarker 运行时参数传参 / 钻取 API 调用 | §`getAllChartData` 运行时传参唯一正确格式 |
 
 ## 组件类型匹配踩坑
 
@@ -167,6 +168,7 @@ bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=payload)
 | **🚨 `addGroup` 的 parentId 必须传 null，不能是 '0'（2026-05-11 重大修正）** | **前一版本的修正描述是错的**——getAllGroup 实际是合法的"分组列表接口"，76 条全是分组节点（无 dbSource）。**真正的 bug 在 addGroup 的 payload**：旧脚本传 `parentId='0'`（字符串），后端 add 成功但建出来的分组 `parentId='0'`，被 getAllGroup 内部过滤逻辑滤掉（getAllGroup 只返 parentId IS NULL 的顶层分组），同时 `queryById` 也返 null（同样的过滤）。结果：下次 `_resolve_group_id` 永远命中不到 → 重复 addGroup → 数据集管理页累积同名空分组（实测一晚上建 3 条"联动示例"）。**对比**：平台预置的"示例数据集"和所有合法用户分组都是 `parentId=None`，与我建的 `parentId='0'` 是两类节点。**正解**：addGroup payload 写 `'parentId': None`（Python None → JSON null），不要写 `'0'`。`_resolve_group_id` 已更新：优先 getAllGroup → list?name= 兜底（应对历史 parentId='0' 脏数据） → addGroup(parentId=None)。历史 parentId='0' 的孤儿分组可用 `DELETE /drag/onlDragDatasetHead/deleteGroup?id=<>` 清理。 |
 | **⚠️ SQL 数据集必须在创建后立即测试** | 创建 SQL 数据集后，**必须立即**调 `POST /drag/onlDragDatasetHead/getAllChartData`（data: `{'id': DS_ID}`）验证 SQL 可执行。若返回 `success=false` 或 `message` 含 `bad SQL grammar`，立刻停止生成图表并报错，否则所有绑定该数据集的图表都会显示"暂无数据" |
 | **⚠️ API 数据集创建后必须调 getAllChartData 触发查询解析** | `POST /drag/onlDragDatasetHead/add` 仅保存元数据配置，**不会**触发系统对接口响应的解析。必须随后调 `POST /drag/onlDragDatasetHead/getAllChartData`（data: `{'id': DS_ID}`）触发一次查询解析，系统才能缓存字段 schema。跳过此步导致：图表绑定后显示"暂无数据"、设计器字段面板为空、dataMapping 无法生效。**在 `create_api_dataset()` 函数末尾必须加此调用**：`bi_utils._request('POST', '/drag/onlDragDatasetHead/getAllChartData', data={'id': ds_id})` |
+| **🚨 `getAllChartData` 向 SQL FreeMarker 注入运行时参数的唯一有效格式：`params: {'key': 'value'}` 直接字典（实测 2026-05-20，仅限 SQL 数据集）** | **适用范围**：SQL 数据集含 FreeMarker 变量（`${drill!}` / `<#if isNotEmpty(drill)>`）时，手动调 `getAllChartData` 传入运行时参数。**注意：本条仅验证了 SQL 类型，API/JSON/文件数据集未验证，勿跨类型套用。** 以下格式对 SQL FreeMarker 全部无效（均只读 DB 存储的 `datasetParamList.paramValue` 默认值）：`paramList:[{name,value}]`、`paramList:[{paramName,paramValue}]`、`dataSetParam:[...]`、`queryInfo:{...}`、`onlDragDatasetParamList:[...]`、顶层直接加参数名。**SQL FreeMarker 有效格式**：`{'id': DS_ID, 'params': {'drill': '华东区'}}`（`params` 是字典，key=FreeMarker 变量名，value=注入值）。SQL 逻辑正确性建议先用 pymysql 直连验证，再通过 `params:{}` 格式验证 API 层。 |
 | **⚠️ API 数据集 getAllChartData 必须 try/except 包裹（后端未重启时返回 null）** | 自写 Java 接口需要重启后端才能访问。在重启前调 `getAllChartData` 时，接口 404/500 导致响应为 `{"result": {"data": null}}`。**必须用 try/except 包裹，失败时打印提示并继续，不能让脚本崩溃**。正确模式：`try: parse_r = bi_utils._request(...); rows = ((parse_r.get('result') or {}).get('data') or []); print(f'解析: {len(rows)} 条') except Exception as e: print(f'解析跳过({e})，后端重启后自动生效')`。**绝对不能让 getAllChartData 失败阻断整个脚本执行** |
 | **⚠️ API 数据集 onlDragDatasetItemList 已在 /add 时传入，禁止再 queryById + edit 回写（浪费 4 个请求）** | 创建 API 数据集时 `/add` 请求体已包含 `onlDragDatasetItemList`，字段已一次性保存到数据库。**禁止**再做 `queryById` → 填 `onlDragDatasetItemList` → `edit` 这三步回写——这是完全多余的操作，浪费 4 个 HTTP 请求（2个数据集 × 2次请求），且在后端未重启时还会因 getAllChartData 返回空而得到无意义的字段列表。正确做法：`/add` 时一次性传字段，随后只做 `getAllChartData`（try/except 包裹）即可 |
 | **⚠️ JeecgBoot 大屏记录表名是 `jmreport_big_screen`，不是 `drag_page`** | `drag_page` 表在默认 jeecgbootsy 库中不存在。统计大屏创建情况时正确表名为 `jmreport_big_screen`（字段含 `screen_name`、`create_time`、`type` 等）。另：`onl_drag_page` 是 drag 模块的新页面表（存在，216+条记录），两个表用途不同 |
@@ -1374,3 +1376,283 @@ opt['innerRadius'] = 40  # max(10, int(73*0.55))
 opt['legend'] = {"orient": "vertical", "right": "2%", "top": "middle", "left": "auto"}
 opt.setdefault('grid', {}).update({'left': 38, 'top': 50})
 ```
+
+---
+
+## 🚨 ECharts option 的 formatter 字段禁止写 JS 函数字符串（实测 2026-05-20，出现两次）
+
+### 问题描述
+
+在 JBar / JLine / JPie 等标准 ECharts 组件的 `option` 中，将 `xAxis.axisLabel.formatter`（或 `yAxis`、`tooltip`、`label` 等的 formatter）设为 JavaScript 函数字符串，如：
+
+```python
+cfg['option']['xAxis']['axisLabel']['formatter'] = "function(v){return v.split('::').pop();}"
+```
+
+保存后，x 轴标签会把整个函数字符串原文渲染出来，图表无法正常显示标签。
+
+### 根因
+
+ECharts 5 的 `setOption()` 接收纯 JSON 对象。当 `formatter` 是字符串时，ECharts 将其视为**模板字符串**（占位符形如 `{value}`、`{a}`、`{b}`），**不会 eval / new Function**。JeecgBoot 大屏平台在传入 ECharts 之前也不做函数字符串预处理，因此函数代码被当作模板原文展示。
+
+### 正确做法（按场景选一）
+
+| 场景 | 正确做法 |
+|------|---------|
+| 截取 / 拼接显示值 | **在 SQL 中处理**：用 `CONCAT`、`SUBSTRING_INDEX`、`CASE WHEN` 等让返回的 `name` 字段本身就是可读值，不依赖 formatter |
+| 加单位（静态） | ECharts 模板字符串：`"formatter": "{value}元"` 或 `"formatter": "{b}: {c}%"`（合法） |
+| 钻取编码值显示 | 用可读分隔符（如 `/`）让编码值本身可读（"华东区/销售一部"），无需 formatter 二次处理 |
+| 确实需要动态逻辑 | 改用 **`JCommon` 组件**（菜单"通用组件"），其 `customOption` 是 JS 字符串，平台会执行，可以写真正的函数 |
+
+### 速查：哪些 formatter 写法合法
+
+```python
+# ✅ ECharts 模板字符串（合法）
+cfg['option']['yAxis']['axisLabel']['formatter'] = '{value}万元'
+cfg['option']['tooltip']['formatter'] = '{b}: {c}%'
+
+# ✅ JCommon 组件的 customOption（唯一可写函数的地方）
+cfg['customOption'] = """
+option = {
+    xAxis: { axisLabel: { formatter: function(v){ return v.split('/').pop(); } } }
+};
+return option;
+"""
+
+# ❌ 所有标准组件（JBar/JLine/JPie 等）的 option 内禁止写函数字符串
+cfg['option']['xAxis']['axisLabel']['formatter'] = "function(v){...}"  # 原文显示
+```
+
+---
+
+## JGroup 弹窗子组件限制：必须直接注入 option；passthrough 自定义组件无法挂载（实测 2026-05-21）
+
+**触发场景 A — 图表空白**：在弹窗 JGroup 内放 JLine/JBar 等图表，chartData 有数据但图表完全空白。
+
+**触发场景 B — 表格无数据**：在 JGroup 内放 JScrollList_3、JScrollTable 等 passthrough 自定义组件，渲染结果为完全空白或乱码。
+
+**根因**：
+- JGroup 内子组件直接使用 `config.option`（ECharts 原生 option），不走平台 "chartData → series/xAxis.data" 自动处理流程。
+- Passthrough 自定义组件（JScrollList/JScrollTable 等）的 Vue 组件实例在 JGroup 弹窗上下文内无法正常挂载。
+
+**正确做法**：
+1. **ECharts 类子组件**（JLine/JBar/JPie 等）：在 `config.option` 中直接注入完整的 series 数据和 xAxis.data。
+2. **JScrollBoard（builtin handler）**：可用于弹窗内，但 chartData/option 格式必须严格正确（见下方专项说明）。
+3. **其他表格类**（JScrollList/JScrollTable，passthrough）：改用 `JCommon + customOption`（ECharts graphic API 绘制表格）。
+
+```python
+# ✅ JLine 在弹窗内：option 中直接注入完整 series
+cfg['option'] = {
+    'xAxis': {'type': 'category', 'data': sh},    # 真实 x 轴数据（非 []）
+    'series': [
+        {'name': '服装', 'type': 'line', 'data': cl, 'smooth': True},
+        {'name': '电子', 'type': 'line', 'data': el, 'smooth': True},
+    ],
+}
+# chartData 保留但不影响渲染（JGroup 内不被处理）
+
+# ✅ 弹窗内滚动表格：用 JScrollBoard（builtin handler，可挂载）
+# 见下方"弹窗内 JScrollBoard 正确写法"章节
+
+# ✅ 弹窗内表格（passthrough 替代方案）：JCommon + graphic
+custom_js = """
+var rows = [['01','李某某','08:23','虚假宣传','王监察','1.5小时','已退款'], ...];
+var hdr = ['序号','被投诉人','投诉时间','投诉原因','处理人','处理时长','处理结果'];
+var els = [];
+[hdr].concat(rows).forEach(function(row, ri) {
+    var bg = ri===0 ? '#1a3a5a' : (ri%2===1 ? '#050e1a' : '#0d2235');
+    els.push({type:'rect',left:0,top:ri*38,right:0,height:37,style:{fill:bg}});
+    row.forEach(function(cell, ci) {
+        els.push({type:'text',left:colX[ci],top:ri*38+12,
+            style:{text:cell,fill:ri===0?'#FFD700':'#d4e8ff',fontSize:ri===0?13:12}});
+    });
+});
+option = {backgroundColor:'transparent', graphic:{elements:els}};
+return option;
+"""
+# 子组件 config:
+# {'component': 'JCommon', 'config': {'customOption': custom_js, 'option': {}, ...}}
+
+# ❌ 禁止在 JGroup 内放 JScrollList/JScrollTable（passthrough，无法挂载，空白或乱码）
+# ✅ JScrollBoard 有 builtin handler，可以在弹窗内正常渲染（但格式必须正确，见下方）
+```
+
+---
+
+## 弹窗内 JScrollBoard 正确写法：chartData=纯二维数组，列头放 option.header（实测 2026-05-21）
+
+**触发场景**：在 JGroup 弹窗内放 JScrollBoard 滚动表格，组件可见但完全无数据（列配置为空，表格空白）。
+
+**根因**：手写 popup 子组件不经过 spec_builder，容易把 chartData 写成 `{"columns": [...], "rows": [...]}` 对象。但 JScrollBoard 的 `chartData` 只认**纯二维数组**（rows only），列定义必须写在 `option.header`，不是 `option.columns`。
+
+**正确写法**：
+
+```python
+header_cols = [
+    {"label": "序号",    "key": "", "width": 50},
+    {"label": "被投诉人","key": "", "width": 90},
+    {"label": "投诉时间","key": "", "width": 130},
+    {"label": "投诉原因","key": "", "width": 160},
+    {"label": "处理人",  "key": "", "width": 80},
+    {"label": "处理时长","key": "", "width": 80},
+    {"label": "处理结果","key": "", "width": 100},
+]
+
+rows_data = [
+    ["1", "张明华", "06-18 08:12", "商品破损", "李晓燕", "1.5h", "已解决"],
+    ["2", "王芳",   "06-18 08:35", "发货延迟", "赵伟",   "2.0h", "已解决"],
+    # ... 更多行
+]
+
+cfg['chartData'] = json.dumps(rows_data, ensure_ascii=False)  # ← 纯二维数组
+
+cfg['option'] = {
+    'header':      header_cols,      # ← 列定义在 option.header，不是 option.columns
+    'headShow':    True,
+    'index':       False,
+    'headerBGC':   '#1a2a4a',
+    'headerHeight': 36,
+    'oddRowBGC':   '#0d1b2a',
+    'evenRowBGC':  '#122030',
+    'rowNum':      10,
+    'waitTime':    2000,
+    'carousel':    'single',
+    'hoverPause':  True,
+    'headFontSize': 13,
+    'bodyFontSize': 12,
+}
+```
+
+**错误写法（导致列配置为空、表格无数据）**：
+```python
+# ❌ chartData 不能是对象
+cfg['chartData'] = json.dumps({'columns': header_cols, 'rows': rows_data})
+
+# ❌ 列定义不能放在 option.columns
+cfg['option'] = {'columns': header_cols, 'rows': rows_data}
+```
+
+---
+
+## JStatsSummary：单位字段是 `suffix` 不是 `unit`，compareState 必须用 `"1"`/`"0"`（实测 2026-05-21）
+
+**触发场景**：手写 chartData（绕过 spec_builder 直接 patch）时，KPI 数值正常显示但单位消失，或 spec_builder 建屏后再 patch 时单位/涨跌方向不生效。
+
+**根因**：  
+- 单位字段名称是 `suffix`，不是 `unit`（defaults/JStatsSummary_1.json 实测）。写 `unit` 不报错但静默忽略。  
+- `compareState` 在 chartData 里必须是字符串 `"1"`（上涨）/ `"0"`（下跌），写 `"up"`/`"down"` 无效（spec_builder 会自动转换，直接写 chartData 不会）。  
+- 同比/环比标签字段是 `compareLabel`（如 `"同比"`），缺少时箭头旁无文字。
+
+**正确写法**：
+```python
+new_data = [
+    {"name": "累计GMV", "value": 4.82, "suffix": "亿元",
+     "compareValue": "35.2%", "compareState": "1", "compareLabel": "同比"},
+    ...
+]
+cfg['chartData'] = json.dumps(new_data, ensure_ascii=False)
+```
+
+**禁止**：`"unit": "亿元"`（静默无效）、`"compareState": "up"`（直接写 chartData 时无效）。
+
+---
+
+## JFlyLineMap：`{from/to}` 城市名简写不可靠，必须传完整经纬度坐标（实测 2026-05-21）
+
+**触发场景**：用 `{"from": "上海", "to": "杭州", "value": 3200}` 格式写飞线数据，大屏显示为同心圆气泡群而非飞线地图。
+
+**根因**：  
+- 平台内置城市坐标查找表在 spec_builder 生成时可能未正确触发 fromLng/fromLat 解析，handler 将数据当作散点气泡处理。  
+- `value` 值过大（如 3200）会直接映射为气泡半径，导致覆盖全图的超大圆圈。
+
+**正确格式**（必须提供完整经纬度）：
+```python
+flyline = [
+    {"fromName": "上海", "fromLng": 121.47, "fromLat": 31.23,
+     "toName":   "杭州", "toLng":   120.15, "toLat":   30.28, "value": 320},
+    ...
+]
+```
+
+**value 取值范围**：建议 100–420，过大（>1000）气泡会遮盖地图，过小（<50）飞线不可见。
+
+**禁止**：`{"from": "城市名", "to": "城市名", "value": 大数值}` 格式（表面可解析，实际渲染为气泡散点图）。
+
+---
+
+## JScrollList variant=3：fieldMapping.key 必须手动对齐数据字段名（实测 2026-05-21）
+
+**触发场景**：spec_builder 建好库存预警类滚动列表后，显示的是默认演示数据（如"车牌号/违规次数"），自定义数据不渲染。
+
+**根因**：spec_builder 从 `defaults/JScrollList_3.json` 读取默认 fieldMapping，其 `key` 是演示字段名（如 `id`/`name`/`type`），与用户自定义数据的字段名不一致，渲染引擎找不到对应列。
+
+**正确做法**：建屏后必须 patch option.fieldMapping，将每一项的 `key` 改为实际数据的字段名：
+```python
+opt['fieldMapping'] = [
+    {"key": "gname",  "name": "商品名称", "width": 220, ...},
+    {"key": "gstock", "name": "剩余库存", "width": 100, ...},
+    {"key": "geta",   "name": "预计售罄", "width": 100, ...},
+]
+cfg['chartData'] = json.dumps([
+    {"gname": "限量版礼盒", "gstock": "12件", "geta": "~5分钟"},
+    ...
+], ensure_ascii=False)
+```
+
+`fieldMapping.key` 必须和 chartData 每条记录的 JSON key 完全一致（区分大小写）。
+
+---
+
+## JColorBlock：value 必须是纯整数/浮点数，字符串格式导致 NAN（实测 2026-05-21）
+
+**触发场景**：直播间实时数据等 JColorBlock 组件显示 "NAN"，而非期望的数值。
+
+**根因**：JColorBlock 渲染时对 `value` 调用 `Number()` 转换。字符串格式（含逗号 `"128,500"`、中文单位 `"238万"`、百分号 `"18.6%"`）均返回 `NaN`。
+
+**正确写法**：
+```python
+new_data = [
+    {"name": "当前在线人数", "value": 128500,   "backgroundColor": "#1a2860"},
+    {"name": "累计观看人次", "value": 2380000,  "backgroundColor": "#1a2860"},
+    {"name": "直播间GMV",   "value": 34200000, "backgroundColor": "#3a1a2a"},
+]
+```
+
+若需显示带单位的文字，用 `JStatsSummary`（支持 `suffix`）替代，或在 `name` 字段里注明单位（不影响 value 解析）。
+
+**禁止**：`"value": "128,500"`、`"value": "238万"`、`"value": "3,420万"` 等任何非纯数字字符串。
+
+---
+
+## JBar/JLine 等图表组件：spec 写 `option.series` 只含 itemStyle，柱体/折线消失（实测 2026-05-21）
+
+**触发场景**：spec JSON 里写了 `"option": {"series": [{"itemStyle": {"color": "#FEF08A"}}]}`，大屏 X 轴标签正常，但柱体完全消失。
+
+**根因**：  
+前端 JBar handler 发现 `option.series` 已存在时，不再从 chartData 自动填充 `series.data`：
+- `xAxis.data` 单独从 chartData.name 解析 → 正常（所以 X 轴标签有）
+- `series.data` 依赖 `option.series` → 只有 itemStyle，无 type/data → 柱体空白
+
+**正确做法（二选一）**：
+
+① 只改颜色 → 用 `option.color`，**禁止写 option.series**：
+```json
+"option": { "color": ["#FEF08A"] }
+```
+
+② 必须自定义 series → 包含完整 `type + data + itemStyle`，data 从 chartData 取值：
+```python
+chart_data = json.loads(cfg['chartData'])
+values = [d['value'] for d in chart_data]
+cfg['option']['series'] = [{
+    'type': 'bar',
+    'data': values,
+    'itemStyle': {'color': '#FEF08A'}
+}]
+```
+
+**禁止**：`"option": {"series": [{"itemStyle": {"color": "..."}}]}`（缺 type/data 的残缺 series）
+
+适用组件：JBar / JLine / JSmoothLine / JArea / JStackBar / JMultipleBar 等所有 ECharts builtin 组件。
+
+**禁止**：`"value": "128,500"`、`"value": "238万"`、`"value": "3,420万"` 等任何非纯数字字符串。

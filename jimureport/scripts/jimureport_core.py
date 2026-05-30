@@ -1,9 +1,11 @@
 """
 jimureport_core.py — Session、签名、ID生成等基础工具
 """
+import base64
 import json
 import hashlib
 import random
+import re
 import string
 import time
 
@@ -12,7 +14,13 @@ import requests
 DEFAULT_BASE_URL = "<api_base>"
 DEFAULT_TOKEN    = "<token>"
 DEFAULT_TENANT   = "2"
-SIGN_SECRET      = "dd05f1c54d63749eda95f9fa6d49v442a"
+# 仅作兜底：无法从服务端动态获取签名密钥时使用（与前端 SignMd5Util.js 的默认值一致）。
+# 真实密钥由 Session 在运行时从报表设计器页面动态解析，见 Session.sign_secret。
+DEFAULT_SIGN_SECRET = "dd05f1c54d63749eda95f9fa6d49v442a"
+SIGN_SECRET         = DEFAULT_SIGN_SECRET  # 向后兼容旧引用
+
+# 服务端把签名密钥 Base64 编码后注入页面：window._JM_CFG_T = "xxx"（见 resource.ftl）
+_JM_CFG_T_RE = re.compile(r'window\._JM_CFG_T\s*=\s*"([^"]+)"')
 
 SIGNED_PATHS = [
     "/queryFieldBySql", "/executeSelectApi", "/loadTableData",

@@ -570,6 +570,108 @@ def cmd_batch_add(args):
     print(f'批量添加成功 {len(added)} 个组件: {", ".join(added)}')
 
 
+def _merge_config_for_type_switch(old_config, old_type, new_type, new_title):
+    """
+    将旧组件 config 与新类型默认 config 合并：
+    - 策略：以旧 option 为基础，只用新类型的 series 覆盖；其余所有通用字段全部沿用旧值
+    - 保留：数据绑定字段、通用样式、option 中所有非 series 字段（title/card/xAxis/yAxis/grid/legend/tooltip/customColor 等）
+    - 替换：series（类型专属渲染结构）
+    """
+    import copy
+
+    new_config = _build_comp_config(new_type, new_title)
+
+    # ---- 顶层可迁移字段（数据绑定 + 通用样式）----
+    PORTABLE_TOP = {
+        'dataType', 'dataSetId', 'dataSetName', 'dataSetType',
+        'dataSetApi', 'dataSetMethod', 'dataSetIzAgent',
+        'dataMapping', 'fieldOption', 'dictOptions', 'paramOption',
+        'chartData', 'background', 'borderColor',
+        'drillData', 'turnConfig', 'jsConfig', 'linkageConfig', 'timeOut',
+    }
+    for key in PORTABLE_TOP:
+        if key in old_config:
+            new_config[key] = copy.deepcopy(old_config[key])
+
+    # ---- option 合并策略：以旧 option 为基础，只保留新类型的 series ----
+    old_opt = old_config.get('option', {}) or {}
+    new_opt = new_config.get('option', {}) or {}
+
+    # 取新类型的 series（类型专属，不能复用旧值）
+    new_series = new_opt.get('series')
+
+    # 以旧 option 深拷贝为起点（保留所有通用配置：xAxis/yAxis/grid/title/card/legend/tooltip/customColor 等）
+    merged_opt = copy.deepcopy(old_opt)
+
+    # 用新类型 series 覆盖（旧 series 与新类型不兼容）
+    if new_series is not None:
+        merged_opt['series'] = new_series
+
+    CARTESIAN = {
+        'JBar', 'JLine', 'JSmoothLine', 'JStepLine', 'JArea',
+        'JHorizontalBar', 'JBackgroundBar', 'JDynamicBar', 'JPictorialBar',
+        'JStackBar', 'JMultipleBar', 'JNegativeBar', 'JMixLineBar',
+        'DoubleLineBar', 'JMultipleLine', 'JScatter', 'JBubble',
+    }
+    # 笛卡尔坐标图互换时：清空 xAxis.data / yAxis.data（防止旧类目污染新 series）
+    if old_type in CARTESIAN and new_type in CARTESIAN:
+        for axis_key in ('xAxis', 'yAxis'):
+            axis_val = merged_opt.get(axis_key)
+            if isinstance(axis_val, dict):
+                axis_val.pop('data', None)
+            elif isinstance(axis_val, list):
+                for ax in axis_val:
+                    if isinstance(ax, dict):
+                        ax.pop('data', None)
+
+    new_config['option'] = merged_opt
+    return new_config
+
+
+def cmd_switch_type(args):
+    """切换组件类型，保留公共配置项"""
+    tmpl = load_template(args.page_id)
+
+    matched = find_components(tmpl, name=args.name, comp_type=args.type, comp_id=args.id)
+    if not matched:
+        print('未找到匹配的组件')
+        return
+
+    switched = 0
+    for item in matched:
+        if item[0] == 'top':
+            comp = item[1]
+        else:
+            comp = item[1]  # group element
+
+        old_type  = comp.get('component', '')
+        old_name  = comp.get('componentName', old_type)
+        new_title = args.title if args.title else old_name
+
+        old_cfg = comp.get('config', {})
+        if isinstance(old_cfg, str):
+            try: old_cfg = json.loads(old_cfg)
+            except: old_cfg = {}
+
+        new_cfg = _merge_config_for_type_switch(old_cfg, old_type, args.to, new_title)
+
+        comp['component']     = args.to
+        comp['componentName'] = new_title
+        comp['config']        = new_cfg
+
+        print(f'  切换: {old_name} ({old_type}) → {new_title} ({args.to})')
+        print(f'    已保留: 数据绑定字段 + option 所有通用配置（xAxis/yAxis/grid/title/card/legend/tooltip/customColor 等）'
+              f'，仅 series 替换为新类型默认值')
+        switched += 1
+
+    if switched == 0:
+        print('未找到匹配的组件')
+        return
+
+    save_template(args.page_id, tmpl)
+    print(f'共切换 {switched} 个组件')
+
+
 def cmd_move(args):
     """移动/缩放组件"""
     tmpl = load_template(args.page_id)
@@ -695,6 +797,13 @@ def main():
     p_batch.add_argument('--specs', required=True,
                          help='组件规格 JSON 数组，每项含 comp/title/x/y/w/h/config')
 
+    # switch-type（切换组件类型，保留公共配置）
+    p_switch = subparsers.add_parser('switch-type', help='切换组件类型并保留公共配置项')
+    add_common(p_switch)
+    add_filter(p_switch)
+    p_switch.add_argument('--to', required=True, help='目标组件类型（如 JLine）')
+    p_switch.add_argument('--title', default=None, help='新组件标题（不填则沿用原名）')
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -714,6 +823,8 @@ def main():
         cmd_batch_add(args)
     elif args.command == 'move':
         cmd_move(args)
+    elif args.command == 'switch-type':
+        cmd_switch_type(args)
 
 
 if __name__ == '__main__':

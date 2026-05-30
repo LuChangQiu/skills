@@ -518,9 +518,36 @@ def handle_JColorGauge(c, p):
 
 def handle_JScrollBoard(c, p):
     d = load_def('JScrollBoard')
-    d['chartData'] = json.dumps(c['rows'], ensure_ascii=False)
-    headers = [{'label': col['label'], 'key': col.get('key', ''),
-                'width': col.get('width', 100)} for col in c['columns']]
+    title = c.get('title', c.get('componentName', 'JScrollBoard'))
+
+    # ── rows 防呆：接受 rows 或 data（直觉陷阱：data 不是 spec 字段）──
+    rows = c.get('rows')
+    if rows is None and 'data' in c:
+        print(f"⚠️  JScrollBoard \"{title}\": spec 用了 'data'，正确字段是 'rows'（已自动修正）")
+        rows = c['data']
+    if rows is None:
+        raise KeyError(
+            f"JScrollBoard \"{title}\": spec 缺少 'rows'（二维数组）。"
+            "示例: rows=[[\"行1列1\",\"行1列2\"],[\"行2列1\",\"行2列2\"]]"
+        )
+
+    # ── columns 防呆：接受 columns 或 header（字符串/对象两种格式）──
+    columns_raw = c.get('columns')
+    if columns_raw is None and 'header' in c:
+        print(f"⚠️  JScrollBoard \"{title}\": spec 用了 'header'，正确字段是 'columns'（已自动修正）")
+        columns_raw = c['header']
+    if columns_raw is None:
+        # 无列定义时按行宽度自动生成
+        n_cols = len(rows[0]) if rows else 1
+        columns_raw = [{'label': f'列{i+1}', 'key': f'c{i}', 'width': 120} for i in range(n_cols)]
+        print(f"⚠️  JScrollBoard \"{title}\": 缺少 'columns'，已按 {n_cols} 列自动生成列头")
+    # 字符串数组 header → 对象数组 columns
+    if columns_raw and isinstance(columns_raw[0], str):
+        columns_raw = [{'label': h, 'key': f'c{i}', 'width': 120} for i, h in enumerate(columns_raw)]
+
+    d['chartData'] = json.dumps(rows, ensure_ascii=False)
+    headers = [{'label': col['label'], 'key': col.get('key', f'c{i}'),
+                'width': col.get('width', 100)} for i, col in enumerate(columns_raw)]
     d['option'].update({
         'header':       headers,
         'headShow':     c.get('headShow', True),
@@ -566,6 +593,8 @@ def handle_JFlyLineMap(c, p):
     d = load_def('JFlyLineMap')
     # Simplified schema: [{from, to, value}] with city name lookup; or raw {fromName, fromLng, ...}.
     rows = []
+    title = c.get('title', 'JFlyLineMap')
+    _flyline_keys = {'from', 'to', 'fromName', 'fromLng', 'toName', 'toLng'}
     for it in c['data']:
         if 'from' in it and 'to' in it:
             fc = CITY_COORDS.get(it['from']);  tc = CITY_COORDS.get(it['to'])
@@ -577,9 +606,25 @@ def handle_JFlyLineMap(c, p):
                 'toLng':   tc[0], 'toLat':   tc[1],
                 'value':   it.get('value', 1),
             })
+        elif not _flyline_keys.intersection(it.keys()):
+            # 传了 {name, value} 省份格式 → 不是飞线数据，提前警告
+            print(f"⚠️  JFlyLineMap \"{title}\": 数据项缺少飞线字段（from/to 或 fromName/fromLng/toName/toLng）。"
+                  f"检测到 {list(it.keys())}，可能误传了省份热力格式 {{name,value}}。"
+                  f"飞线格式：{{from:'城市A', to:'城市B', value:100}} 或 {{fromName,fromLng,fromLat,toName,toLng,toLat,value}}")
+            rows.append(it)   # 仍然 passthrough，不强制崩溃
         else:
             rows.append(it)   # raw fromLng/fromLat/... pass through
     d['chartData'] = json.dumps(rows, ensure_ascii=False)
+
+    # area.value 自动修正："china" 在平台数据库无对应 GeoJSON，全国底图正确 adcode 是 "100000"
+    area = d['option'].setdefault('area', {})
+    raw_area_val = area.get('value', [])
+    if isinstance(raw_area_val, list) and any(str(v).lower() == 'china' for v in raw_area_val):
+        print(f"⚠️  JFlyLineMap \"{title}\": area.value 含 'china'，平台无此地图名，已自动修正为 ['100000']（中国全图）")
+        area['value'] = ['100000']
+    elif not raw_area_val:
+        area['value'] = ['100000']
+
     if c.get('title'):
         d['option'].setdefault('title', {}).update({
             'show': True, 'text': c['title'],
@@ -592,6 +637,13 @@ def handle_JFlyLineMap(c, p):
     })
     if 'option' in c:        _deep_update(d['option'], c['option'])
     if 'commonOption' in c:  _deep_update(d['commonOption'], c['commonOption'])
+
+    # spec 也可透传 area.value 覆盖默认值（如指定省级地图 "110000"）
+    if 'option' in c and 'area' in c['option']:
+        area_override = c['option']['area'].get('value')
+        if area_override:
+            d['option']['area']['value'] = area_override if isinstance(area_override, list) else [area_override]
+
     return 'JFlyLineMap', d
 
 
@@ -1290,7 +1342,8 @@ SCHEMAS = {
         'category': 'DataV 轮播表格',
         'spec_fields': 'columns:[{label, key, width}], rows<二维数组>, rowNum, waitTime, headerBg, oddRowBg, evenRowBg, align, headShow, index',
         'pitfalls': [
-            'header 必须是对象数组 [{label,key,width}]，字符串数组表头不显示',
+            '⚠️ spec 字段是 columns+rows，不是 header+data（直觉陷阱）。handler 已加防呆：误传 data→自动改 rows，误传 header→自动改 columns，并打印警告',
+            'columns 是对象数组 [{label,key,width}]；字符串数组 header 也会被自动转换',
             'rows 是二维数组（列表的列表），不是对象数组',
             '⚠️ 数据集绑定走 option.header[*].key（B.6）。机制速查见 references/data-binding-mapping.md',
         ],
@@ -1330,7 +1383,11 @@ SCHEMAS = {
         'pitfalls': [
             'handler 内置 34 常用城市坐标查表，直接用 from/to 中文城市名',
             'commonOption.effect 必须有（spec_builder 自动保留 defaults 的）',
+            '⚠️ 禁止传 {name,value} 省份格式（JAreaMap 格式），那是热力图数据，不是飞线；handler 遇到无飞线字段的数据项会打印警告',
             '⚠️ 数据集绑定 filed 必须中文：[起点名称, 起点经度, 起点纬度, 终点名称, 终点经度, 终点纬度, 数值]（7 项）',
+            '⚠️ option.area.value 必须用 adcode 数字字符串，禁止用 "china"（平台无此 GeoJSON）。全国地图用 ["100000"]，spec_builder 已自动修正',
+            '⚠️ flyline value 须归一化到合理范围（建议 5-60），原始业务数值（如 GMV 万元级）会使 effectScatter 气泡极大覆盖地图；spec_builder 不自动归一化，由调用方负责',
+            '⚠️ 仓库/终点坐标若与某省会完全相同，会产生零长度飞线（只显示一个大圆点）；终点坐标需相对省会中心轻微偏移（±0.1~0.3 度）',
         ],
         'selection': '跨区域流向/迁移展示。散点用 JBubbleMap；带时间轴用 JTotalFlyLineMap',
     },

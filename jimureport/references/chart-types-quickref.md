@@ -47,8 +47,8 @@
 | 气泡散点图 | 气泡图 | `scatter.bubble` | `""` | 多系列+径向渐变 |
 | 普通漏斗图 | 漏斗图 | `funnel.simple` | `""` | sort="descending" |
 | 金字塔漏斗图 | 金字塔图 | `funnel.pyramid` | `""` | sort="ascending" |
-| 普通雷达图 | 雷达图 | `radar.basic` | `""` | shape="polygon"；legend.data 必须预填 |
-| 圆形雷达图 | — | `radar.custom` | `""` | shape="circle"；splitArea 渐变 |
+| 普通雷达图 | 雷达图 | `radar.basic` | `""` 单系列 / `"name"` 多系列 | shape="polygon"；**SQL数据集必须用长格式**（见 chart-echarts-templates.md § radar.basic） |
+| 圆形雷达图 | — | `radar.custom` | `""` 单系列 / `"name"` 多系列 | shape="circle"；splitArea 渐变；同样须长格式SQL |
 | 普通象形图 | 象形柱图 | `pictorial.spirits` | `""` | type="pictorialBar"；横向布局 |
 | 区域地图 | — | `map.simple` | `""` | 根级加 `"chartType":"map"` |
 | 点地图 | — | `map.scatter` | `""` | extData 加 `isCustomPropName:True` |

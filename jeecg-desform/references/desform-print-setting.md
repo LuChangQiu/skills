@@ -2,6 +2,10 @@
 
 控制表单的打印功能。所有字段均存储在 `designConfig.config` 中，通过 `update_design_config` 修改。
 
+> **想一键自动生成积木报表并关联打印？** 不要手动准备 URL 再填 `jmReportURL` —— 直接用
+> `scripts/desform_jimureport.py`，它会自动建报表、按字段排版、回写 `allowJmReport`/`jmReportURL`。
+> 详见 `references/desform-jimureport.md`。本文档仅用于**已有现成报表 URL**、只需开关打印的场景。
+
 ---
 
 ## config 字段说明
@@ -70,5 +74,7 @@ update_design_config('my_form', {
 
 ## 注意事项
 
-- `jmReportURL` 需用户提供，AI 不能猜测或伪造报表 URL
+- `jmReportURL` 的来源取决于场景：
+  - **一键生成场景**（用 `scripts/desform_jimureport.py`）：URL 由脚本自动生成并回填，格式为 `{{sysBasePath}}/jmreport/view/{reportId}`，**无需用户提供**。
+  - **手动开关已有报表场景**（本文档）：URL 必须由用户提供真实地址，AI **不能猜测或伪造**一个不存在的报表 URL。
 - `disabledAutoGrid` 同时影响表单编辑视图（非仅打印），开启后整个表单禁用自适应栅格

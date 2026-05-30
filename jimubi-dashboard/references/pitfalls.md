@@ -39,6 +39,10 @@
 | **⚠️ record_count 的 widgetType 必须是 `'text'`，不是 `'count'`（2026-04-10）** | 源码 ChartSetModal.vue countField 定义：`widgetType: 'text'`。写成 `'count'` 虽不报错但与正常手工配置不一致，可能影响部分渲染逻辑。同时必须包含 `groupField: ''`。 |
 | **⚠️ filterField 应从表单字段填充，不能留空（2026-04-10）** | `filterField` 对应 ChartSetModal 的 `criteriaFields`（表单所有字段）。初始为空时用户打开编辑弹窗会自动填充，但创建时应主动调 `build_filter_fields()` 填充，否则联动过滤功能无法立即使用。 |
 | **⚠️ 脚本中所有显示用字段必须写汉字，严禁拼音或英文替代（2026-04-09 违规被用户指出）** | `fieldTxt`、`formName`、`componentName`、`showName`、`fieldTxt` 等所有面向用户展示的字段值，必须直接写汉字（如 `'fieldTxt': '文本框'`），禁止用拼音（`'wenbenk'`）或英文替代。Python 脚本统一加 `PYTHONIOENCODING=utf-8` 前缀，可直接写中文字符串，无编码问题。 |
+| **🚨 联动源图表 fieldOption 必须用前端格式，否则设置 UI 映射字段列显示空（2026-04-24）** | `config.fieldOption` 必须用 `{value:fieldName, label:fieldTxt, text:fieldTxt, show:'Y', type:fieldType}` 格式。用 `{fieldName,fieldTxt,fieldType}` 时，`LinkConfig.vue` 第322行 `field.value==item.mapping` 过滤失败 → 联动设置弹窗"映射字段"列显示为空（功能仍运行，但 UI 中无法直观确认映射是否正确）。**正确**：`{'value':'name','label':'性别','text':'性别','show':'Y','type':'String'}`；**错误**：`{'fieldName':'name','fieldTxt':'性别','fieldType':'String'}` |
+| **🚨 联动目标刷新不生效：SQL FreeMarker + paramOption + datasetParamList 三者缺一不可（2026-04-24）** | 目标图表点击后不刷新，最常见原因是三者任一缺失：① 目标数据集 SQL 缺 FreeMarker 条件 `<#if isNotEmpty(name)>WHERE f='${name}'</#if>`；② 数据集 `datasetParamList` 未声明参数 `{paramName:'name',...}`；③ 目标图表 `config.paramOption` 未包含 `{paramName:'name',...}`。联动配置本身（`linkageConfig`）可以验证正确，但不等于目标能接收参数。 |
+| **🚨 SQL GROUP BY 禁止用 SELECT 别名（2026-04-24）** | `SELECT DATE_FORMAT(x,'%Y') as name ... GROUP BY name` 在 MySQL `ONLY_FULL_GROUP_BY` 模式下报 `bad SQL grammar`。必须用原表达式分组：`GROUP BY DATE_FORMAT(x,'%Y')`。同理，`SELECT sex ... GROUP BY sex`（不用别名）是安全写法。 |
+| **🚨 IFNULL/COALESCE 写在 SELECT 中被 SqlInjectionUtil 拦截报错（2026-04-24）** | `SELECT IFNULL(style,'default') AS name` 等在 SELECT 列中使用空值处理函数，会被后端 `SqlInjectionUtil` 关键词检测拦截，导致查询直接报错（不是数据为空，是接口报错）。**修复**：改用 `WHERE col IS NOT NULL` 过滤，在 SELECT 中直接取原列值。❌ `SELECT IFNULL(style,'default') AS name, COUNT(*) AS value FROM t WHERE del_flag=0 GROUP BY style`；✅ `SELECT style AS name, COUNT(*) AS value FROM t WHERE del_flag=0 AND style IS NOT NULL GROUP BY style` |
 | **⚠️ 禁止在自定义脚本内用 subprocess 调用 comp_ops.py 再二次直接调用** | 在 Python 脚本中通过 `subprocess.run(comp_ops.py add ...)` 添加组件后，**禁止**在脚本外再单独执行一次 `py comp_ops.py add` 相同命令。两次调用都会成功，导致大屏出现两个位置和名称完全相同的重复组件。正确做法：创建数据集用自定义脚本，添加组件**只用一种方式**——要么在脚本内 subprocess 调用，要么脚本外直接调用，二选一。推荐：**脚本只负责创建数据集，组件添加统一用脚本外 `py comp_ops.py add --dataset-name`**，流程最清晰不易出错。 |
 | **⚠️ 创建数据集前必须询问数据来源（Step 0.1 强制流程）** | 用户未明确说明数据来源时，**禁止**擅自使用公开 mock API 或任何默认 URL 创建数据集。必须先问：①使用 mock 系统还是自己编写代码？②接口需要实现什么业务需求？可跳过的情况：用户已提供 mock 地址/账号、已指定 Controller 文件路径、已指定已有数据集或 SQL 数据源、任务不涉及数据集创建。 |
 | **⚠️ 创建 API 数据集后必须回写字段列表（onlDragDatasetItemList）** | 创建 API 类型数据集后，系统不会自动解析字段。必须：①调 `POST /drag/onlDragDatasetHead/getAllChartData` 解析字段；②用 `GET /drag/onlDragDatasetHead/queryById` 获取完整数据集实体；③构建 `onlDragDatasetItemList`（含 fieldName/fieldTxt/fieldType/izShow/orderNum）；④调 `POST /drag/onlDragDatasetHead/edit` 回写。不回写则数据集字段配置为空，设计器无法选字段，fieldOption 也为空。完整代码：`items = [{'fieldName':k,'fieldTxt':k,'fieldType':'String','izShow':'Y','izWhere':'N','izTotal':'N','orderNum':i} for i,k in enumerate(field_names)]; ds_full = bi_utils._request('GET','/drag/onlDragDatasetHead/queryById',params={'id':DS_ID})['result']; ds_full['onlDragDatasetItemList']=items; bi_utils._request('POST','/drag/onlDragDatasetHead/edit',data=ds_full)` |
@@ -165,6 +169,9 @@ bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data=payload)
 | **⚠️ `dataset_ops.py create-api` 不支持 `--data-path`** | 该命令无 `--data-path` 参数，无法配置 JSON 提取路径。若接口返回包装格式 `{"code":200,"result":[...]}` 则 `dataset test` 显示 `data: null` |
 | **⚠️ API 数据集接口必须返回裸数组** | API 接口应直接返回 JSON 数组（如 `[{"name":"1月","value":320},...]`），**不要包装成** `{"code":200,"result":[...]}` 格式。包装格式需要配置 data-path 才能解析，而该工具不支持此参数。Java 接口返回类型写 `String`，直接 `return "[{...}]"` 最简单 |
 | **⚠️ `datasource_ops.py create` 示例命令必须含 `--code`** | pitfalls.md 有记录但 SKILL.md 示例未展示，实际运行时必须提供。完整示例：`py datasource_ops.py create $API_BASE $TOKEN --name "名称" --code "唯一编码" --db-type MYSQL5.7 --host 127.0.0.1 --port 3306 --db dbname --user root --password root` |
+| **🚨 YApi mock 自定义 res_body 必须是纯数组，禁止嵌套包装** | 手写 mock body 时（不用 `yapi_ops.py` 内置模板），必须直接返回 JSON 数组 `[{"name":"...","value":...}]`。**禁止**包装成 `{"result":{"data":[...]}}` 或 `{"code":200,"data":[...]}` 格式——JeecgBoot API 数据集默认不解析嵌套路径，`getAllChartData` 会返回 `data: null`，所有绑定该 mock 的图表显示"暂无数据"。这与行 166 「API接口必须返回裸数组」一致，但在 YApi 场景下极易忽视（2026-04-24 实踩）|
+| **🚨 YApi `/api/interface/up` 更新接口时 payload 用 `id` 字段，不是 `_id`** | YApi MongoDB 文档中接口 ID 字段是 `_id`，但 `/api/interface/up` REST API 接收的 payload 字段名是 `id`（无下划线）。用 `_id` 会收到 `errcode=400: 请求参数 data 应当有必需属性 id`。正确用法：`payload = {'id': iid, 'project_id':..., 'title':..., 'path':..., 'res_body':...}` （2026-04-24 实踩）|
+| **🚨 API 数据集 `izAgent='0'` 时，`getAllChartData` 服务端返回 `data: null` 是正常行为，禁止视为错误** | `izAgent='0'`（前端直连模式）下，后端不代理访问外部 API，`getAllChartData` 的服务端调用会得到 `{"result":{"dictOptions":{},"data":null}}`。这**不代表**数据集配置错误或图表无法显示——实际数据由用户浏览器直接从 mock URL 获取渲染。**禁止**因此 0 条去修改 `izAgent`、删除重建数据集或调试响应格式，浪费大量时间。判断 API 数据集是否工作正常的唯一标准是在前端预览页面查看图表渲染结果（2026-04-24 实踩）|
 
 ## 文件数据集相关（singleFile / FILES）
 
@@ -1118,6 +1125,15 @@ bi_utils._request('POST', '/drag/page/edit', data=payload)
 
 ---
 
+## comp_ops.py / py -c 常见误用（2026-04-24 实测）
+
+| 问题 | 原因 | 解决方案 |
+|------|------|---------|
+| **⚠️ `comp_ops.py list` 当成"查页面列表"调用，报 `page_id required`** | `comp_ops.py list` 是查**某页面内的组件列表**，`page_id` 是必填参数；查所有页面应调 `/drag/page/list` API | 查页面列表：`bi_utils._request('GET', '/drag/page/list', params={'pageNo':1,'pageSize':50,'style':'default'})`；查某页面组件：`comp_ops.py list API_BASE TOKEN PAGE_ID` |
+| **⚠️ `py -c "sys.path.insert(0, '$HOME/...')"` 报 `ModuleNotFoundError: No module named 'bi_utils'`** | Git Bash 将 `$HOME` 展开为 Unix 格式路径（`/c/Users/25067/...`），Windows Python 无法识别该路径，`sys.path.insert` 实际无效 | 改用 `PYTHONPATH` 环境变量让系统自动处理路径转换：`SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"; PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py -c "import bi_utils; ..."` |
+
+---
+
 ## Online 表单 / 设计器表单图表渲染异常（2026-04-10 实测）
 
 以下 4 个组件在 online 表单或设计器表单模式（dataType=4）下有特殊 option/字段结构，使用通用模板会导致渲染异常。
@@ -1328,3 +1344,490 @@ params={'appId': APP_ID, 'pageSize': 100}
 # 再过滤：[m for m in records if m.get('appId') == APP_ID]
 ```
 ```
+
+---
+
+## 联动（Linkage）完整端到端配置（2026-04-24 验证）
+
+> 适用场景：创建两个 SQL 数据集图表，点击源图表某项 → 目标图表按该值过滤刷新。
+
+### 三要素清单（缺一不可）
+
+| 要素 | 位置 | 说明 |
+|------|------|------|
+| ① FreeMarker SQL | 目标数据集 `querySql` | 含 `<#if isNotEmpty(param)>AND col='${param}'</#if>` 条件 |
+| ② datasetParamList | 目标数据集创建时 `datasetParamList` | 声明参数名、类型，否则 FreeMarker 不被执行 |
+| ③ paramOption | 目标图表 `config.paramOption` | 联动触发时前端将值注入此处，缺少则值无法传入 SQL |
+
+以及联动 UI 正确显示映射字段：
+| 要素 | 位置 | 说明 |
+|------|------|------|
+| ④ fieldOption 格式 | 源图表 `config.fieldOption` | 必须用 `{value, label, text, show:'Y', type}` 格式，否则联动设置弹窗映射字段列为空 |
+
+### 完整工作流脚本模板（已验证可用）
+
+```python
+import sys, os, json, time, random, copy
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references'))
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references', 'scripts'))
+import bi_utils
+
+API_BASE  = '<api_base>'
+TOKEN     = '<token>'
+PAGE_ID   = '<page_id>'
+DB_SOURCE = '<datasource_id>'
+
+bi_utils.API_BASE = API_BASE
+bi_utils.TOKEN    = TOKEN
+
+def _key():
+    return f'{int(time.time()*1000)}_{random.randint(100000,999999)}'
+
+# Step 1: 缓存已有组件（必须！防止 save_page 覆盖）
+page = bi_utils.query_page(PAGE_ID)
+tmpl = page.get('template') or []
+if isinstance(tmpl, str): tmpl = json.loads(tmpl)
+
+# Step 2: 获取/创建「示例数据集」分组
+groups = (bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup').get('result') or [])
+parent_id = next((g['id'] for g in groups
+                  if g.get('name') == '示例数据集' and g.get('dataType') is None), '0')
+if parent_id == '0':
+    bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup', data={'groupName': '示例数据集'})
+    groups = (bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup').get('result') or [])
+    parent_id = next((g['id'] for g in groups
+                      if g.get('name') == '示例数据集' and g.get('dataType') is None), '0')
+
+# Step 3: 创建联动源数据集（柱形图，简单 GROUP BY，无 FreeMarker）
+# ⚠️ 禁止用 IFNULL/COALESCE，改用 WHERE col IS NOT NULL 过滤空值
+SQL_SOURCE = (
+    "SELECT dim_col AS name, COUNT(*) AS value "
+    "FROM your_table WHERE del_flag=0 AND dim_col IS NOT NULL "
+    "GROUP BY dim_col ORDER BY value DESC"
+)
+src_ds = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
+    'name': '源数据集名称', 'code': f'src_ds_{int(time.time())}',
+    'dataType': 'sql', 'dbSource': DB_SOURCE,
+    'querySql': SQL_SOURCE, 'apiMethod': 'GET', 'parentId': parent_id,
+    'datasetItemList': [
+        {'fieldName': 'name',  'fieldTxt': '维度', 'fieldType': 'String',  'izShow': 'Y', 'orderNum': 0},
+        {'fieldName': 'value', 'fieldTxt': '数值', 'fieldType': 'Integer', 'izShow': 'Y', 'orderNum': 1},
+    ],
+    'datasetParamList': []   # 源数据集无需参数
+})
+SRC_DS_ID = (src_ds.get('result') or {}).get('id')
+
+# Step 4: 创建联动目标数据集（饼图，含 FreeMarker 条件 + datasetParamList）
+# 三要素之 ① + ②
+SQL_TARGET = (
+    "SELECT sub_col AS name, COUNT(*) AS value "
+    "FROM your_table WHERE del_flag=0 AND sub_col IS NOT NULL "
+    "<#if isNotEmpty(name)>AND dim_col='${name}'</#if> "   # ① FreeMarker 条件
+    "GROUP BY sub_col ORDER BY value DESC"
+)
+tgt_ds = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
+    'name': '目标数据集名称', 'code': f'tgt_ds_{int(time.time())}',
+    'dataType': 'sql', 'dbSource': DB_SOURCE,
+    'querySql': SQL_TARGET, 'apiMethod': 'GET', 'parentId': parent_id,
+    'datasetItemList': [
+        {'fieldName': 'name',  'fieldTxt': '维度', 'fieldType': 'String',  'izShow': 'Y', 'orderNum': 0},
+        {'fieldName': 'value', 'fieldTxt': '数值', 'fieldType': 'Integer', 'izShow': 'Y', 'orderNum': 1},
+    ],
+    'datasetParamList': [   # ② 声明 FreeMarker 参数
+        {'paramName': 'name', 'paramTxt': '过滤值', 'paramType': 'String',
+         'defaultValue': '', 'izNotNull': 'N', 'orderNum': 0}
+    ]
+})
+TGT_DS_ID = (tgt_ds.get('result') or {}).get('id')
+
+# Step 5: 加载默认配置
+cfg_path = os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard',
+                        'references', 'scripts', 'default_configs.json')
+with open(cfg_path, encoding='utf-8') as f:
+    defaults = json.load(f)
+
+# Step 6: 构建源图表 config
+# 三要素之 ④ fieldOption 必须用 {value,label,text,show,type} 格式
+SRC_FIELD_OPTION = [
+    {'value': 'name',  'label': '维度', 'text': '维度', 'show': 'Y', 'type': 'String'},
+    {'value': 'value', 'label': '数值', 'text': '数值', 'show': 'Y', 'type': 'Integer'},
+]
+src_cfg = copy.deepcopy(defaults.get('JBar', {}))
+src_cfg.update({
+    'dataType': 2, 'dataSetId': SRC_DS_ID, 'dataSetName': '源数据集名称',
+    'dataSetType': 'sql', 'dataSetApi': SQL_SOURCE, 'dataSetMethod': 'GET', 'dataSetIzAgent': '',
+    'dataMapping': [{'filed': '维度', 'mapping': 'name'}, {'filed': '数值', 'mapping': 'value'}],
+    'fieldOption': SRC_FIELD_OPTION,   # ④ 正确格式
+    'dictOptions': {}, 'paramOption': [], 'chartData': '[]',
+})
+src_cfg.setdefault('option', {})['title'] = {'show': True, 'text': '源图表标题（点击联动）'}
+src_cfg['option'].setdefault('card', {})['title'] = ''
+
+# Step 7: 构建目标图表 config
+# 三要素之 ③ paramOption
+TGT_FIELD_OPTION = [
+    {'value': 'name',  'label': '维度', 'text': '维度', 'show': 'Y', 'type': 'String'},
+    {'value': 'value', 'label': '数值', 'text': '数值', 'show': 'Y', 'type': 'Integer'},
+]
+tgt_cfg = copy.deepcopy(defaults.get('JPie', {}))
+tgt_cfg.update({
+    'dataType': 2, 'dataSetId': TGT_DS_ID, 'dataSetName': '目标数据集名称',
+    'dataSetType': 'sql', 'dataSetApi': SQL_TARGET, 'dataSetMethod': 'GET', 'dataSetIzAgent': '',
+    'dataMapping': [{'filed': '维度', 'mapping': 'name'}, {'filed': '数值', 'mapping': 'value'}],
+    'fieldOption': TGT_FIELD_OPTION,
+    'dictOptions': {},
+    'paramOption': [   # ③ 联动注入点，paramName 必须与 FreeMarker 参数名一致
+        {'paramName': 'name', 'paramTxt': '过滤值', 'paramType': 'String', 'paramValue': ''}
+    ],
+    'chartData': '[]',
+})
+tgt_cfg.setdefault('option', {})['title'] = {'show': True, 'text': '目标图表标题'}
+tgt_cfg['option'].setdefault('card', {})['title'] = ''
+
+# Step 8: 添加组件到页面
+max_y = max((c.get('y', 0) + c.get('h', 0) for c in tmpl), default=0)
+SRC_NAME = '联动源柱形图'
+TGT_NAME = '联动目标饼图'
+
+tmpl.append({'component': 'JBar', 'componentName': SRC_NAME, 'visible': True,
+             'i': _key(), 'x': 0,  'y': max_y, 'w': 12, 'h': 35,
+             'orderNum': (len(tmpl)+1)*10, 'config': src_cfg})
+tmpl.append({'component': 'JPie', 'componentName': TGT_NAME, 'visible': True,
+             'i': _key(), 'x': 12, 'y': max_y, 'w': 12, 'h': 35,
+             'orderNum': (len(tmpl)+2)*10, 'config': tgt_cfg})
+
+bi_utils._page_components[PAGE_ID] = tmpl
+bi_utils.save_page(PAGE_ID)
+print('组件已添加，正在配置联动...')
+```
+
+然后用 `linkage_ops.py` 添加联动（mapping 中 src=源图表字段名, tgt=目标数据集 FreeMarker 参数名）：
+
+```bash
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/linkage_ops.py" add-linkage \
+  $API_BASE $TOKEN $PAGE_ID \
+  --source "联动源柱形图" --target "联动目标饼图" --mapping "name=name"
+```
+
+### SQL 安全规范（联动场景）
+
+| 场景 | 错误写法 | 正确写法 |
+|------|---------|---------|
+| 处理 NULL 维度值 | `SELECT IFNULL(col,'default') AS name` | `SELECT col AS name ... WHERE col IS NOT NULL` |
+| 处理 NULL 维度值 | `SELECT COALESCE(col,'x') AS name` | `SELECT col AS name ... WHERE col IS NOT NULL` |
+| GROUP BY | `SELECT x AS name ... GROUP BY name` | `SELECT x AS name ... GROUP BY x`（用原表达式） |
+| FreeMarker 条件 | `WHERE col='${name}'`（无判空） | `<#if isNotEmpty(name)>AND col='${name}'</#if>` |
+
+---
+
+## 钻取（Drill-Down）完整配置指南
+
+> 验证日期：2026-04-24；数据类型：dataType=2（SQL 数据集）
+
+### 钻取工作原理
+
+用户点击图表（如柱子） → ECharts 触发点击事件，`params.name` = X 轴标签值 →
+前端读取 `config.drillData` 找到 `source=name` 的映射 → 把 `params.name` 赋给 `target` 指定的 SQL 参数 →
+重新调用数据集查询（带参数）→ 图表刷新，左上角出现回退按钮 ↩
+
+### drillData 正确格式（必须写入 config 顶层）
+
+```python
+"drillData": [{"source": "name", "target": "name"}]
+# source = ECharts 点击事件 params 的字段名（通常是 "name"）
+# target = SQL FreeMarker 参数名（与 <#if isNotEmpty(target)> 中的名称一致）
+```
+
+### fieldOption 必须用前端 DataSource.vue 格式
+
+```python
+# ✅ 正确（前端 EventConfig.vue 第134行：field.value == item.mapping）
+"fieldOption": [
+    {"value": "name",  "label": "名称", "text": "名称", "show": "Y", "type": "String"},
+    {"value": "value", "label": "数量", "text": "数量", "show": "Y", "type": "String"}
+]
+
+# ❌ 错误（后端字段格式，前端读不到 value 键 → 钻取配置"原始"下拉为空）
+"fieldOption": [
+    {"fieldName": "name", "fieldTxt": "名称", "fieldType": "String"}
+]
+```
+
+### SQL FreeMarker 模板（两级钻取示例）
+
+```sql
+SELECT
+<#if isNotEmpty(name)>
+  -- 有参数时：下钻到明细维度（如男女分布）
+  CASE sex WHEN '1' THEN '男' WHEN '2' THEN '女' ELSE '未知' END AS name,
+<#else>
+  -- 无参数时：顶层汇总（如年龄段）
+  age AS name,
+</#if>
+COUNT(*) AS value
+FROM demo
+WHERE sex IS NOT NULL AND sex != ''
+<#if isNotEmpty(name)>
+AND age = '${name}'
+</#if>
+GROUP BY
+<#if isNotEmpty(name)>
+sex
+<#else>
+age
+</#if>
+ORDER BY value DESC
+LIMIT 8
+```
+
+### 可钻取图表的完整 config 结构（对标前端参考 JSON）
+
+```python
+correct_config = {
+    "w": 12, "h": 35,
+    "dataType": 2,
+    "timeOut": 0,
+    "turnConfig": {"url": ""},
+    "linkageConfig": [],
+    "dataMapping": [
+        {"filed": "维度", "mapping": "name"},
+        {"filed": "数值", "mapping": "value"}
+    ],
+    "chartData": "[]",
+    "option": {
+        "grid": {"show": False, "top": 90, "bottom": 115, "containLabel": True},
+        "card": {"title": "", "extra": "", "rightHref": "", "size": "default"},
+        "title": {"text": "图表标题", "show": True, "textStyle": {"fontWeight": "normal"}},
+        "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+        "yAxis": {"yUnit": "", "splitLine": {"interval": 2}},
+        "series": [{"data": [], "type": "bar", "barWidth": 40,
+                    "itemStyle": {"color": "#64b5f6", "borderRadius": 0}}]
+    },
+    "size": {"height": 385},
+    "background": "#FFFFFF",
+    "borderColor": "#FFFFFF",
+    "viewLoading": True,
+    "dataSetId": "<DS_ID>",
+    "dataSetName": "<数据集名>",
+    "dataSetIzAgent": None,          # ← null，不是 ""
+    "dataSetApi": "<SQL>",
+    "dataSetType": "sql",
+    "dataSetMethod": "GET",
+    "seriesType": [],
+    "fieldOption": [                  # ← 必须用 value/label/text/show/type 格式
+        {"value": "name",  "label": "name",  "text": "name",  "show": "Y", "type": "String"},
+        {"value": "value", "label": "value", "text": "value", "show": "Y", "type": "String"}
+    ],
+    "paramOption": [],               # ← 空数组，不要放 FreeMarker 参数对象
+    "query": [],
+    "drillData": [                   # ← 钻取映射，必须在此处
+        {"source": "name", "target": "name"}
+    ],
+    "dictOptions": {},
+    "actionConfig": {"modalName": "", "url": "", "operateType": "modal"}
+}
+```
+
+### 完整端到端脚本（创建数据集 + 绑定图表 + 配置钻取，一次保存）
+
+```python
+# -*- coding: utf-8 -*-
+import sys, os, json, time, random, hashlib, urllib.request
+
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references'))
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references', 'scripts'))
+import bi_utils
+
+API_BASE  = '<api_base>'
+TOKEN     = '<token>'
+PAGE_ID   = '<page_id>'
+DB_SOURCE = '<datasource_id>'
+SECRET    = 'dd05f1c54d63749eda95f9fa6d49v442a'
+
+bi_utils.API_BASE = API_BASE
+bi_utils.TOKEN    = TOKEN
+
+# Step 1: 缓存已有组件
+page = bi_utils.query_page(PAGE_ID)
+tmpl = page.get('template') or []
+if isinstance(tmpl, str): tmpl = json.loads(tmpl)
+bi_utils._page_components[PAGE_ID] = tmpl
+
+# Step 2: 获取/创建「示例数据集」分组
+groups = (bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup').get('result') or [])
+parent_id = next((g['id'] for g in groups if g.get('name') == '示例数据集' and g.get('dataType') is None), '0')
+if parent_id == '0':
+    bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup', data={'groupName': '示例数据集'})
+    groups = (bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup').get('result') or [])
+    parent_id = next((g['id'] for g in groups if g.get('name') == '示例数据集' and g.get('dataType') is None), '0')
+
+# Step 3: 创建 FreeMarker SQL 数据集（两级钻取）
+SQL = """SELECT
+<#if isNotEmpty(name)>
+  CASE sex WHEN '1' THEN '男' WHEN '2' THEN '女' ELSE '未知' END AS name,
+<#else>
+  age AS name,
+</#if>
+COUNT(*) AS value
+FROM demo
+WHERE sex IS NOT NULL AND sex != ''
+<#if isNotEmpty(name)>
+AND age = '${name}'
+</#if>
+GROUP BY
+<#if isNotEmpty(name)>
+sex
+<#else>
+age
+</#if>
+ORDER BY value DESC
+LIMIT 8"""
+
+ds_resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
+    'name': '钻取示例-年龄段人数',
+    'code': f'drill_age_{int(time.time())}',
+    'dataType': 'sql', 'dbSource': DB_SOURCE,
+    'querySql': SQL, 'apiMethod': 'GET',
+    'parentId': parent_id,
+    'datasetItemList': [
+        {'fieldName': 'name',  'fieldTxt': '名称', 'fieldType': 'String',  'izShow': 'Y', 'orderNum': 0},
+        {'fieldName': 'value', 'fieldTxt': '数量', 'fieldType': 'Integer', 'izShow': 'Y', 'orderNum': 1},
+    ],
+    'datasetParamList': [{'paramName': 'name', 'paramTxt': '钻取参数', 'paramType': 'String', 'paramValue': ''}],
+})
+result = ds_resp.get('result', {})
+DS_ID = result.get('id') if isinstance(result, dict) else result
+                  'fieldType': f.get('fieldType', 'String'), 'izShow': 'Y', 'orderNum': i}
+                 for i, f in enumerate(raw)]
+if parsed_fields:
+    ds_full = bi_utils._request('GET', '/drag/onlDragDatasetHead/queryById', params={'id': DS_ID})
+    ds_obj = ds_full.get('result', {}); ds_obj['datasetItemList'] = parsed_fields
+    bi_utils._request('POST', '/drag/onlDragDatasetHead/edit', data=ds_obj)
+
+# Step 5: 构建正确格式的完整 config（含 drillData）
+# ⚠️ 必须在同一脚本同一次 save_page 中写入，不能分两步
+comp_config = {
+    "w": 12, "h": 35,
+    "dataType": 2, "timeOut": 0,
+    "turnConfig": {"url": ""},
+    "linkageConfig": [],
+    "dataMapping": [{"filed": "维度", "mapping": "name"}, {"filed": "数值", "mapping": "value"}],
+    "chartData": "[]",
+    "option": {
+        "grid": {"show": False, "top": 90, "bottom": 115, "containLabel": True},
+        "card": {"title": "", "extra": "", "rightHref": "", "size": "default"},
+        "title": {"text": "可钻取基础柱形图", "show": True, "textStyle": {"fontWeight": "normal"}},
+        "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+        "yAxis": {"yUnit": "", "splitLine": {"interval": 2}},
+        "series": [{"data": [], "type": "bar", "barWidth": 40,
+                    "itemStyle": {"color": "#64b5f6", "borderRadius": 0}, "label": {"position": "top"}}]
+    },
+    "size": {"height": 385},
+    "background": "#FFFFFF", "borderColor": "#FFFFFF", "viewLoading": True,
+    "dataSetId": DS_ID,
+    "dataSetName": "钻取示例-年龄段人数",
+    "dataSetIzAgent": None,
+    "dataSetApi": SQL,
+    "dataSetType": "sql", "dataSetMethod": "GET",
+    "seriesType": [],
+    # ⚠️ fieldOption 必须用 {value, label, text, show, type}
+    "fieldOption": [
+        {"value": "name",  "label": "name",  "text": "name",  "show": "Y", "type": "String"},
+        {"value": "value", "label": "value", "text": "value", "show": "Y", "type": "String"}
+    ],
+    "paramOption": [],
+    "query": [],
+    # ⚠️ drillData 和 config 必须在同一次 save_page 写入
+    "drillData": [{"source": "name", "target": "name"}],
+    "dictOptions": {},
+    "actionConfig": {"modalName": "", "url": "", "operateType": "modal"}
+}
+
+# Step 6: 追加组件并保存
+import random
+max_y = max((c.get('y', 0) + c.get('h', 0) for c in tmpl), default=0)
+comp = {
+    'component': 'JBar', 'componentName': '可钻取基础柱形图',
+    'visible': True, 'i': f'{int(time.time()*1000)}_{random.randint(100000,999999)}',
+    'x': 0, 'y': max_y, 'w': 12, 'h': 35,
+    'orderNum': len(tmpl) * 10 + 10,
+    'config': comp_config
+}
+tmpl.append(comp)
+bi_utils._page_components[PAGE_ID] = tmpl
+bi_utils.save_page(PAGE_ID)
+print(f'完成！预览: {API_BASE}/drag/page/view/{PAGE_ID}')
+```
+
+### 踩坑清单（钻取专项）
+
+| 问题 | 原因 | 解决 |
+|------|------|------|
+| 钻取配置面板「原始」下拉为空 | fieldOption 用了 `{fieldName}` 而非 `{value}` | 改用 `{value, label, text, show, type}` |
+| 钻取配置面板「暂无数据」 | drillData 未写入 config，或被后续 save_page 覆盖 | 在同一次 save_page 中同时写 drillData 和数据集 config |
+| 点击柱子无反应 | dataType=1 静态数据无法重查 | 必须用 FreeMarker SQL 数据集 |
+| 点击后数据不变 | FreeMarker 参数名与 drillData.target 不一致 | target 必须与 SQL 中 `isNotEmpty(xxx)` 的参数名一致 |
+| 分两步写入 drillData 总是丢失 | 第二次 save_page 覆盖 config，drillData 不在新 config 中 | 必须一步完成，dataset + drillData 写在同一个 config，一次 save_page |
+
+---
+
+## singleFile 文件数据集踩坑（2026-05-09 实踩）
+
+### 🚨 后端会按 datasetItemList 字段名重建 SQL，字段名必须是表中真实列名
+
+**现象**：设置 SQL 为 `SELECT bsl_pi_name AS name, count(*) AS cnt FROM table GROUP BY bsl_pi_name`，`datasetItemList` 中字段名写 `name`/`cnt`（SQL别名），保存后前端执行变成 `SELECT name, SUM(cnt) AS cnt FROM table GROUP BY name`，报错 `Column 'name' not found in any table`。
+
+**根本原因**：singleFile（及 FILES）数据集保存时，后端会用 `datasetItemList` 中的 `fieldName` 重建执行 SQL（形如 `SELECT {f1}, SUM({f2}) AS {f2} FROM table GROUP BY {f1}`）。如果 `fieldName` 是 SQL 别名（`name`/`cnt`），这些列在 H2 表中根本不存在，查询必然报错。
+
+**正确做法**：singleFile 数据集的 SQL 必须用真实列名，`datasetItemList` 的 `fieldName` 也必须是真实列名：
+
+```python
+# ✅ 正确：SQL 用真实列名，fieldName 也是真实列名
+ds['querySql'] = f'select * from {table_name}'
+ds['datasetItemList'] = [
+    {'fieldName': 'bsl_pi_name', 'fieldTxt': '产品名称', 'fieldType': 'String',  'izShow': 'Y', 'orderNum': 0},
+    {'fieldName': 'bsl_amount',  'fieldTxt': '数量',     'fieldType': 'Integer', 'izShow': 'Y', 'orderNum': 1},
+]
+# dataMapping 也用真实列名
+cfg['dataMapping'] = [
+    {'filed': '维度', 'mapping': 'bsl_pi_name'},
+    {'filed': '数值', 'mapping': 'bsl_amount'},
+]
+
+# ❌ 错误：SQL 用别名，fieldName 也用别名
+ds['querySql'] = f'select bsl_pi_name as name, count(*) as cnt from {table_name} GROUP BY bsl_pi_name'
+ds['datasetItemList'] = [
+    {'fieldName': 'name', ...},   # 'name' 不是表中真实列，后端重建 SQL 报错
+    {'fieldName': 'cnt',  ...},
+]
+```
+
+### 🚨 禁止在 singleFile 数据集中使用 count(*) 等无别名聚合函数
+
+**现象**：SQL 用 `select bsl_pi_name, count(*) from table GROUP BY bsl_pi_name`，H2 引擎把 `count(*)` 列命名为 `EXPR$1`，若把 `EXPR$1` 写入 `fieldName`，后端重建 SQL 变成 `SELECT bsl_pi_name, SUM(EXPR$1) AS EXPR$1 FROM table GROUP BY bsl_pi_name`，`EXPR$1` 是 H2 内部名，真实表中不存在，必报错。
+
+**根本原因**：`EXPR$N` 是 H2/Calcite 引擎对无别名表达式的内部列名，不是真实列名，不能作为 `fieldName` 使用。
+
+**正确做法**：singleFile 数据集**禁止 GROUP BY 聚合**。直接 `select *` 取全量数据，由图表前端展示明细行（饼图会按维度字段自动聚合同名值）：
+
+```python
+# ✅ 正确：select * 取全量，图表前端自动处理
+ds['querySql'] = f'select * from {table_name}'
+
+# ❌ 错误：GROUP BY 导致聚合列变成 EXPR$N
+ds['querySql'] = f'select bsl_pi_name, count(*) from {table_name} GROUP BY bsl_pi_name'
+```
+
+### singleFile 数据集完整正确流程总结
+
+| 步骤 | 正确做法 | 禁止 |
+|------|---------|------|
+| 上传文件 | `isSingle=true`，从返回的 `dbUrl` 取 `table_name` | 用 FILES 模式上传单文件 |
+| 解析字段 | `queryFileFieldBySql`（**需签名**），参数 `dbCode=PAGE_ID` | 用 `queryFieldBySql`（SQL数据库接口，不适用于文件） |
+| SQL | `select * from {table_name}` | GROUP BY、别名、聚合函数 |
+| datasetItemList fieldName | 必须是 H2 表中**真实存在的列名** | SQL 别名、H2 内部名（EXPR$N） |
+| code 字段 | 必须等于 `table_name`（如 `jmf.Sheet1_xxx_excel`） | 自造随机字符串 |
+| dataSetIzAgent（组件 config） | 空字符串 `''` | `'0'` 或 `'1'` |
+| dataMapping.mapping | 真实列名 | SQL 别名 |
+| dataSetIzAgent 用 `""` 导致行为异常 | SQL 数据集该字段应为 null | 赋值 `None`（Python）→ JSON null |

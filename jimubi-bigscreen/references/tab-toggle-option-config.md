@@ -4,6 +4,18 @@
 >
 > 用途：点击/自动轮播切换高亮项，同时控制页面其他组件的显示/隐藏，实现多页面导航效果。
 
+## ⚠️ 陷阱：personalizedMode=true 无图片时 Tab 不渲染
+
+`option.personalizedMode: true` 是"个性化模式"，要求每个 item 配置独立的 `normalImgUrl` / `activeImgUrl`。**若图片 URL 为空字符串，组件会渲染一个空白框，Tab 文字完全不显示**（平台前端 TabToggle.vue 行为，不会报错）。
+
+**正确做法**：
+- 不使用图片时，保持 `personalizedMode: false`（默认值），使用通用 `normal` / `active` 样式
+- 需要每项独立图片时才开启 `personalizedMode: true`，并为每个 item 提供有效 URL
+
+`defaults/JTabToggle.json` 已修正为 `personalizedMode: false`。
+
+---
+
 ## 基础配置
 
 | 说明 | 配置路径 | 默认值 |

@@ -55,7 +55,7 @@
  "options": [{"value": "1", "label": "男"}, {"value": "2", "label": "女"}]}
 ```
 
-## 主表支持的 type 及可选参数
+## 主表支持的 type
 
 **所有主表控件（除 divider/text/buttons/tabs 布局控件外）均支持以下两个通用参数：**
 
@@ -72,52 +72,54 @@
 ```
 > 详见 `desform-context-vars.md` — 完整变量列表、混合语法、注意事项。
 
-| type | 可选参数 | 说明 |
-|------|---------|------|
-| `input` | `required`, `placeholder`, `unique`, `remoteAPI`, `fillRuleCode`, `readonly` | 单行文本 |
-| `textarea` | `required`, `remoteAPI`, `fillRuleCode`, `readonly` | 多行文本 |
-| `number` | `required`, `unit`, `precision`, `remoteAPI` | 数字 |
-| `integer` | `required`, `unit`, `remoteAPI` | 整数 |
-| `money` | `required`, `unit`, `remoteAPI` | 金额 |
-| `date` | `required`, `fmt` | 日期（fmt 默认 `yyyy-MM-dd`） |
-| `time` | `required` | 时间 |
-| `switch` | - | 开关 |
-| `slider` | - | 滑块 |
-| `rate` | - | 评分 |
-| `color` | - | 颜色 |
-| `radio` | `options`(必填), `required`, `dictCode` | 单选 |
-| `select` | `options`(必填), `required`, `multiple`, `dictCode` | 下拉 |
-| `checkbox` | `options`(必填), `required`, `dictCode` | 多选 |
-| `select-user` | `required`, `multiple` | 选人 |
-| `select-depart` | `required`, `multiple` | 选部门 |
-| `select-depart-post` | `required` | 选岗位 |
-| `org-role` | `required`, `multiple` | 组织角色 |
-| `phone` | `required` | 手机 |
-| `email` | `required` | 邮箱 |
-| `area-linkage` | `required` | 省市级联 |
-| `table-dict` | `dictTable`, `dictCodeCol`, `dictTextCol`, `style`, `multiple`, `queryScope` | 表字典（options 内置 dictTable/dictCode/dictText/queryScope；**style=popup 时 dictTextCol 会被替换为该控件自身的 model**；queryScope=database 时仅支持 style=select） |
-| `select-tree` | `categoryCode`(必填), `dataFrom`(必填), `tableConf`, `required`, `multiple` | 下拉树；**`categoryCode` 和 `dataFrom` 必须显式传入，不可省略**；`dataFrom="category"` 时传 `categoryCode`（默认 `"B02"`）；`dataFrom="table"` 时传 `tableConf`（含 name/code/text/pidField/rootPid/leaf/converIsLeafVal） |
-| `file-upload` | `required` | 文件上传 |
-| `imgupload` | `required` | 图片上传 |
-| `hand-sign` | `required` | 手写签名 |
-| `auto-number` | `prefix` | 自动编号 |
-| `barcode` | `sourceModel`, `codeType`(`barcode`/`qrcode`), `maxWidth` | 条码/二维码 |
-| `capital-money` | `moneyField`, `moneyWidgetKey` | 大写金额（关联 money/formula/summary 字段） |
-| `text-compose` | `expression` | 文本组合（$model$ 引用字段） |
-| `location` | `required`, `defaultCurrent`, `showMap` | 定位 |
-| `map` | `height`, `zoom`, `lng`, `lat` | 地图（百度地图） |
-| `ocr` | `ocrType`(`normal`/`id_card`/`vat_invoice`/`train_ticket`), `fieldMapping` | 文本识别 |
-| `formula` | `mode`, `expression`, `decimal`, `unit` | 公式 |
-| `divider` | `text` | 分隔符（name 会被忽略，用 text） |
-| `editor` | `required` | 富文本 |
-| `markdown` | `required` | Markdown |
-| `text` | `text`, `fontSize`, `fontColor`, `align`, `bold` | 静态文本（不存储数据） |
-| `buttons` | `text`, `btnType`, `icon`, `clickCode` | 按钮（不存储数据） |
-| `tabs` | `tabLabels`(数组), `tabType`, `position` | 标签页容器（见下方 tabs 说明） |
-| `link-record` | `sourceCode`, `titleField`, `showFields`, `showMode`, `showType` | 关联记录 |
-| `link-field` | `linkRecordKey`, `showField`, `fieldType`, `fieldOptions` | 他表字段 |
-| `summary` | `linkTable`, `field`, `summaryType`, `filter` | 汇总（summaryType: inner-sum/inner-average/inner-max/inner-min/inner-record-count/inner-completed-count/inner-incompletely-count/inner-date-earliest/inner-date-latest） |
-| `sub-table-design` | `fields`(必填，子控件数组) | 设计子表（见下方子表说明） |
+> **各 type 的完整参数（含 `disabled`/`hidden`/`placeholder` 等所有字段）见权威文档 `desform-widget-options.md`**，按 SKILL.md 中的 `WIDGET_OPTIONS_INDEX` 索引定位对应控件片段直接阅读，不要凭记忆填写参数。
+
+| type | 说明 |
+|------|------|
+| `input` | 单行文本 |
+| `textarea` | 多行文本 |
+| `number` | 数字 |
+| `integer` | 整数 |
+| `money` | 金额 |
+| `date` | 日期（`fmt` 默认 `yyyy-MM-dd`；`type:"daterange"` 开启范围选择） |
+| `time` | 时间 |
+| `switch` | 开关 |
+| `slider` | 滑块 |
+| `rate` | 评分 |
+| `color` | 颜色 |
+| `radio` | 单选（`options` 必填） |
+| `select` | 下拉（`options` 必填） |
+| `checkbox` | 多选（`options` 必填） |
+| `select-user` | 选人 |
+| `select-depart` | 选部门 |
+| `select-depart-post` | 选岗位 |
+| `org-role` | 组织角色 |
+| `phone` | 手机 |
+| `email` | 邮箱 |
+| `area-linkage` | 省市级联 |
+| `table-dict` | 表字典弹窗选择（**style=popup 时 dictTextCol 会被替换为该控件自身的 model**；queryScope=database 时仅支持 style=select） |
+| `select-tree` | 下拉树（**`categoryCode` 和 `dataFrom` 必须显式传入**；`dataFrom="category"` 配 `categoryCode`，默认 `"B02"`；`dataFrom="table"` 配 `tableConf`） |
+| `file-upload` | 文件上传 |
+| `imgupload` | 图片上传 |
+| `hand-sign` | 手写签名 |
+| `auto-number` | 自动编号 |
+| `barcode` | 条码/二维码 |
+| `capital-money` | 大写金额（关联 money/formula/summary 字段） |
+| `text-compose` | 文本组合（$model$ 引用字段） |
+| `location` | 定位 |
+| `map` | 地图（百度地图） |
+| `ocr` | 文本识别 |
+| `formula` | 公式 |
+| `divider` | 分隔符（`name` 会被忽略，用 `text`） |
+| `editor` | 富文本 |
+| `markdown` | Markdown |
+| `text` | 静态文本（不存储数据） |
+| `buttons` | 按钮（不存储数据） |
+| `tabs` | 标签页容器（见下方 tabs 说明） |
+| `link-record` | 关联记录 |
+| `link-field` | 他表字段 |
+| `summary` | 汇总（summaryType: inner-sum/inner-average/inner-max/inner-min/inner-record-count/inner-completed-count/inner-incompletely-count/inner-date-earliest/inner-date-latest） |
+| `sub-table-design` | 设计子表（`fields` 必填，见下方子表说明） |
 
 ---
 
@@ -228,63 +230,38 @@
 
 > **注意：** 子表内只支持以下 type，不要凭空捏造不存在的类型。数字用 `number`，整数用 `integer`，多行文本用 `textarea`。
 
-**基础类型：**
+> **各 type 的完整参数见 `desform-widget-options.md`**（同主表，按 WIDGET_OPTIONS_INDEX 定位）。子表内控件用 `col_width` 控制列宽，不用 `autoWidth`。
 
-| type | 可选参数 | 说明 |
-|------|---------|------|
-| `input` | `required`, `col_width` | 单行文本 |
-| `textarea` | `required`, `col_width` | 多行文本 |
-| `integer` | `required`, `col_width`, `unit` | 整数 |
-| `number` | `required`, `col_width`, `unit` | 数字 |
-| `money` | `required`, `col_width`, `unit` | 金额 |
-| `date` | `required`, `col_width` | 日期 |
-| `time` | `required`, `col_width` | 时间 |
-
-**选择类型：**
-
-| type | 可选参数 | 说明 |
-|------|---------|------|
-| `select` | `options`(必填), `required`, `col_width`, `dictCode` | 下拉选择 |
-| `radio` | `options`(必填), `required`, `col_width`, `dictCode` | 单选 |
-| `checkbox` | `options`(必填), `required`, `col_width`, `dictCode` | 多选 |
-| `table-dict` | `dictTable`, `dictCodeCol`, `dictTextCol`, `queryScope`, `required`, `col_width` | 表字典（options 内置 dictTable/dictCode/dictText/queryScope；queryScope=database 时仅支持 style=select） |
-| `select-tree` | `categoryCode`, `required`, `col_width` | 下拉树 |
-
-**系统类型：**
-
-| type | 可选参数 | 说明 |
-|------|---------|------|
-| `select-user` | `required`, `col_width`, `multiple` | 选人 |
-| `select-depart` | `required`, `col_width`, `multiple` | 选部门 |
-| `select-depart-post` | `required`, `col_width` | 选岗位 |
-| `phone` | `required`, `col_width` | 手机 |
-| `email` | `required`, `col_width` | 邮箱 |
-| `area-linkage` | `required`, `col_width` | 省市级联 |
-
-**开关/滑块/评分：**
-
-| type | 可选参数 | 说明 |
-|------|---------|------|
-| `switch` | `col_width`, `active`, `inactive` | 开关（默认 Y/N） |
-| `slider` | `col_width` | 滑块 |
-| `rate` | `col_width` | 评分 |
-| `color` | `col_width` | 颜色 |
-
-**文件类型：**
-
-| type | 可选参数 | 说明 |
-|------|---------|------|
-| `imgupload` | `required`, `col_width` | 图片上传（子表内缩略图自动缩小为 50x50） |
-| `file-upload` | `required`, `col_width` | 文件上传 |
-
-**关联/公式：**
-
-| type | 可选参数 | 说明 |
-|------|---------|------|
-| `link-record` | `sourceCode`, `titleField`, `showFields`, `showMode` | 关联记录（子表内强制为下拉模式） |
-| `link-field` | `linkRecordKey`, `showField`, `fieldType`, `fieldOptions` | 他表字段（子表内强制为保存模式） |
-| `formula` | `mode`, `expression`, `col_width`, `unit` | 公式 |
-| `product` | `field_models`(必填), `col_width`, `unit` | 乘积公式 |
+| type | 说明 |
+|------|------|
+| `input` | 单行文本 |
+| `textarea` | 多行文本 |
+| `integer` | 整数 |
+| `number` | 数字 |
+| `money` | 金额 |
+| `date` | 日期 |
+| `time` | 时间 |
+| `select` | 下拉选择（`options` 必填） |
+| `radio` | 单选（`options` 必填） |
+| `checkbox` | 多选（`options` 必填） |
+| `table-dict` | 表字典（queryScope=database 时仅支持 style=select） |
+| `select-tree` | 下拉树 |
+| `select-user` | 选人 |
+| `select-depart` | 选部门 |
+| `select-depart-post` | 选岗位 |
+| `phone` | 手机 |
+| `email` | 邮箱 |
+| `area-linkage` | 省市级联 |
+| `switch` | 开关（默认 Y/N） |
+| `slider` | 滑块 |
+| `rate` | 评分 |
+| `color` | 颜色 |
+| `imgupload` | 图片上传（子表内缩略图自动缩小为 50x50） |
+| `file-upload` | 文件上传 |
+| `link-record` | 关联记录（子表内强制为下拉模式） |
+| `link-field` | 他表字段（子表内强制为保存模式） |
+| `formula` | 公式 |
+| `product` | 乘积公式（`field_models` 必填） |
 
 ### 子表内特殊约束（源码强制行为）
 
@@ -307,47 +284,17 @@
   "layout": "word",
   "fields": [
     {"name": "自动编号", "type": "auto-number", "prefix": "GCYS"},
-    {"name": "条码", "type": "barcode"},
     {"name": "工程名称", "type": "input", "required": true},
-    {"name": "工程编号", "type": "input"},
     {"name": "工程类别", "type": "radio", "options": ["土建工程", "安装工程", "装饰工程", "市政工程"]},
-    {"name": "建设单位", "type": "input"},
-    {"name": "工程地址", "type": "input"},
-    {"name": "施工单位", "type": "input"},
+    {"name": "负责人", "type": "select-user", "required": true},
+    {"name": "所属部门", "type": "select-depart"},
     {"name": "开工时间", "type": "date"},
     {"name": "完工时间", "type": "date"},
     {"name": "工程量清单", "type": "textarea"},
-    {"name": "图片上传", "type": "imgupload"},
-    {"name": "定位", "type": "location"},
-    {"name": "验收类别", "type": "radio", "options": ["竣工验收", "分部验收", "专项验收"]},
-    {"name": "施工单位项目经理签字", "type": "hand-sign"},
-    {"name": "---", "type": "divider", "text": "广电工程完工验收报告"},
-    {"name": "工程名称(报告)", "type": "input"},
-    {"name": "工程编号(报告)", "type": "input"},
-    {"name": "建设单位(报告)", "type": "input"},
-    {"name": "施工单位(报告)", "type": "input"},
-    {"name": "开工时间(报告)", "type": "date"},
-    {"name": "完工时间(报告)", "type": "date"},
-    {"name": "验收时间", "type": "time"},
-    {"name": "验收类别(报告)", "type": "radio", "options": ["竣工验收", "分部验收", "专项验收"]},
-    {"name": "---", "type": "divider", "text": "竣工项目分项审查情况"},
-    {"name": "立项手续完整性", "type": "radio", "options": ["合格", "不合格", "整改后合格"]},
-    {"name": "项目主体组签字(立项)", "type": "hand-sign"},
-    {"name": "竣工资料完整性", "type": "radio", "options": ["合格", "不合格", "整改后合格"]},
-    {"name": "项目主体组签字(资料)", "type": "hand-sign"},
-    {"name": "施工工艺合规性", "type": "radio", "options": ["合格", "不合格", "整改后合格"]},
-    {"name": "项目主体组签字(工艺)", "type": "hand-sign"},
-    {"name": "技术指标达标情况", "type": "radio", "options": ["合格", "不合格", "整改后合格"]},
-    {"name": "项目主体组签字(技术)", "type": "hand-sign"},
-    {"name": "材料设备核定结果", "type": "radio", "options": ["合格", "不合格", "整改后合格"]},
-    {"name": "项目主体组签字(材料)", "type": "hand-sign"},
-    {"name": "工程量核量结果", "type": "radio", "options": ["合格", "不合格", "整改后合格"]},
-    {"name": "项目主体组签字(核量)", "type": "hand-sign"},
-    {"name": "验收问题清单", "type": "textarea"},
+    {"name": "现场图片", "type": "imgupload"},
+    {"name": "---", "type": "divider", "text": "验收审查"},
     {"name": "验收结论", "type": "radio", "options": ["合格", "不合格", "整改后复验"]},
-    {"name": "技术部负责人签字", "type": "hand-sign"},
-    {"name": "施工单位签字", "type": "hand-sign"},
-    {"name": "分管领导组签字", "type": "hand-sign"}
+    {"name": "负责人签字", "type": "hand-sign"}
   ],
   "menuParent": "工程验收管理"
 }

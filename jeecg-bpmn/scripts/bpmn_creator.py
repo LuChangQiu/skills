@@ -215,9 +215,12 @@ def build_countersign_parts(cs):
         extra_attrs += f' flowable:countersignProportion="{proportion}"'
 
     # ── 2. taskCountersignExtendJson ──
-    # customUser 类型（自定义-指定人员）：无 taskCountersignExtendJson
+    # customUser 类型（自定义-指定人员）：需写入 taskCountersignExtendJson 让前端识别为"会签自定义"
     if utype == 'customUser':
-        cs_extend_b64 = None
+        cs_full = {'auditorUserType': 'customUser', 'timestamp': int(time.time() * 1000)}
+        cs_extend_b64 = base64.b64encode(
+            json.dumps(cs_full, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        ).decode('ascii')
         collection = cs.get('customCollection') or '${flowUtil.stringToList(assigneeUserIdList)}'
         prop_val = proportion or '0.5'
         _cond_map = {
@@ -2897,7 +2900,22 @@ def validate_and_fix_layout(xml, config):
     if len(layout_issues) > 5:
         print(f'    - ... 共 {len(layout_issues)} 处')
 
-    # ── 3. 重建 DI 区块（复用 build_bpmn_xml 内的布局逻辑） ─────────────────
+    # ── 3. 优先使用拓扑布局引擎重建 DI 区块 ──────────────────────────────────
+    try:
+        import sys as _sys, os as _os
+        _scripts_dir = _os.path.dirname(_os.path.abspath(__file__))
+        if _scripts_dir not in _sys.path:
+            _sys.path.insert(0, _scripts_dir)
+        from bpmn_layout_engine import recompute_layout as _recompute_layout
+        import xml.etree.ElementTree as _ET2
+        fixed_xml = _recompute_layout(xml)
+        _ET2.fromstring(fixed_xml)  # 验证 XML 合法
+        print('  [布局引擎] 拓扑引擎修复成功')
+        return fixed_xml, True, issues_desc
+    except Exception as _eng_e:
+        print(f'  [布局引擎] 新引擎失败({type(_eng_e).__name__}: {_eng_e})，降级到内置算法')
+
+    # ── 4. 降级：重建 DI 区块（复用 build_bpmn_xml 内的布局逻辑） ──────────
     nodes = config['nodes']
     flows = config['flows']
 

@@ -39,7 +39,7 @@
     }
   ],
   "option": {
-    "personalizedMode": true,
+    "personalizedMode": false,
     "currentValue": null,
     "normal": {
       "fontSize": 20,

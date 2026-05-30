@@ -58,9 +58,10 @@ import sys
 import argparse
 
 from jimureport_utils import (
-    Session, gen_layer, parse_sql, save_db,
+    Session, gen_id, gen_layer, parse_sql, save_db,
     make_designer, base_save, get_report, print_summary,
 )
+from jimureport_datasource import resolve_ds_id, generate_sql_via_ai
 
 # Windows 控制台中文
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -276,8 +277,8 @@ def build_echarts_config(chart_type: str, chart_config: dict, theme: dict) -> di
             "title":   {"text": title_text, "left": "center"},
             "tooltip": {"trigger": "axis"},
             "legend":  {"bottom": 0},
-            "xAxis":   [{"type": "value" if is_h else "category", "data": []}],
-            "yAxis":   [{"type": "category" if is_h else "value",  "data": []}],
+            "xAxis":   {"show": True, "type": "value" if is_h else "category", "data": []},
+            "yAxis":   {"show": True, "type": "category" if is_h else "value",  "data": []},
             "series":  [{"type": "bar", "data": [], "itemStyle": {"color": colors[0]}}],
             "color":   colors,
         }
@@ -288,8 +289,8 @@ def build_echarts_config(chart_type: str, chart_config: dict, theme: dict) -> di
                         "textStyle": {"fontSize": 16, "color": theme["title"]}},
             "grid":    {"left": 60, "top": 60, "right": 40, "bottom": 60},
             "tooltip": {"show": True, "trigger": "axis"},
-            "xAxis":   [{"type": "category", "data": []}],
-            "yAxis":   [{"type": "value", "minInterval": 1}],
+            "xAxis":   {"show": True, "type": "category", "data": []},
+            "yAxis":   {"show": True, "type": "value", "minInterval": 1},
             "series":  [{"type": "line", "data": [], "smooth": smooth,
                          "lineStyle": {"width": 3, "color": theme["chart"]},
                          "itemStyle": {"color": theme["chart"]},
@@ -317,8 +318,8 @@ def build_echarts_config(chart_type: str, chart_config: dict, theme: dict) -> di
     if chart_type == "mixed.linebar":
         return {"title": {"text": title_text, "left": "center"},
                 "tooltip": {"trigger": "axis"}, "legend": {"bottom": 0},
-                "xAxis": [{"type": "category", "data": []}],
-                "yAxis": [{"type": "value"}],
+                "xAxis": {"show": True, "type": "category", "data": []},
+                "yAxis": {"show": True, "type": "value"},
                 "series": [{"type": "bar",  "data": []},
                            {"type": "line", "data": [], "smooth": True}],
                 "color": colors}
@@ -336,15 +337,18 @@ def create_report(session: Session, config: dict) -> str | None:
     styles = build_styles(theme)
     print(f"\n{'=' * 50}\n创建积木报表: {report_name}\n{'=' * 50}")
 
-    # Step 1: 创建空报表，取服务端 ID
-    r = session.request("/save", base_save("", make_designer("", report_name)))
-    report_id = r["result"]["id"]
+    # Step 1: 客户端预生成 report_id（orphan，saveDb/link 接受）
+    report_id = gen_id()
     designer  = make_designer(report_id, report_name)
     print(f"  report_id={report_id}")
 
-    # Step 2: 解析并保存数据集（支持 SQL / JSON）
+    # Step 2: 解析并保存数据集（支持 SQL / API / JSON / 文件 / JavaBean / 共享）
     print("\n[1/3] 保存数据集...")
     dataset_ids: dict = {}
+    # dbCode → chart extData dataType 字符串，供后续图表 dataType 自动修正使用
+    # dbType: "0"=SQL "1"=API "2"=JavaBean "3"=JSON "4"=共享 "5"=文件(Calcite-SQL查询)
+    _DBTYPE_TO_CHART = {"0":"sql","1":"api","2":"javabean","3":"json","4":"sql","5":"files"}
+    dataset_chart_types: dict = {}
     for ds in config.get("datasets", []):
         db_code  = ds["dbCode"]
         db_type  = ds.get("dbType", "0")  # "0"=SQL, "3"=JSON
@@ -369,19 +373,103 @@ def create_report(session: Session, config: dict) -> str | None:
             resp = session.request("/saveDb", save_body)
             ds_id = resp["result"]["id"]
             print(f"  [{db_code}] JSON数据集 OK  id={ds_id}  records={len(json_data)}")
-        else:
-            # ── SQL 数据集 ──
-            sql = ds.get("dbDynSql", "")
-            print(f"  解析 [{db_code}]: {sql[:60]}{'...' if len(sql) > 60 else ''}")
-            fl = parse_sql(session, sql, ds.get("dbSource", ""))
+            dataset_chart_types[db_code] = "json"
+        elif db_type == "1":
+            # ── API 数据集 ──
+            api_url = ds.get("apiUrl", ds.get("dbDynSql", ""))
+            fl = ds.get("fieldList") or []
+            if fl and isinstance(fl[0], (list, tuple)):
+                fl = [{"fieldName":f,"fieldText":t,"widgetType":"String","orderNum":i,
+                       "tableIndex":0,"extJson":"","dictCode":""} for i,(f,t) in enumerate(fl)]
+            ds_id = save_db(session, report_id, db_code,
+                            ds.get("dbChName", db_code), api_url, fl,
+                            ds.get("paramList") or None,
+                            db_type="1", api_url=api_url,
+                            api_method=ds.get("apiMethod", "0"),
+                            is_list=ds.get("isList", "1"),
+                            is_page=ds.get("isPage", "1"))
+            print(f"  [{db_code}] API数据集 OK  id={ds_id}")
+            dataset_chart_types[db_code] = "api"
+        elif db_type == "2":
+            # ── JavaBean 数据集 ──
+            java_value = ds.get("javaValue", ds.get("dbDynSql", ""))
+            fl = ds.get("fieldList") or []
+            if fl and isinstance(fl[0], (list, tuple)):
+                fl = [{"fieldName":f,"fieldText":t,"widgetType":"String","orderNum":i,
+                       "tableIndex":0,"extJson":"","dictCode":""} for i,(f,t) in enumerate(fl)]
+            if not fl:
+                # 自动调 /queryFieldByBean 获取字段列表
+                r = session.request("/queryFieldByBean",
+                                    {"javaType": "spring-key", "javaValue": java_value})
+                fl = r.get("result", [])
+            ds_id = save_db(session, report_id, db_code,
+                            ds.get("dbChName", db_code), java_value, fl,
+                            ds.get("paramList") or None,
+                            db_type="2",
+                            java_type="spring-key", java_value=java_value,
+                            is_list=ds.get("isList", "1"),
+                            is_page=ds.get("isPage", "0"))
+            print(f"  [{db_code}] JavaBean数据集 OK  id={ds_id}  bean={java_value}")
+            dataset_chart_types[db_code] = "javabean"
+        elif db_type in ("es", "mongo", "mongodb", "redis"):
+            # ── NoSQL 数据集（ES / MongoDB / Redis）── 实际保存类型均为 SQL ("0")
+            # Calcite schema 前缀：es→"es."  mongo/mongodb→"mongo."  redis→无前缀
+            import re as _re
+            _SCHEMA   = {"es": "es",    "mongo": "mongo", "mongodb": "mongo", "redis": None}
+            _IDX_KEY  = {"es": "esIndex", "mongo": "mongoCollection", "mongodb": "mongoCollection", "redis": None}
+            schema    = _SCHEMA[db_type]
+            idx_key   = _IDX_KEY[db_type]
+            idx       = ds.get(idx_key, "") if idx_key else ""
+            sql       = ds.get("dbDynSql", "")
+
+            if idx and not sql:
+                # 简写字段（esIndex / mongoCollection）→ 自动生成 SELECT *
+                prefix = f"{schema}." if schema else ""
+                sql = f"SELECT * FROM {prefix}{idx}"
+            elif sql and schema and not _re.search(rf'(?i)\bFROM\s+{schema}\.', sql):
+                # SQL 有但缺少 schema 前缀，自动注入
+                sql = _re.sub(r'(?i)(FROM\s+)(\w+)', rf'\1{schema}.\2', sql, count=1)
+
+            db_source = resolve_ds_id(session, ds.get("dbSource", ""))
+            label = db_type.upper()
+            print(f"  解析 [{db_code}] ({label}): {sql[:70]}{'...' if len(sql) > 70 else ''}")
+            fl = parse_sql(session, sql, db_source)
             for f in fl:
                 if f["fieldName"] in ds.get("fieldTextMap", {}):
                     f["fieldText"] = ds["fieldTextMap"][f["fieldName"]]
             ds_id = save_db(session, report_id, db_code,
                             ds.get("dbChName", db_code), sql, fl,
+                            ds.get("paramList") or None,
+                            db_type="0",
+                            db_source=db_source,
+                            is_list=ds.get("isList", "1"),
+                            is_page=ds.get("isPage", "1"))
+            print(f"  [{db_code}] {label}数据集 OK  id={ds_id}")
+            dataset_chart_types[db_code] = "sql"
+
+        else:
+            # ── SQL 数据集 ──
+            db_source = resolve_ds_id(session, ds.get("dbSource", ""))
+            sql = ds.get("dbDynSql", "")
+            # 只给了自然语言 requirement、没给 SQL → 调内置 AI 接口按真实表 DDL 生成 SQL
+            if not sql and ds.get("requirement"):
+                sql = generate_sql_via_ai(session, db_source, ds["requirement"])
+                print(f"  [{db_code}] AI 生成 SQL: {sql[:80]}{'...' if len(sql) > 80 else ''}")
+            print(f"  解析 [{db_code}]: {sql[:60]}{'...' if len(sql) > 60 else ''}")
+            fl = parse_sql(session, sql, db_source)
+            for f in fl:
+                if f["fieldName"] in ds.get("fieldTextMap", {}):
+                    f["fieldText"] = ds["fieldTextMap"][f["fieldName"]]
+            ds_id = save_db(session, report_id, db_code,
+                            ds.get("dbChName", db_code), sql, fl,
+                            ds.get("paramList") or None,
+                            db_source=db_source,
+                            is_list=ds.get("isList", "1"),
                             is_page=ds.get("isPage", "1"))
             print(f"  [{db_code}] SQL数据集 OK  id={ds_id}")
+            dataset_chart_types[db_code] = "sql"
 
+        dataset_chart_types.setdefault(db_code, _DBTYPE_TO_CHART.get(str(db_type), "sql"))
         dataset_ids[db_code] = ds_id
 
     # Step 3: 构造布局
@@ -438,6 +526,23 @@ def create_report(session: Session, config: dict) -> str | None:
         _add_chart(1, 1, 6)
         print(f"  布局: 仅图表")
 
+    elif table_config and config.get("charts"):
+        # 表格 + 多图表（chart_linkage 场景）
+        t_rows, t_merges, next_row, group_config = build_table_rows(table_config)
+        all_rows.update(t_rows); all_merges.extend(t_merges)
+        cur_row = next_row + 1
+        for ch_cfg in config["charts"]:
+            ch_db_id = dataset_ids.get(ch_cfg["datasetCode"], "")
+            saved_chart_config = chart_config
+            chart_config = ch_cfg
+            c_rows, c_list, next_r = build_chart_rows(ch_cfg, ch_db_id, theme, cur_row, 1, col_count)
+            chart_config = saved_chart_config
+            all_rows.update(c_rows)
+            chart_list.extend(c_list)
+            cur_row = next_r + int(ch_cfg.get("height", 350)) // 25 + 2
+        all_rows[str(cur_row + 5)] = {"cells": {"1": {"text": " "}}}
+        print(f"  布局: 数据表 + {len(config['charts'])} 个图表")
+
     elif table_config:
         t_rows, t_merges, _, group_config = build_table_rows(table_config)
         all_rows.update(t_rows); all_merges.extend(t_merges)
@@ -467,15 +572,139 @@ def create_report(session: Session, config: dict) -> str | None:
         cols = build_cols(table_config["columns"]) if table_config else {"len": 100}
     total_w = sum(v["width"] for v in cols.values() if isinstance(v, dict) and "width" in v)
 
+    # Step 3.5: 钻取/联动（在 /save 之前创建 link，把 link_id 回填到 rows/chartList）
+    drilling_links: dict = {}   # field → link_id
+    linkage_links: list = []    # ordered list of link_ids
+    if config.get("drilling"):
+        for d in config["drilling"]:
+            param_list = [{"paramName": p["paramName"],
+                           "paramValue": p.get("paramValue", p.get("fieldName", "")),
+                           "tableIndex": p.get("tableIndex", 0),
+                           "dbCode": p.get("dbCode", table_config["datasetCode"] if table_config else ""),
+                           "fieldName": p.get("fieldName", "")}
+                          for p in d.get("params", [])]
+            link_type = d.get("linkType", "0")
+            target_report = d.get("targetReportId", report_id if link_type == "1" else "")
+            payload = {
+                "reportId":    target_report or report_id,
+                "linkName":    d.get("name", "钻取"),
+                "linkType":    link_type,
+                "ejectType":   d.get("ejectType", "0"),
+                "apiUrl":      d.get("targetUrl", ""),
+                "apiMethod":   "",
+                "requirement": "",
+                "linkChartId": "",
+                "parameter":   json.dumps(param_list, ensure_ascii=False),
+            }
+            r = session.request("/link/saveAndEdit", payload)
+            link_id = r["result"]
+            src = d.get("source", {})
+            key = src.get("field") or src.get("chartIndex")
+            drilling_links[(src.get("type", "cell"), key)] = link_id
+
+    if config.get("linkages"):
+        for lk in config["linkages"]:
+            target = lk.get("target", {})
+            target_layer = target.get("layerId") or ""
+            # 通过 chartIndex 反查 layer_id
+            if not target_layer and "chartIndex" in target:
+                idx = target["chartIndex"]
+                if idx < len(chart_list):
+                    target_layer = chart_list[idx].get("layer_id", "")
+            param_list = []
+            for p in lk.get("params", []):
+                item = {"paramName": p["paramName"],
+                        "paramValue": p.get("paramValue", "")}
+                if "fieldName" in p:
+                    item.update({"tableIndex": p.get("tableIndex", 0),
+                                 "dbCode": p.get("dbCode", ""),
+                                 "fieldName": p["fieldName"]})
+                else:
+                    item["index"] = p.get("index", 1)
+                param_list.append(item)
+            payload = {
+                "reportId":    report_id,
+                "linkName":    lk.get("name", "联动"),
+                "linkType":    "2",
+                "ejectType":   "0",
+                "apiUrl":      "", "apiMethod": "", "requirement": "",
+                "linkChartId": target_layer,
+                "parameter":   json.dumps(param_list, ensure_ascii=False),
+            }
+            r = session.request("/link/saveAndEdit", payload)
+            linkage_links.append({"link_id": r["result"], "config": lk})
+
+    # 把 drilling/linkage 的 link_id 回填到 rows 和 chartList
+    if drilling_links and table_config:
+        for r_idx, r_obj in all_rows.items():
+            if r_idx == "len" or not isinstance(r_obj, dict):
+                continue
+            for c_idx, cell in r_obj.get("cells", {}).items():
+                if not isinstance(cell, dict):
+                    continue
+                text = cell.get("text", "")
+                for (src_type, src_key), lid in drilling_links.items():
+                    if src_type == "cell" and src_key and f".{src_key}}}" in text:
+                        cell["linkIds"] = lid
+                        cell["display"] = "link"
+    if drilling_links and chart_list:
+        for ch in chart_list:
+            for (src_type, src_key), lid in drilling_links.items():
+                if src_type == "chart":
+                    ch["extData"]["linkIds"] = lid
+    if linkage_links:
+        # 回填表格触发 / 图表触发
+        for entry in linkage_links:
+            lk = entry["config"]
+            lid = entry["link_id"]
+            src = lk.get("source", {})
+            if src.get("type") == "cell" and table_config:
+                fld = src.get("field")
+                for r_idx, r_obj in all_rows.items():
+                    if r_idx == "len" or not isinstance(r_obj, dict):
+                        continue
+                    for c_idx, cell in r_obj.get("cells", {}).items():
+                        if isinstance(cell, dict) and fld and f".{fld}}}" in cell.get("text", ""):
+                            prev = cell.get("linkIds", "")
+                            cell["linkIds"] = (prev + "," + lid) if prev else lid
+                            cell["display"] = "link"
+            elif src.get("type") == "chart":
+                idx = src.get("chartIndex", 0)
+                if idx < len(chart_list):
+                    ext = chart_list[idx]["extData"]
+                    prev = ext.get("linkIds", "")
+                    ext["linkIds"] = (prev + "," + lid) if prev else lid
+
+    # Step 3.6: 图表 dataType 自动修正（按数据集实际类型覆盖默认 "sql"）
+    for ch in chart_list:
+        ext = ch.get("extData", {})
+        ds_code_ref = ext.get("dbCode", "")
+        if ds_code_ref in dataset_chart_types:
+            ext["dataType"] = dataset_chart_types[ds_code_ref]
+
+    # Step 3.7: 报表参数查询自动开启查询条
+    param_total = sum(len(ds.get("paramList") or []) for ds in config.get("datasets", []))
+    query_setting = {"izOpenQueryBar": True, "izDefaultQuery": True} if param_total > 0 else None
+
     # Step 4: 保存完整报表
     print("\n[3/3] 保存报表设计...")
-    session.request("/save", base_save(
-        report_id, designer,
-        rows=all_rows, cols=cols, styles=styles, merges=all_merges,
-        chartList=chart_list,
-        dataRectWidth=total_w or 700,
-        **({"isGroup": True, "groupField": group_config["groupField"]} if group_config else {}),
-    ))
+    save_extra = {
+        "rows": all_rows, "cols": cols, "styles": styles, "merges": all_merges,
+        "chartList": chart_list, "dataRectWidth": total_w or 700,
+    }
+    if group_config:
+        save_extra.update({"isGroup": True, "groupField": group_config["groupField"]})
+    if query_setting:
+        save_extra["querySetting"] = query_setting
+    for k in ("imgList", "barcodeList", "qrcodeList", "loopBlockList",
+              "zonedEditionList", "freeze", "freezeLineColor", "background",
+              "rpbar", "printConfig",
+              "displayConfig", "hiddenCells",
+              "fixedPrintHeadRows", "fixedPrintTailRows",
+              "completeBlankRowList", "dbexps", "autofilter"):
+        if k in config:
+            save_extra[k] = config[k]
+    session.request("/save", base_save(report_id, designer, **save_extra))
 
     print_summary(report_id, report_name, session.base_url, "")
     return report_id
@@ -539,10 +768,51 @@ def main():
         config = json.load(f)
 
     action = config.get("action", "create")
-    if action == "create":
+    if action in ("create", "param_query"):
+        # paramList 已由 create_report 透传 + querySetting 自动开启
+        # drilling/linkages 键也在 create_report 内部处理（无需额外 Python 脚本）
         create_report(session, config)
     elif action == "edit":
         edit_report(session, config)
+    elif action == "group":
+        from jimureport_type_group import create_group_report
+        create_group_report(session, config)
+    elif action == "horizontal_group":
+        from jimureport_type_hgroup import create_hgroup_report
+        create_hgroup_report(session, config)
+    elif action == "mastersub":
+        from jimureport_type_mastersub import create_mastersub_report
+        create_mastersub_report(session, config)
+    elif action == "loopblock":
+        from jimureport_type_loopblock import create_loopblock_report
+        create_loopblock_report(session, config)
+    elif action == "fillform":
+        from jimureport_type_fillform import create_fillform_report
+        create_fillform_report(session, config)
+    elif action == "multilevel":
+        from jimureport_type_multilevel import create_multilevel_report
+        create_multilevel_report(session, config)
+    elif action == "multisource":
+        from jimureport_type_multisource import create_multisource_report
+        create_multisource_report(session, config)
+    elif action == "multisheet":
+        from jimureport_type_multisheet import create_multisheet_report
+        create_multisheet_report(session, config)
+    elif action == "zoned":
+        from jimureport_type_zoned import create_zoned_report
+        create_zoned_report(session, config)
+    elif action == "chart_linkage":
+        from jimureport_type_chart_linkage import create_chart_linkage_report
+        create_chart_linkage_report(session, config)
+    elif action == "drilling":
+        from jimureport_type_drilling import create_drilling_report
+        create_drilling_report(session, config)
+    elif action == "template_print":
+        from jimureport_type_template_print import create_template_print_report
+        create_template_print_report(session, config)
+    elif action == "file_dataset":
+        from jimureport_type_file_dataset import create_file_dataset_report
+        create_file_dataset_report(session, config)
     else:
         print(f"未知操作类型: {action}"); sys.exit(1)
 

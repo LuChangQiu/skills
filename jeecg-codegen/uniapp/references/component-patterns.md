@@ -228,7 +228,7 @@
 ### SelectUser 用户选择
 
 ```vue
-<select-user
+<SelectUser
   labelWidth="100px"
   :label="'字段名'"
   name="'fieldName'"
@@ -239,7 +239,7 @@
 ### SelectDept 部门选择
 
 ```vue
-<select-dept
+<SelectDept
   labelWidth="100px"
   :label="'字段名'"
   name="'fieldName'"

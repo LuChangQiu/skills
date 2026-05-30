@@ -380,3 +380,245 @@ api_request(api_base, token, '/act/process/extActProcessNodePermission/saveOrUpd
 ```
 
 > 每个字段在后端存储为两条记录：`ruleType=1`（可见性规则）和 `ruleType=2`（可编辑性规则），批量通过 `POST /act/process/extActProcessNodePermission/saveOrUpdateBatch` 保存。
+
+---
+
+## 自定义开发单表（formType=3）字段权限完整配置流程（实测验证）
+
+> **触发场景：** 已有流程节点需配置字段级可见/可编辑权限，表单是自定义开发的单表（非 Online、非 DesForm）。
+
+### 关键规则（⚠️ 强制）
+
+**规则A：`set_node_field_permissions` 不支持 formType=3，必须直接调 API**
+
+`bpmn_creator.py` 的 `set_node_field_permissions` 内部对 formType=3 走 `get_desform_fields` 分支，会因找不到 DesForm 编码而返回 `{'success': False, 'updated': 0, 'errors': ['无法获取表单字段信息']}`。  
+**强制规则：formType=3 必须手动构造 batch_data，直接调用 `saveOrUpdateBatch` API。**
+
+```python
+# ✅ 正确 —— 直接构造 batch_data
+FIELDS = [
+    {'field': 'username', 'label': '账号', 'editable': False},
+    {'field': 'age',      'label': '年龄', 'editable': True},
+]
+batch_data = []
+for fd in FIELDS:
+    rule_code = f"{MODULE}:{fd['field']}"   # MODULE = 'testLocalBpm'
+    base = {
+        'formType': '3', 'formBizCode': TABLE_NAME,   # TABLE_NAME = 'test_local_bpm'
+        'processId': PROCESS_ID, 'processNodeCode': NODE_CODE,
+        'ruleCode': rule_code, 'ruleName': fd['label'], 'required': 0,
+    }
+    batch_data.append({**base, 'ruleType': '1', 'status': '1'})                            # 可见
+    batch_data.append({**base, 'ruleType': '2', 'status': '0' if fd['editable'] else '1'}) # 可编辑
+bc.api_request(API_BASE, TOKEN,
+    '/act/process/extActProcessNodePermission/saveOrUpdateBatch', data=batch_data)
+```
+
+**规则B：`sys/permission/list` 不支持按 perms 过滤参数（已实测）**
+
+`GET /sys/permission/list?perms=xxx` 中的 `perms` 参数被忽略，始终返回全量数据。  
+**查找新增权限 ID 的唯一可靠方式：** 调用 `/sys/permission/queryTreeList`，展开树后按 `parentId` + `title`（即添加时的 `name`）匹配。
+
+```python
+# ✅ 正确 —— 按 parentId+title 查新增权限的 ID
+def flatten_tree(nodes, acc=None):
+    if acc is None: acc = []
+    for n in (nodes or []):
+        if isinstance(n, dict):
+            acc.append(n)
+            flatten_tree(n.get('children', []), acc)
+    return acc
+
+r = api_get('/sys/permission/queryTreeList')
+all_nodes = flatten_tree(r.get('result', {}).get('treeList', []))
+children = [n for n in all_nodes if n.get('parentId') == MENU_ID]
+# queryTreeList 节点用 'key' 字段做 ID（不是 'id'），且不含 'perms' 字段
+# 需按 title/label 匹配（即 add 时传的 name 值）
+NAME_TO_PERMS = {'账号显示': 'testLocalBpm:username', '年龄显示': 'testLocalBpm:age'}
+target_ids = [c['key'] for c in children if (c.get('title') or c.get('label')) in NAME_TO_PERMS]
+```
+
+> ⚠️ `queryTreeList` 树节点结构：`key`=ID、`title`/`label`=名称、`parentId`=父节点ID，**不含 `perms` 字段**（被剥离）。
+
+**规则C：单表 sys_permission 每个 ruleCode 只需一条记录（permsType=1 即可）**
+
+实测发现：对单表 formType=3，`hasPermission` 和 `isDisabledAuth` 都基于 `permissionList`（由 BPM 引擎注入）工作，只需用 permsType=1 注册可见性权限即可——字段的可编辑/禁用由 `extActProcessNodePermission` 中 `ruleType=2` 的 status 控制。  
+permsType=2 的 sys_permission 条目可以不添加，**不影响 `isDisabledAuth` 工作**。
+
+### 完整 Python 脚本模板（单表 formType=3）
+
+```python
+# -*- coding: utf-8 -*-
+"""单表 formType=3 节点字段权限完整配置"""
+import json, urllib.request, urllib.parse
+import sys, os, pathlib
+_SKILLS = pathlib.Path.home() / '.claude' / 'skills'
+sys.path.insert(0, str(_SKILLS / 'jeecg-bpmn' / 'scripts'))
+import bpmn_creator as bc
+
+API_BASE   = 'http://...'
+TOKEN      = '...'
+HEADERS    = {'X-Access-Token': TOKEN, 'Content-Type': 'application/json'}
+PROCESS_ID = '...'
+NODE_CODE  = 'task_finance'     # 目标节点
+FORM_CODE  = 'test_local_bpm'  # 数据库主表名
+FORM_TYPE  = '3'
+ADMIN_ROLE = 'f6817f48af4fb3af11b9e8bf182f618b'
+MODULE     = 'testLocalBpm'    # ruleCode 前缀（驼峰模块名）
+MENU_ID    = '...'             # 该模块在 sys_permission 的菜单 ID
+FORM_URL   = 'demo/components/TestLocalBpmForm?edit=1'  # 前端路由
+
+# ── 字段定义 ──
+FIELDS = [
+    {'field': 'username', 'label': '账号',  'editable': False},
+    {'field': 'realname', 'label': '名称',  'editable': False},
+    {'field': 'age',      'label': '年龄',  'editable': True},
+    {'field': 'sex',      'label': '性别',  'editable': False},
+]
+
+def api_get(path):
+    req = urllib.request.Request(f'{API_BASE}{path}', headers=HEADERS)
+    return json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
+
+def api_post(path, data):
+    body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+    req = urllib.request.Request(f'{API_BASE}{path}', data=body, headers=HEADERS, method='POST')
+    return json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
+
+def api_put(path, data):
+    body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+    req = urllib.request.Request(f'{API_BASE}{path}', data=body, headers=HEADERS, method='PUT')
+    return json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
+
+def flatten_tree(nodes, acc=None):
+    if acc is None: acc = []
+    for n in (nodes or []):
+        if isinstance(n, dict):
+            acc.append(n); flatten_tree(n.get('children', []), acc)
+    return acc
+
+# ── Step 1: 开启节点 formEditStatus=1，同步 nodeConfigJson ──
+r_nodes = api_get(f'/act/process/extActProcessNode/list?processId={PROCESS_ID}&pageNo=1&pageSize=50')
+nodes = r_nodes.get('result', {}).get('records', [])
+target_node = next((n for n in nodes if n['processNodeCode'] == NODE_CODE), None)
+target_node['formEditStatus'] = '1'
+target_node['modelAndView'] = FORM_URL
+target_node['modelAndViewMobile'] = FORM_URL
+cfg = json.loads(target_node.get('nodeConfigJson') or '{}')
+cfg['formEditStatus'] = True
+target_node['nodeConfigJson'] = json.dumps(cfg, ensure_ascii=False)
+api_put('/act/process/extActProcessNode/edit', target_node)
+api_put('/act/process/extActProcess/deployProcess', {'id': PROCESS_ID})
+print('Step 1: 节点配置+发布 OK')
+
+# ── Step 2: 注册 sys_permission（每字段一条，permsType=1） ──
+# 先查已有，避免重复
+r_tree = api_get('/sys/permission/queryTreeList')
+all_nodes = flatten_tree(r_tree.get('result', {}).get('treeList', []))
+children = [n for n in all_nodes if n.get('parentId') == MENU_ID]
+existing_name_ids = {(c.get('title') or c.get('label')): c['key'] for c in children}
+
+new_ids = []
+for fd in FIELDS:
+    perm_name = f"{fd['label']}显示"
+    if perm_name not in existing_name_ids:
+        api_post('/sys/permission/add', {
+            'menuType': 2, 'name': perm_name, 'parentId': MENU_ID,
+            'perms': f"{MODULE}:{fd['field']}", 'permsType': '1', 'status': '1',
+        })
+        # 重新查树取 ID（按 name 匹配，queryTreeList 是唯一可靠来源）
+        r2 = api_get('/sys/permission/queryTreeList')
+        fresh = flatten_tree(r2.get('result', {}).get('treeList', []))
+        c2 = [n for n in fresh if n.get('parentId') == MENU_ID]
+        added = next((n for n in c2 if (n.get('title') or n.get('label')) == perm_name), None)
+        if added:
+            new_ids.append(added['key']); existing_name_ids[perm_name] = added['key']
+print(f'Step 2: 注册 {len(new_ids)} 个新权限')
+
+# ── Step 3: 授权给 admin 角色 ──
+if new_ids:
+    r_role = api_get(f'/sys/permission/queryByRole?roleId={ADMIN_ROLE}')
+    role_result = r_role.get('result', []) or []
+    existing_ids = [p.get('id') or p.get('key','') for p in role_result if isinstance(p, dict)]
+    existing_ids = [x for x in existing_ids if x]
+    all_ids = list(set(existing_ids + new_ids))
+    api_post('/sys/permission/saveRolePermission', {
+        'roleId': ADMIN_ROLE,
+        'permissionIds': ','.join(all_ids),
+        'lastpermissionIds': ','.join(existing_ids),
+    })
+    print(f'Step 3: 授权 OK')
+
+# ── Step 4: 删除旧节点字段权限，重写（deploy 后再写） ──
+old_r = bc.api_request(API_BASE, TOKEN,
+    f'/act/process/extActProcessNodePermission/list?processId={PROCESS_ID}'
+    f'&processNodeCode={NODE_CODE}&pageNo=1&pageSize=200', method='GET')
+old_recs = old_r.get('result', {})
+old_recs = old_recs.get('records', []) if isinstance(old_recs, dict) else (old_recs or [])
+for rec in old_recs:
+    bc.api_request(API_BASE, TOKEN,
+        f'/act/process/extActProcessNodePermission/delete?id={rec["id"]}', method='DELETE')
+
+batch_data = []
+for fd in FIELDS:
+    rule_code = f"{MODULE}:{fd['field']}"
+    base = {
+        'formType': FORM_TYPE, 'formBizCode': FORM_CODE,
+        'processId': PROCESS_ID, 'processNodeCode': NODE_CODE,
+        'ruleCode': rule_code, 'ruleName': fd['label'], 'required': 0,
+    }
+    batch_data.append({**base, 'ruleType': '1', 'status': '1'})
+    batch_data.append({**base, 'ruleType': '2', 'status': '0' if fd['editable'] else '1'})
+
+r_save = bc.api_request(API_BASE, TOKEN,
+    '/act/process/extActProcessNodePermission/saveOrUpdateBatch', data=batch_data)
+print(f'Step 4: 字段权限保存 {r_save.get("success")} {r_save.get("message","")}')
+```
+
+### 前端 data.ts 标准改法（实测验证）
+
+**改动点 3 处（顶部 + formSchema 每字段 + getBpmFormSchema）：**
+
+```typescript
+// ① 顶部新增（文件最顶层，非组件内部）
+import { usePermission } from '/@/hooks/web/usePermission';
+const { isDisabledAuth, hasPermission, initBpmFormData } = usePermission();
+
+// ② formSchema 每个需要权限控制的字段加 show + dynamicDisabled
+export const formSchema: FormSchema[] = [
+  {
+    label: '账号', field: 'username', component: 'Input',
+    show: () => hasPermission('testLocalBpm:username'),
+    dynamicDisabled: () => isDisabledAuth('testLocalBpm:username'),
+  },
+  {
+    label: '年龄', field: 'age', component: 'Input',
+    show: () => hasPermission('testLocalBpm:age'),
+    dynamicDisabled: () => isDisabledAuth('testLocalBpm:age'),
+  },
+  // ... 其他字段同理
+];
+
+// ③ getBpmFormSchema 调用 initBpmFormData（必须在 return 之前）
+export function getBpmFormSchema(_formData): FormSchema[] {
+  initBpmFormData(_formData);   // ← 激活节点权限读取，缺少则权限不生效
+  return formSchema;
+}
+```
+
+> **`show`/`dynamicDisabled` 的回调不需要 `({ values }) =>` 参数**，直接 `() =>` 即可（两种写法均合法，但简洁写法更清晰）。
+
+### 权限生效原理（单表 formType=3）
+
+```
+BPM 引擎启动流程节点
+  → 查询 ext_act_process_node_auth（ruleCode/ruleType/status）
+  → 注入到 formData.permissionList（type=1 可见，type=2 禁用，action=ruleCode）
+  → Form.vue 接收 props.formData
+  → getBpmFormSchema(formData) 调用 initBpmFormData(formData)
+  → usePermission 内部 formData 变量指向节点权限列表
+  → hasPermission('testLocalBpm:age') 检查 permissionList 中 type=1 action=该code → true=可见
+  → isDisabledAuth('testLocalBpm:age') 检查 type=2 action=该code → true=禁用，false=可编辑
+```
+
+> **sys_permission 的作用：** 当 `formData.permissionList` 为空（非 BPM 流程打开，或普通新增/编辑弹窗）时，`hasPermission` 回退到检查 `allCodeList`（来自 sys_permission）。因此注册 sys_permission 是为了保证**非流程场景下字段正常显示**，不是流程权限的核心机制。

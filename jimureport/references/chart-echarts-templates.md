@@ -517,16 +517,47 @@ XVAL   = {"show": True, "type": "value"}                  # 横向图数值X轴
 > | radar.basic  | "polygon" | 无 |
 > | radar.custom | "circle"  | startAngle:90, splitNumber:4, radius:90(px), splitArea（渐变填充） |
 
+#### ⚠️ SQL数据集必须用「长格式」，不能用「宽格式」
+
+**错误根因（已踩坑 2026-05-25）**：JimuReport 前端的图表填充机制对多系列雷达图期望「每行=一个(维度, 系列, 值)」的长格式。若传宽格式（每行=一个系列，多列=各维度），前端会把系列名作为 indicator 轴、把单列值展平成数组，导致：
+- 雷达图变成以系列名命名的三角形（维度数=系列数而非实际维度数）
+- legend 显示 `undefined`（因 series[0].data 被覆盖为普通数字数组，`.name` 属性为 undefined）
+- 设置 `apiStatus="0"` 或手动写入 config 均无效，前端每次渲染都会用 `/qurestSql` 覆盖
+
+**正确做法：SQL 用 UNION 转长格式 + extData.series 设为系列列名**
+
+```sql
+-- 宽格式表 radar_demo (id, name, attack, defense, speed, magic, endurance)
+-- 转成长格式查询：
+SELECT '攻击力' AS dimension, name, attack    AS score FROM radar_demo
+UNION ALL SELECT '防御力', name, defense  FROM radar_demo
+UNION ALL SELECT '速度',   name, speed    FROM radar_demo
+UNION ALL SELECT '魔法值', name, magic    FROM radar_demo
+UNION ALL SELECT '耐力',   name, endurance FROM radar_demo
+ORDER BY name, dimension
+```
+
+**extData 绑定**：
+
+| 属性 | 值 | 含义 |
+|------|----|------|
+| axisX | `dimension` | 维度列 → radar indicator 轴名 |
+| axisY | `score` | 值列 → 各维度得分 |
+| series | `name` | 系列列 → 每条折线/区域（如英雄名） |
+
+前端会自动 pivot：unique(dimension) → indicator[]，按 name 分组 → series[].data[].value[]。
+
+**ECharts config 初始模板（留空让前端填充）**：
+
 ```python
 {"title": TITLE, "legend": LEGEND,
  "radar": [{"shape": "polygon",  # radar.custom 改为 "circle"，并加 radius:90, startAngle:90, splitNumber:4, splitArea
             "center": [320, 200],
-            "indicator": [{"name": "维度A", "max": 100}, {"name": "维度B", "max": 100}],
-            "name": {"formatter": "【{value}】", "textStyle": {"color": "#72ACD1", "fontSize": 14}},
+            "indicator": [],   # 前端自动从 dimension 列填充
+            "name": {"formatter": "{value}", "textStyle": {"color": "#72ACD1", "fontSize": 14}},
             "axisLine": {"lineStyle": {"color": "gray", "opacity": 0.5}},
             "splitLine": {"lineStyle": {"color": "gray", "opacity": 0.5}}}],
- "series": [{"type": "radar",
-             "data": [{"name": "系列A", "value": [80, 60], "lineStyle": {}}]}],
+ "series": [{"type": "radar", "data": []}],   # 前端自动从 name+score 列填充
  "tooltip": TIP}
 ```
 

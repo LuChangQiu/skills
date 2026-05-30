@@ -1,43 +1,44 @@
 """
-files_ops.py — FILES 多文件数据集操作预置脚本
-用法:
+files_ops.py — 文件数据集操作预置脚本（支持单文件 singleFile 和多文件 FILES）
+
+━━ 单文件模式（--single）━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  py files_ops.py create-bind API_BASE TOKEN PAGE_ID
+      --files data.xlsx
+      --single                        # ← 启用单文件模式
+      --comp JPie                     # 组件类型（默认 JPie）
+      --title "数据饼图"
+      --x 0 --y 0 --w 12 --h 30      # 仪表盘栅格坐标
+      [--ds-name "数据集名称"]
+      [--col-name  <维度列名>]        # 不指定则自动选第一个 String 列
+      [--col-sales <数值列名>]        # 不指定则自动选第一个非 String 列
+      [--no-chart]
+
+  数据集特征：dataType=singleFile，code=表名，dbSource=PAGE_ID
+  组件特征：dataSetIzAgent=''（空字符串，区别于 FILES 的 '1'）
+
+━━ 多文件模式（默认）━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   py files_ops.py create-bind API_BASE TOKEN PAGE_ID
       --files file1.xlsx file2.xlsx ...
       --join-on product_id            # JOIN 键（两表同名列）
-      --group-by region,category      # GROUP BY 字段（逗号分隔，格式 table_alias.col 或 col）
+      --group-by region,category      # GROUP BY 字段（逗号分隔）
       --agg amount                    # SUM 聚合字段
-      --comp JMultipleBar             # 组件类型
-      --title "各大区各品类销售额"
-      --x 50 --y 100 --w 1820 --h 520
-      [--ds-name "数据集名称"]        # 默认从 title 生成
-      [--parent-id "示例数据集ID"]    # 默认 1516743332632494082
-      [--col-name  name]              # 第1个 group-by 字段别名 (默认 name)
-      [--col-type  type]              # 第2个 group-by 字段别名 (默认 type)
-      [--col-sales sales]             # 聚合字段别名 (默认 sales)
-      [--no-chart]                    # 仅创建数据集，不添加图表
-
-  py files_ops.py upload API_BASE TOKEN PAGE_ID --files file1.xlsx ...
-      # 仅上传文件，列出表名
-
-  py files_ops.py list-tables API_BASE TOKEN PAGE_ID
-      # 列出当前大屏已上传的文件及表名
-
-  py files_ops.py add-chart API_BASE TOKEN PAGE_ID
-      --ds-id  DS_ID
-      --ds-name "数据集名称"
       --comp JMultipleBar
-      --title "图表标题"
-      --x 50 --y 100 --w 1820 --h 520
-      --fields "name:大区:String,type:品类:String,sales:销售额:Integer"
-
-示例（完整一步）:
-  py files_ops.py create-bind <api_base> <token> 1202125307063787520 \\
-      --files products.xlsx orders.xlsx \\
-      --join-on product_id \\
-      --group-by region,category \\
-      --agg amount \\
-      --comp JMultipleBar \\
       --title "各大区各品类销售额"
+      --x 50 --y 100 --w 1820 --h 520
+      [--ds-name "数据集名称"]
+      [--parent-id "示例数据集ID"]
+      [--col-name  name]
+      [--col-type  type]
+      [--col-sales sales]
+      [--no-chart]
+
+━━ 其他子命令 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  py files_ops.py upload API_BASE TOKEN PAGE_ID --files file1.xlsx ...
+  py files_ops.py list-tables API_BASE TOKEN PAGE_ID
+  py files_ops.py add-chart API_BASE TOKEN PAGE_ID
+      --ds-id DS_ID --ds-name "名称" --comp JBar --title "标题"
+      --x 0 --y 0 --w 12 --h 30
+      --fields "name:维度:String,value:数值:Integer"
 """
 import sys, json, os, time, uuid, argparse, subprocess
 import urllib.request
@@ -51,25 +52,31 @@ def init_bi(api_base, token):
     _bu.TOKEN    = token
     return _bu
 
-def upload_file(bi, page_id, file_path):
+def upload_file(bi, page_id, file_path, is_single=False):
     boundary  = 'bnd_' + uuid.uuid4().hex
     base      = os.path.basename(file_path)
     name, ext = os.path.splitext(base)
-    # 文件名加 uuid 后缀（无下划线），避免 H2 按下划线截断表名导致冲突
-    # 例如 products.xlsx → productsA1B2C3D4.xlsx → jmf.Sheet1_productsA1B2C3D4_excel
-    ts        = uuid.uuid4().hex[:8].upper()
-    filename  = f'{name}{ts}{ext}'
+    # 单文件模式保留原文件名（表名需可预测）；多文件模式加 uuid 后缀避免冲突
+    if is_single:
+        filename = base
+    else:
+        ts       = uuid.uuid4().hex[:8].upper()
+        filename = f'{name}{ts}{ext}'
+    CRLF = b'\r\n'
     with open(file_path, 'rb') as f:
         data = f.read()
-    body = b''
-    body += ('--' + boundary + '\r\n').encode()
-    body += ('Content-Disposition: form-data; name="reportId"\r\n\r\n').encode()
-    body += (page_id + '\r\n').encode()
-    body += ('--' + boundary + '\r\n').encode()
-    body += ('Content-Disposition: form-data; name="file"; filename="' + filename + '"\r\n').encode()
-    body += ('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n').encode()
-    body += data + b'\r\n'
-    body += ('--' + boundary + '--\r\n').encode()
+    body  = b'--' + boundary.encode() + CRLF
+    body += b'Content-Disposition: form-data; name="reportId"' + CRLF + CRLF
+    body += page_id.encode() + CRLF
+    if is_single:
+        body += b'--' + boundary.encode() + CRLF
+        body += b'Content-Disposition: form-data; name="isSingle"' + CRLF + CRLF
+        body += b'true' + CRLF
+    body += b'--' + boundary.encode() + CRLF
+    body += ('Content-Disposition: form-data; name="file"; filename="' + filename + '"').encode() + CRLF
+    body += b'Content-Type: application/octet-stream' + CRLF + CRLF
+    body += data + CRLF
+    body += b'--' + boundary.encode() + b'--' + CRLF
     url = bi.API_BASE + '/jmreport/source/datasource/files/add'
     req = urllib.request.Request(url, data=body)
     req.add_header('Content-Type',   'multipart/form-data; boundary=' + boundary)
@@ -112,13 +119,15 @@ def get_or_create_group(bi, group_name='示例数据集', default_id='1516743332
 
 def add_chart_to_page(bi, page_id, comp_type, title, x, y, w, h,
                        ds_id, ds_name, data_mapping, field_option,
-                       defaults_path='default_configs.json'):
+                       defaults_path='default_configs.json',
+                       dataset_type='FILES', iz_agent='1',
+                       sql=''):
     """将组件添加到页面（安全：先加载已有 template）"""
     defaults = json.load(open(defaults_path, 'r', encoding='utf-8'))
     cfg = json.loads(json.dumps(defaults.get(comp_type, {})))
     cfg.pop('w', None); cfg.pop('h', None)
-    cfg['background']  = '#FFFFFF00'
-    cfg['borderColor'] = '#FFFFFF00'
+    cfg['background']  = '#FFFFFF'
+    cfg['borderColor'] = '#E8E8E8'
     opt = cfg.get('option', {})
     if isinstance(opt, str):
         try:    opt = json.loads(opt)
@@ -129,20 +138,22 @@ def add_chart_to_page(bi, page_id, comp_type, title, x, y, w, h,
     elif isinstance(t, dict):
         t['text'] = title
     cfg['option'] = opt
+    # 像素尺寸：w*75, h*11（仪表盘栅格转像素公式）
+    px_w, px_h = w * 75, h * 11
     cfg.update({
         'dataType':       2,
         'dataSetId':      ds_id,
         'dataSetName':    ds_name,
-        'dataSetType':    'FILES',
-        'dataSetApi':     '',
+        'dataSetType':    dataset_type,
+        'dataSetApi':     sql,          # 传入实际 SQL 或 API URL，禁止留空
         'dataSetMethod':  'get',
-        'dataSetIzAgent': '1',
+        'dataSetIzAgent': iz_agent,
         'chartData':      '[]',
         'viewLoading':    True,
         'paramOption':    [],
         'dataMapping':    data_mapping,
         'fieldOption':    field_option,
-        'size':           {'width': w, 'height': h},
+        'size':           {'width': px_w, 'height': px_h},  # 必须是像素值
         'chart':          {'subclass': comp_type, 'category': 'Bar'},
         'turnConfig':     {},
         'linkageConfig':  [],
@@ -157,7 +168,7 @@ def add_chart_to_page(bi, page_id, comp_type, title, x, y, w, h,
         'dataType':      2,
         'config':        json.dumps(cfg, ensure_ascii=False),
         'dataMapping':   {},
-        'size':          {'width': w, 'height': h},
+        'size':          {'width': px_w, 'height': px_h},   # 必须是像素值
         'chart':         {'subclass': comp_type, 'category': 'Bar'},
         'turnConfig':    {},
         'linkageConfig': [],
@@ -168,6 +179,167 @@ def add_chart_to_page(bi, page_id, comp_type, title, x, y, w, h,
     return comp['i']
 
 # ── 子命令实现 ────────────────────────────────────────────────────────────────
+
+def clean_old_files(bi, page_id, file_path):
+    """删除与 file_path 同名（含 _N 后缀变体）的旧文件，避免服务端自动加后缀"""
+    import re
+    base     = os.path.basename(file_path)
+    name, ext = os.path.splitext(base)
+    pattern  = re.compile(rf'^{re.escape(name)}(_\d+)?{re.escape(ext)}$', re.IGNORECASE)
+    existing = get_file_tables(bi, page_id)
+    to_del   = [f for f in existing if pattern.match(f.get('fileName', ''))]
+    if to_del:
+        print(f'[0] 清理旧文件 ({len(to_del)} 个): {[f["fileName"] for f in to_del]}')
+        for f in to_del:
+            bi._request('DELETE', '/jmreport/source/datasource/files/del/file',
+                        params={'reportId': page_id, 'fileName': f['fileName']})
+
+
+def cmd_create_bind_single(bi, args):
+    """单文件 singleFile 模式：isSingle 上传 → queryFileFieldBySql → singleFile 数据集 → 图表"""
+    t0      = time.time()
+    ds_name = args.ds_name or args.title
+    parent_id = args.parent_id or get_or_create_group(bi)
+
+    # ── 0. 清理同名旧文件（防止服务端加 _N 后缀）
+    fp = args.files[0]
+    clean_old_files(bi, args.page_id, fp)
+
+    # ── 1. 上传文件（isSingle=true）
+    print(f'[1] 上传: {os.path.basename(fp)} (isSingle=true)')
+    r  = upload_file(bi, args.page_id, fp, is_single=True)
+    print(f'    {r.get("message", "ok")}')
+    if not r.get('success'):
+        print(f'    失败: {r}'); sys.exit(1)
+
+    # ── 2. 取表名
+    file_list  = get_file_tables(bi, args.page_id)
+    # 找本次上传的文件（最后一条，或按文件名匹配）
+    base = os.path.basename(fp)
+    matched = [f for f in file_list if base in f.get('fileName', '')]
+    entry  = matched[-1] if matched else file_list[-1]
+    table_name = entry['name']
+    print(f'[2] 表名: {table_name}')
+
+    # ── 3. queryFileFieldBySql 解析真实列名
+    print(f'[3] 解析字段 (queryFileFieldBySql)...')
+    fr    = bi._request('POST', '/drag/onlDragDatasetHead/queryFileFieldBySql',
+                         data={'sql': f'select * from {table_name}', 'dbCode': args.page_id})
+    flds  = fr.get('result') or []
+    if isinstance(flds, dict):
+        flds = flds.get('fieldList') or []
+    print(f'    {[(f.get("fieldName"), f.get("fieldType")) for f in flds]}')
+
+    # 字段为空时从 getAllChartData 回退
+    # 🚨 修复：不能 DELETE 临时数据集——删除会触发后端清空 H2 表和 dbUrl，
+    #    导致后续新建数据集查询时报 "Object not found"。
+    #    解决：临时数据集创建后直接复用（edit 改名+更新字段），不再单独新建。
+    fallback_ds_id = None   # 记录临时数据集 ID，供步骤4复用
+    if not flds:
+        print(f'    queryFileFieldBySql 返回空，尝试从数据行推断字段...')
+        tmp_ds = bi._request('POST', '/drag/onlDragDatasetHead/add', data={
+            'name': '__tmp__', 'code': table_name, 'dataType': 'singleFile',
+            'dbSource': args.page_id, 'querySql': f'select * from {table_name}',
+            'content': json.dumps(file_list, ensure_ascii=False), 'apiMethod': 'GET',
+            'parentId': parent_id, 'datasetItemList': [], 'datasetParamList': [],
+        })
+        fallback_ds_id = (tmp_ds.get('result') or {}).get('id')
+        if fallback_ds_id:
+            vr  = bi._request('POST', '/drag/onlDragDatasetHead/getAllChartData', data={'id': fallback_ds_id})
+            dl2 = ((vr.get('result') or {}).get('data') or [])
+            if dl2:
+                flds = [{'fieldName': k, 'fieldTxt': k,
+                         'fieldType': 'Integer' if isinstance(v, (int, float)) else 'String',
+                         'izShow': 'Y', 'orderNum': i}
+                        for i, (k, v) in enumerate(dl2[0].items())]
+                print(f'    从数据行推断到 {len(flds)} 个字段')
+            # 不 DELETE——保留 H2 表注册，步骤4直接 edit 复用此数据集
+
+    # ── 4. 创建或复用 singleFile 数据集（code 必须 == table_name）
+    print(f'[4] 创建 singleFile 数据集...')
+    dataset_items = [
+        {'fieldName': f.get('fieldName'), 'fieldTxt': f.get('fieldTxt', f.get('fieldName')),
+         'fieldType': f.get('fieldType', 'String'), 'izShow': 'Y', 'orderNum': i}
+        for i, f in enumerate(flds)
+    ]
+    if fallback_ds_id:
+        # 复用临时数据集：edit 改名 + 写入字段，避免重新创建触发 H2 表丢失
+        ds_entity = (bi._request('GET', '/drag/onlDragDatasetHead/queryById',
+                                  params={'id': fallback_ds_id}).get('result') or {})
+        ds_entity['name'] = ds_name
+        ds_entity['datasetItemList'] = dataset_items
+        bi._request('POST', '/drag/onlDragDatasetHead/edit', data=ds_entity)
+        ds_id = fallback_ds_id
+    else:
+        ds_resp = bi._request('POST', '/drag/onlDragDatasetHead/add', data={
+            'name':             ds_name,
+            'code':             table_name,   # 🚨 必须等于 table_name
+            'dataType':         'singleFile',
+            'dbSource':         args.page_id, # 页面 ID 作为 dbSource
+            'querySql':         f'select * from {table_name}',
+            'content':          json.dumps(file_list, ensure_ascii=False),
+            'apiMethod':        'GET',
+            'parentId':         parent_id,
+            'datasetItemList':  dataset_items,
+            'datasetParamList': [],
+        })
+        res   = ds_resp.get('result') or {}
+        ds_id = res.get('id') if isinstance(res, dict) else res
+    print(f'    DS_ID: {ds_id}')
+    if not ds_id:
+        print(f'    失败'); sys.exit(1)
+
+    # ── 5. 验证数据
+    val_r    = bi._request('POST', '/drag/onlDragDatasetHead/getAllChartData', data={'id': ds_id})
+    val_data = ((val_r.get('result') or {}).get('data') or [])
+    print(f'[5] 验证: {len(val_data)} 条数据')
+    if val_data:
+        print(f'    样本: {val_data[:1]}')
+
+    # ── 6. 添加图表（dataSetIzAgent='' 区别于 FILES 的 '1'）
+    if not args.no_chart:
+        col_name  = args.col_name  if args.col_name  != 'name'  else None
+        col_sales = args.col_sales if args.col_sales != 'sales' else None
+        # 自动选列
+        if flds:
+            str_flds = [f for f in flds if f.get('fieldType', 'String').lower()
+                        in ('string', 'varchar', 'text', 'char')]
+            num_flds = [f for f in flds if f.get('fieldType', 'String').lower()
+                        not in ('string', 'varchar', 'text', 'char')]
+            if not col_name  and str_flds: col_name  = str_flds[0]['fieldName']
+            if not col_sales and num_flds: col_sales = num_flds[0]['fieldName']
+        col_name  = col_name  or (flds[0]['fieldName']  if flds else 'name')
+        col_sales = col_sales or (flds[1]['fieldName']  if len(flds) > 1 else 'value')
+        print(f'    维度={col_name}  数值={col_sales}')
+
+        data_mapping = [
+            {'filed': '维度', 'mapping': col_name},
+            {'filed': '数值', 'mapping': col_sales},
+        ]
+        field_option = [
+            {'label': f.get('fieldName'), 'text': f.get('fieldTxt', f.get('fieldName')),
+             'type': f.get('fieldType', 'String'), 'value': f.get('fieldName'), 'show': 'Y'}
+            for f in flds
+        ] if flds else [
+            {'label': col_name,  'text': '维度', 'type': 'String',  'value': col_name,  'show': 'Y'},
+            {'label': col_sales, 'text': '数值', 'type': 'Integer', 'value': col_sales, 'show': 'Y'},
+        ]
+
+        scripts_dir   = os.path.dirname(os.path.abspath(__file__))
+        defaults_path = os.path.join(scripts_dir, 'default_configs.json')
+        comp_id = add_chart_to_page(
+            bi, args.page_id, args.comp, args.title,
+            args.x, args.y, args.w, args.h,
+            ds_id, ds_name, data_mapping, field_option, defaults_path,
+            dataset_type='singleFile', iz_agent='',  # 🚨 singleFile 必须空字符串
+            sql=f'select * from {table_name}',        # 传入实际 SQL，禁止留空
+        )
+        print(f'[6] 图表已添加: {comp_id}')
+
+    url = f'{bi.API_BASE}/drag/page/view/{args.page_id}'
+    print(f'\n预览地址:\n{url}')
+    print(f'耗时: {time.time()-t0:.1f}s')
+
 
 def cmd_list_tables(bi, args):
     file_list = get_file_tables(bi, args.page_id)
@@ -221,6 +393,12 @@ def cmd_add_chart(bi, args):
     print(f'耗时: {time.time()-t0:.1f}s')
 
 def cmd_create_bind(bi, args):
+    # 单文件模式路由
+    if args.single:
+        if not args.files:
+            print('[!] --single 模式需要 --files 指定一个文件'); sys.exit(1)
+        return cmd_create_bind_single(bi, args)
+
     t0 = time.time()
     ds_name   = args.ds_name or args.title
     parent_id = args.parent_id or get_or_create_group(bi)
@@ -376,7 +554,8 @@ def cmd_create_bind(bi, args):
         comp_id = add_chart_to_page(
             bi, args.page_id, args.comp, args.title,
             args.x, args.y, args.w, args.h,
-            ds_id, ds_name, data_mapping, field_option, defaults_path
+            ds_id, ds_name, data_mapping, field_option, defaults_path,
+            sql=agg_sql,  # 传入实际 SQL，禁止留空
         )
         print(f'[7] 图表已添加: {comp_id}')
 
@@ -393,15 +572,16 @@ def main():
     p.add_argument('token')
     p.add_argument('page_id')
     p.add_argument('--files',      nargs='+', default=[])
+    p.add_argument('--single',     action='store_true', help='单文件 singleFile 模式')
     p.add_argument('--join-on',    default='')
     p.add_argument('--group-by',   default='')
     p.add_argument('--agg',        default='')
-    p.add_argument('--comp',       default='JMultipleBar')
+    p.add_argument('--comp',       default='JPie', help='组件类型（single 默认 JPie，多文件默认 JMultipleBar）')
     p.add_argument('--title',      default='图表')
-    p.add_argument('--x',          type=int, default=50)
-    p.add_argument('--y',          type=int, default=100)
-    p.add_argument('--w',          type=int, default=1820)
-    p.add_argument('--h',          type=int, default=520)
+    p.add_argument('--x',          type=int, default=0)
+    p.add_argument('--y',          type=int, default=0)
+    p.add_argument('--w',          type=int, default=12)
+    p.add_argument('--h',          type=int, default=30)
     p.add_argument('--ds-name',    default='')
     p.add_argument('--ds-id',      default='')
     p.add_argument('--parent-id',  default='')

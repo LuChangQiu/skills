@@ -97,6 +97,7 @@ def save_db(
     if db_type == "1":
         payload["apiUrl"]    = api_url or sql
         payload["apiMethod"] = api_method
+        payload["dbDynSql"]  = ""   # 防止后端因 dbDynSql 非空而将类型覆盖为 SQL
     if db_type == "2":
         payload["javaType"]  = java_type or "spring-key"
         payload["javaValue"] = java_value

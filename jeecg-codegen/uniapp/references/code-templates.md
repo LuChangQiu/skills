@@ -460,8 +460,8 @@ export const columns = [
     label-width="100px"
     v-model="myFormData['fieldName']"
     :label="get4Label('字段注释')"
-    name="'fieldName'"
-    prop="'fieldName'"
+    name="fieldName"
+    prop="fieldName"
     placeholder="请输入字段注释"
     :rules="[
       { required: true, message: '请输入字段注释!' },
@@ -479,8 +479,8 @@ export const columns = [
     label-width="100px"
     v-model="myFormData['fieldName']"
     :label="get4Label('字段注释')"
-    name="'fieldName'"
-    prop="'fieldName'"
+    name="fieldName"
+    prop="fieldName"
     placeholder="请输入字段注释"
     inputMode="numeric"
     :rules="[
@@ -501,7 +501,7 @@ export const columns = [
   >
     <online-image
       v-model:value="myFormData['fieldName']"
-      name="'fieldName'"
+      name="fieldName"
       :maxNum="1"
     />
   </wd-cell>
@@ -518,7 +518,7 @@ export const columns = [
   >
     <online-file-custom
       v-model:value="myFormData['fieldName']"
-      name="'fieldName'"
+      name="fieldName"
     />
   </wd-cell>
 </view>
@@ -533,7 +533,7 @@ export const columns = [
     labelWidth="100px"
     type="datetime"
     format="YYYY-MM-DD HH:mm:ss"
-    name="'fieldName'"
+    name="fieldName"
     v-model="myFormData['fieldName']"
   />
 </view>
@@ -547,7 +547,7 @@ export const columns = [
     :label="get4Label('字段注释')"
     labelWidth="100px"
     type="date"
-    name="'fieldName'"
+    name="fieldName"
     v-model:value="myFormData['fieldName']"
   />
 </view>
@@ -559,13 +559,13 @@ export const columns = [
 <view>
   <wd-cell
     :label="get4Label('字段注释')"
-    name="'fieldName'"
+    name="fieldName"
     title-width="100px"
     center
   >
     <wd-switch
       :label="get4Label('字段注释')"
-      name="'fieldName'"
+      name="fieldName"
       size="18px"
       v-model="myFormData['fieldName']"
       active-value="Y"
@@ -583,7 +583,7 @@ export const columns = [
     :label="get4Label('字段注释')"
     labelWidth="100px"
     type="list"
-    name="'fieldName'"
+    name="fieldName"
     dict="dictCode"
     v-model="myFormData['fieldName']"
   />
@@ -598,7 +598,7 @@ export const columns = [
     :label="get4Label('字段注释')"
     labelWidth="100px"
     type="radio"
-    name="'fieldName'"
+    name="fieldName"
     dict="dictCode"
     v-model="myFormData['fieldName']"
   />
@@ -613,7 +613,7 @@ export const columns = [
     :label="get4Label('字段注释')"
     labelWidth="100px"
     type="checkbox"
-    name="'fieldName'"
+    name="fieldName"
     dict="dictCode"
     v-model="myFormData['fieldName']"
   />
@@ -628,7 +628,7 @@ export const columns = [
     :label="get4Label('字段注释')"
     labelWidth="100px"
     type="list_multi"
-    name="'fieldName'"
+    name="fieldName"
     dict="dictCode"
     v-model="myFormData['fieldName']"
   />
@@ -643,8 +643,8 @@ export const columns = [
     :label="get4Label('字段注释')"
     labelWidth="100px"
     type="textarea"
-    name="'fieldName'"
-    prop="'fieldName'"
+    name="fieldName"
+    prop="fieldName"
     clearable
     :maxlength="300"
     v-model="myFormData['fieldName']"
@@ -660,8 +660,8 @@ export const columns = [
     :label="get4Label('字段注释')"
     labelWidth="100px"
     show-password
-    name="'fieldName'"
-    prop="'fieldName'"
+    name="fieldName"
+    prop="fieldName"
     clearable
     v-model="myFormData['fieldName']"
   />
@@ -675,8 +675,8 @@ export const columns = [
   <online-pca
     :label="get4Label('字段注释')"
     labelWidth="100px"
-    name="'fieldName'"
-    prop="'fieldName'"
+    name="fieldName"
+    prop="fieldName"
     clearable
     v-model:value="myFormData['fieldName']"
   />
@@ -687,10 +687,10 @@ export const columns = [
 
 ```vue
 <view>
-  <select-user
+  <SelectUser
     labelWidth="100px"
     :label="get4Label('字段注释')"
-    name="'fieldName'"
+    name="fieldName"
     v-model="myFormData['fieldName']"
   />
 </view>
@@ -700,10 +700,10 @@ export const columns = [
 
 ```vue
 <view>
-  <select-dept
+  <SelectDept
     labelWidth="100px"
     :label="get4Label('字段注释')"
-    name="'fieldName'"
+    name="fieldName"
     v-model="myFormData['fieldName']"
     :multiple="true"
   />
@@ -776,7 +776,7 @@ export const columns = [
   <online-popup-link-record
     :label="get4Label('字段注释')"
     labelWidth="100px"
-    name="'fieldName'"
+    name="fieldName"
     :formSchema="getFormSchema('tableName','fieldName','fieldText')"
     v-model:value="myFormData['fieldName']"
   />
@@ -862,8 +862,8 @@ export const columns = [
     label-width="100px"
     v-model="myFormData['name']"
     :label="get4Label('姓名')"
-    name="'name'"
-    prop="'name'"
+    name="name"
+    prop="name"
     placeholder="请输入姓名"
     :rules="[{ required: true, message: '请输入姓名!' }]"
     clearable
@@ -874,7 +874,7 @@ export const columns = [
     :label="get4Label('性别')"
     labelWidth="100px"
     type="radio"
-    name="'sex'"
+    name="sex"
     dict="sex"
     v-model="myFormData['sex']"
   />
@@ -884,8 +884,8 @@ export const columns = [
     label-width="100px"
     v-model="myFormData['phone']"
     :label="get4Label('手机号')"
-    name="'phone'"
-    prop="'phone'"
+    name="phone"
+    prop="phone"
     placeholder="请输入手机号"
     :rules="[
       { pattern: /^1[3456789]\d{9}$/, message: '请输入正确的手机号码!' },
@@ -898,7 +898,7 @@ export const columns = [
     :label="get4Label('入职日期')"
     labelWidth="100px"
     type="date"
-    name="'entryDate'"
+    name="entryDate"
     v-model:value="myFormData['entryDate']"
   />
 </view>
@@ -906,16 +906,16 @@ export const columns = [
   <wd-cell :title="get4Label('头像')" title-width="100px">
     <online-image
       v-model:value="myFormData['avatar']"
-      name="'avatar'"
+      name="avatar"
       :maxNum="1"
     />
   </wd-cell>
 </view>
 <view>
-  <wd-cell :label="get4Label('是否在职')" name="'isActive'" title-width="100px" center>
+  <wd-cell :label="get4Label('是否在职')" name="isActive" title-width="100px" center>
     <wd-switch
       :label="get4Label('是否在职')"
-      name="'isActive'"
+      name="isActive"
       size="18px"
       v-model="myFormData['isActive']"
       active-value="Y"
@@ -928,8 +928,8 @@ export const columns = [
     :label="get4Label('备注')"
     labelWidth="100px"
     type="textarea"
-    name="'remark'"
-    prop="'remark'"
+    name="remark"
+    prop="remark"
     clearable
     :maxlength="300"
     v-model="myFormData['remark']"

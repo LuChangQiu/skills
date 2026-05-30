@@ -149,3 +149,141 @@ def print_summary(report_id: str, report_name: str,
     print(f"  预览地址:   {preview}")
     print(f"  设计器地址: {design}")
     print(f"{'=' * 50}")
+
+
+# ── Layout helpers (moved from jimureport_creator.py) ─────────────────────────
+
+def build_cols(columns: list) -> dict:
+    """根据 columns 配置生成 cols 对象。"""
+    cols: dict = {"len": 100}
+    for i, col in enumerate(columns):
+        if col.get("width"):
+            cols[str(i + 1)] = {"width": col["width"]}
+    return cols
+
+
+def build_table_rows(
+    table_config: dict,
+    start_row: int = 1,
+    title_style: int = 5,
+    header_style: int = 4,
+    data_style: int = 2,
+) -> tuple[dict, list, int, dict]:
+    """
+    构造数据表格的 rows 和 merges。
+    返回 (rows, merges, next_row, group_config)。
+    """
+    rows: dict = {}
+    merges: list = []
+    columns = table_config.get("columns", [])
+    ds_code  = table_config["datasetCode"]
+    col_count = len(columns)
+    row = start_row
+    group_config: dict = {}
+
+    def _col(idx: int) -> str:
+        result, n = "", idx + 1
+        while n:
+            n, r = divmod(n - 1, 26)
+            result = chr(65 + r) + result
+        return result
+
+    # 标题行
+    title = table_config.get("title")
+    if title:
+        rows[str(row)] = {"cells": {"0": {"text": title, "style": title_style,
+                                          "merge": [0, col_count], "height": 50}}, "height": 50}
+        ui_row = row + 1
+        merges.append(f"A{ui_row}:{_col(col_count)}{ui_row}")
+        row += 1
+
+    # 表头行
+    rows[str(row)] = {"cells": {str(i + 1): {"text": col["title"], "style": header_style}
+                                for i, col in enumerate(columns)}, "height": 34}
+    row += 1
+
+    # 数据绑定行
+    data_cells: dict = {}
+    for i, col in enumerate(columns):
+        field = col["field"]
+        cell: dict = {"style": data_style}
+        if col.get("group"):
+            cell["text"]      = f"#{{{ds_code}.group({field})}}"
+            cell["aggregate"] = "group"
+            if "subtotalText" in col:
+                cell["subtotal"]     = "groupField"
+                cell["funcname"]     = "-1"
+                cell["subtotalText"] = col["subtotalText"]
+            if col.get("textOrders"):
+                cell["textOrders"] = col["textOrders"]   # "华北|华南|华东"
+            if not group_config:
+                group_config = {"isGroup": True, "groupField": f"{ds_code}.{field}"}
+        elif col.get("funcname"):
+            cell["text"]     = f"#{{{ds_code}.{field}}}"
+            cell["aggregate"] = col.get("aggregate", "select")
+            cell["subtotal"] = "-1"
+            cell["funcname"] = col["funcname"]
+            if col.get("decimalPlaces"):
+                cell["decimalPlaces"] = col["decimalPlaces"]
+        else:
+            cell["text"] = f"#{{{ds_code}.{field}}}"
+        # 列级 widgetType/dictCode/format 等可选属性透传
+        for k in ("widgetType", "dictCode", "decimalPlaces", "format",
+                  "align", "valign", "color", "bgcolor", "barcode",
+                  "qrcode", "showSign", "expression"):
+            if k in col and k not in cell:
+                cell[k] = col[k]
+        data_cells[str(i + 1)] = cell
+
+    rows[str(row)] = {"cells": data_cells}
+    row += 1
+    return rows, merges, row, group_config
+
+
+# ── Cross-cutting helpers ──────────────────────────────────────────────────────
+
+def apply_params(design: dict, params: list[dict]) -> None:
+    """Open query bar when params are defined (params are already in dataset paramList)."""
+    if not params:
+        return
+    design["querySetting"] = {"izOpenQueryBar": True, "izDefaultQuery": True}
+
+
+def apply_drilling(session, report_id: str, drilling: list[dict]) -> None:
+    """Create drill-through links for each drilling config entry."""
+    import json as _json
+    for d in drilling:
+        param_list = [{"linkField": p["from"], "destParam": p["to"]}
+                      for p in d.get("params", [])]
+        session.request("/link/saveAndEdit", {
+            "reportId":    report_id,
+            "linkName":    d.get("name", f"钻取_{d['field']}"),
+            "linkType":    "0",
+            "ejectType":   d.get("ejectType", "0"),
+            "apiUrl":      "",
+            "apiMethod":   "",
+            "requirement": "",
+            "linkChartId": "",
+            "parameter":   _json.dumps(param_list, ensure_ascii=False),
+        })
+
+
+def apply_linkage(session, report_id: str, linkage: dict | None) -> None:
+    """Create chart linkage link."""
+    import json as _json
+    if not linkage:
+        return
+    session.request("/link/saveAndEdit", {
+        "reportId":    report_id,
+        "linkName":    linkage.get("name", "图表联动"),
+        "linkType":    "2",
+        "ejectType":   "0",
+        "apiUrl":      "",
+        "apiMethod":   "",
+        "requirement": "",
+        "linkChartId": linkage.get("targetChartDataset", ""),
+        "parameter":   _json.dumps([{
+            "linkField": linkage["triggerField"],
+            "destParam": linkage["targetParam"],
+        }], ensure_ascii=False),
+    })

@@ -37,6 +37,83 @@ def find_datasource(session: Session, ds_name: str) -> str:
     return max(matched, key=lambda x: x["id"])["id"]
 
 
+def resolve_ds_id(session: Session, db_source: str) -> str:
+    """把 config 里的 dbSource 统一解析成数据源 ID：
+       - 空 → ""（用服务端默认数据源）
+       - 纯数字 → 原样返回（已是 ID）
+       - 其它（数据源名字）→ find_datasource 按名查 ID（查不到抛 RuntimeError 并列出可用）
+    """
+    if not db_source:
+        return ""
+    if str(db_source).isdigit():
+        return str(db_source)
+    return find_datasource(session, db_source)
+
+
+def generate_sql_via_ai(session: Session, ds_id: str, requirement: str) -> str:
+    """调积木内置 AI 接口按需求在指定数据源上生成 SQL（chooseTables → generateSql）。
+       ds_id 为数据源 id（空串=服务默认/全部表）。返回生成的 SQL 字符串。
+       让服务端用真实表 DDL 接地，避免 AI 凭空猜表名。"""
+    import json as _json
+    choose = session.request("/ai/assistant/chooseTables",
+                             {"dbSource": ds_id or "", "requirements": requirement})
+    raw = choose.get("result")
+    tables = []
+    if isinstance(raw, list):
+        tables = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            parsed = _json.loads(raw)
+            tables = parsed if isinstance(parsed, list) else [parsed]
+        except Exception:
+            tables = [t.strip() for t in raw.split(",") if t.strip()]
+    if not tables:
+        raise RuntimeError(f"chooseTables 未选出可用表（需求：{requirement}）")
+    gen = session.request("/ai/assistant/generateSql",
+                          {"dbSource": ds_id or "", "tables": tables, "requirements": requirement})
+    sql = gen.get("result")
+    if not sql:
+        raise RuntimeError("generateSql 未返回 SQL")
+    return sql
+
+
+def save_dataset(session: Session, report_id: str, ds: dict) -> str:
+    """统一保存一个数据集，返回 db_id。支持：
+       - JSON  (dbType="3")：jsonData + fieldList
+       - API   (dbType="1")：apiUrl + fieldList
+       - SQL   (dbType="0"/默认)：dbDynSql；也可只给 requirement，自动调 generate_sql_via_ai 生成 SQL
+       dbSource 接受数据源名称或 id（自动 resolve_ds_id）。fieldList 支持 [["f","名"],...] 简写。
+    """
+    import json as _json
+    from jimureport_dataset import save_db, parse_sql
+    db_code = ds["dbCode"]
+    db_type = str(ds.get("dbType", "0"))
+    fl = ds.get("fieldList", [])
+    if fl and isinstance(fl[0], (list, tuple)):
+        fl = [{"fieldName": f, "fieldText": t, "widgetType": "String", "orderNum": i,
+               "tableIndex": 0, "extJson": "", "dictCode": ""} for i, (f, t) in enumerate(fl)]
+    if db_type == "3":
+        return save_db(session, report_id, db_code, ds.get("dbChName", db_code), "", fl,
+                       ds.get("paramList"), db_type="3",
+                       json_data=_json.dumps(ds.get("jsonData", []), ensure_ascii=False),
+                       is_list=ds.get("isList", "1"), is_page=ds.get("isPage", "0"))
+    if db_type == "1":
+        api_url = ds.get("apiUrl", "")
+        return save_db(session, report_id, db_code, ds.get("dbChName", db_code), api_url, fl,
+                       ds.get("paramList"), db_type="1", api_url=api_url,
+                       api_method=ds.get("apiMethod", "0"),
+                       is_list=ds.get("isList", "1"), is_page=ds.get("isPage", "0"))
+    db_source = resolve_ds_id(session, ds.get("dbSource", ""))
+    sql = ds.get("dbDynSql", "")
+    if not sql and ds.get("requirement"):
+        sql = generate_sql_via_ai(session, db_source, ds["requirement"])
+    if not fl:
+        fl = parse_sql(session, sql, db_source)
+    return save_db(session, report_id, db_code, ds.get("dbChName", db_code), sql, fl,
+                   ds.get("paramList"), db_source=db_source,
+                   is_list=ds.get("isList", "1"), is_page=ds.get("isPage", "0"))
+
+
 def ensure_datasource(
     session: Session,
     name: str,

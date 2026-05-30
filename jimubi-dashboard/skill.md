@@ -24,6 +24,7 @@ description: Use when user asks to create/design a dashboard (仪表盘/看板),
 - 未调用本 skill，直接读 memory 找凭据自行执行
 - 未调用本 skill，自己探索 API 路径后直接调用
 - 以"操作太简单不需要 skill"为由跳过
+- **用 curl/bash/Agent 子代理探测仪表盘 API 端点**（正确做法：先调用本 skill，再在 skill 上下文内执行）
 
 **正确执行顺序**：
 1. 用户提出仪表盘相关需求
@@ -37,11 +38,12 @@ description: Use when user asks to create/design a dashboard (仪表盘/看板),
 | 场景 | 读取文件 |
 |------|---------|
 | **敲敲云（QQY）低代码应用仪表盘** | 核心规则已内联（识别条件/初始化/必填字段/工作流）；完整 config 模板/UI组件配置/批量生成/按钮操作 → 读取 `references/qqy-guide.md` |
-| **QQY全组件仪表盘（30统计图表+7UI，一次生成）** | 直接用 `gen_qqy_all_comps.py`（**无需 Write 脚本**）：`PYTHONIOENCODING=utf-8 py gen_qqy_all_comps.py API_BASE TOKEN --page-id PAGE_ID --app-id APP_ID --tenant-id TENANT_ID --form-code FORM_CODE [--form-name 表单名称] [--form-type design\|online]` |
+| **QQY全组件仪表盘（30统计图表+7UI，一次生成）** | 直接用 `gen_qqy_all_comps.py`（**无需 Write 脚本**）：`SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"; PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/gen_qqy_all_comps.py" API_BASE TOKEN --page-id PAGE_ID --app-id APP_ID --tenant-id TENANT_ID --form-code FORM_CODE [--form-name 表单名称] [--form-type design\|online]` |
 | 需要示例/演示数据（用户未提供数据源）| `references/api-dataset-examples.md`（92条公开 mock API，按行业分类，直接用 `dataset_ops.py create-api` 创建） |
 | 创建/绑定/修改数据集（SQL/API/文件）| `references/dataset-guide.md`（**仅自定义脚本时需要**；使用预置脚本时**无需读取**） |
 | **多文件数据集（FILES）+ 图表** | 直接用 `files_ops.py create-bind`（**无需 Write 脚本**） |
 | 创建 WebSocket 数据集 | `references/dataset-guide.md`「创建 WebSocket 数据集」章节 |
+| **创建 JSON 数据集 + 图表** | 无需读文档；规则已内联：`dataType:'json'`，数据放 `querySql`（**禁止放 content**），无需 dbSource/queryFieldBySql，直接 `_request POST /add` + `batch-add --specs` 绑定 |
 | **多图表+联动批量生成**（≥2个图表且需要联动） | 直接用 `multi_chart_linkage.py` |
 | 从模板复制创建仪表盘 | 直接用 `template_ops.py copy` |
 | 模板复制遇到问题时 | `references/template-copy-guide.md` |
@@ -75,12 +77,13 @@ description: Use when user asks to create/design a dashboard (仪表盘/看板),
 > ⚠️ **无论使用任何方式创建 SQL 数据集，都必须先询问数据源，禁止直接执行。**
 
 **执行步骤（强制）：**
-1. 先运行 `py datasource_ops.py list API_BASE TOKEN` 列出所有可用数据源
+1. 先运行以下命令列出所有可用数据源
 2. 向用户展示列表，询问"请问使用哪个数据源？"
 3. 等待用户选择后，用选定的数据源 ID 继续执行
 
 ```bash
-py datasource_ops.py list "<api_base>" "TOKEN"
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/datasource_ops.py" list "<api_base>" "TOKEN"
 ```
 
 ### 第2步：根据业务场景自行编写SQL
@@ -93,7 +96,8 @@ py datasource_ops.py list "<api_base>" "TOKEN"
 ### 第3步：创建SQL数据集
 - 分组必须使用 **"示例数据集"**（`dataset_ops.py create-sql` 已内置 `--group "示例数据集"` 默认值）
 ```bash
-py dataset_ops.py create-sql $API_BASE $TOKEN \
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/dataset_ops.py" create-sql $API_BASE $TOKEN \
   --name "数据集名称" --db-source "数据源ID" \
   --sql "SELECT name, value FROM table GROUP BY name" \
   --fields "name:String,value:Integer"
@@ -122,7 +126,7 @@ py dataset_ops.py create-sql $API_BASE $TOKEN \
 
 | 操作类型 | 目标耗时 | 做法 |
 |---------|---------|------|
-| 单组件增/删/改/查 | ≤30s | comp_ops.py 一条命令（cp + 执行 + rm，共 2 轮） |
+| 单组件增/删/改/查 | ≤30s | comp_ops.py 一条命令（SKILL_REFS + 全路径执行，1轮完成） |
 | 数据集 + 单组件 | ≤60s | singleFile 脚本（7步完整流程：/add → queryFieldBySql → /edit → getAllChartData → config → append → save_page） |
 | 复合操作（数据集 + 多组件） | ≤60s | 并行 Bash 调用 |
 | 模板复制创建仪表盘 | ≤60s | template_ops.py copy |
@@ -130,6 +134,7 @@ py dataset_ops.py create-sql $API_BASE $TOKEN \
 
 ### 反模式检查清单（出现任何一条就说明在浪费时间）
 
+- **🚨 用 `py -c` 或 `ls` 探索已知信息**（default_configs.json 的路径、可用键名、组件类型等在 skill.md 和 map-guide.md 中已完整列出，禁止用探索命令去"验证"，直接写脚本执行。探索命令还会引入 `$HOME` Unix 路径格式问题导致 `FileNotFoundError`。）
 - **🚨 添加≥2个组件时用单独的 `add` 并行执行**（并行导致乐观锁冲突丢失组件！必须用 `batch-add --specs '[...]'` 一次保存）
 - **🚨 `add` 命令后 chartData 为 `[]`**（comp_ops.py 已从 default_configs.json 加载完整默认数据，出现空数据说明 default_configs.json 未被复制到工作目录）
 - **🚨 静态 chartData 禁止使用 comp_ops.py 兜底数据**（default_configs.json 为空时 comp_ops.py 回落到内置占位数据：JBar→A/B/C/D/E、JStackBar→收入/支出，这些是虚构数据。必须从前端源码 `data.ts`（位于 `packages/dragEngine/components/jeecgComponents/data.ts`）中读取各组件 `compConfig.chartData` 的真实值，通过每个 spec 加 `"config":{"chartData":[...]}` 字段，或 singleFile 脚本中调用 `comp_ops._build_comp_config(comp_type, title, {"chartData": json.dumps(real_data)})` 覆盖）
@@ -139,9 +144,9 @@ py dataset_ops.py create-sql $API_BASE $TOKEN \
 - **⚠️ singleFile 场景将"建数据集脚本"和"添加图表脚本"拆成两个**（必须一个脚本完成全部流程）
 - **⚠️ singleFile 场景用 `comp_ops.py --dataset-name` 绑定图表**（按字段数组顺序自动映射，导致图表显示错误数据）
 - **⚠️ 执行 `py script.py` 时不加 `PYTHONIOENCODING=utf-8`**（Windows 默认 GBK 编码，中文必定乱码）
-- **⚠️ cp 依赖文件放在轮次1，py 执行在轮次2**（cp 后文件可能丢失。**必须把 cp 与 py 放在同一命令链**）
-- **⚠️ cp 目标路径用 `.` 或 `C:/Users/` 格式**（`.` 不可靠、`C:/Users/` 在 Git Bash 静默失败。**必须用完整 Unix 格式** `/c/Users/<用户名>/bi_utils.py`，含文件名）
-- **⚠️ cp 后用 `py -c` 或读取文件来验证文件内容**（多余！直接 Write 脚本并执行即可，中途检查浪费1轮。仅需 `ls` 验证文件存在）
+- **⚠️ 自定义脚本用 `cp bi_utils.py` 而非 `sys.path.insert`**（cp 路径硬编码，换机器失效，且需要清理。**必须用 `sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references'))`**）
+- **⚠️ 预置脚本用 `py comp_ops.py` 短名调用**（PYTHONPATH 只解决 `import bi_utils`，不解决脚本文件查找！`py comp_ops.py` 在当前目录找脚本，必然报"No such file"。**必须用全路径**：`SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"; PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/comp_ops.py" ...`）
+- **🚨 create_page 后紧接 save_page**（create_page 内部已保存一次，updateCount 变为1；随即 save_page 携带 updateCount=0 触发乐观锁报"仪表盘内容不是最新"。**save_page 只在添加/修改组件后调用**）
 - **⚠️ Write 脚本时写占位符 TOKEN/API_BASE 再单独 Edit 更新**（凭据已在上下文中，必须 Write 时直接填入最终值）
 - **⚠️ 多图表+联动场景逐个调用 comp_ops.py + linkage_ops.py**（用 `multi_chart_linkage.py` 单脚本，节省约80%耗时）
 - **⚠️ 直接调用 bi_utils.add_xxx() + save_page() 添加组件到已有页面**（会覆盖已有组件！必须先 query_page + 缓存 template）
@@ -287,16 +292,40 @@ bi_utils.init_api(API_BASE, TOKEN, extra_headers={
 
 ### QQY 仪表盘列表查询
 
-QQY 模式下查询应用内的仪表盘列表时，`X-Low-App-ID` 头会自动过滤出该应用的仪表盘。也可以直接用 `lowAppId` 参数过滤：
+> **🚨 强制规则：用户未提供 appId 时，必须先询问，禁止自行猜测或遍历已知 appId**
+>
+> 正确流程：
+> 1. 用户说"在某仪表盘中操作"但未给 appId → 先问："请提供该应用的 appId（可从浏览器 URL `/myapp/{appId}/...` 获取）"
+> 2. 拿到 appId 后，**优先通过应用菜单接口查找仪表盘**（可按名称精确定位 pageId）
+> 3. 确认 pageId 后再执行操作
+
+**✅ 推荐方式：通过应用菜单查找仪表盘（按名称定位 pageId）**
 
 ```python
-# 查询指定低代码应用的仪表盘列表
+# 查询应用菜单，按名称找到仪表盘的 pageId（menuUrl 字段）
+resp = bi_utils._request('GET', '/online/lowAppMenu/list',
+    params={'appId': APP_ID, 'pageSize': 100})
+records = resp.get('result', {}).get('records', []) or []
+for m in records:
+    # type='drag' 为仪表盘菜单项，menuUrl 即为 pageId
+    print(m['id'], m.get('type'), m.get('menuName'), m.get('menuUrl'))
+# 示例输出：
+# 2047251681335025666 | drag | 销量分析 | 1207230587321589760
+#                                 ↑名称      ↑这就是 PAGE_ID
+```
+
+**备用方式：通过 page/list 过滤（结果需二次验证 lowAppId）**
+
+```python
+# ⚠️ page/list 接口不精确过滤，返回结果混有其他应用页面，需手动校验 lowAppId
 result = bi_utils._request('GET', '/drag/page/list', params={
     'lowAppId': APP_ID,
     'pageNo': 1,
     'pageSize': 50
 })
 pages = result.get('result', {}).get('records', [])
+# 必须二次过滤，排除 lowAppId 不匹配的页面
+pages = [p for p in pages if p.get('lowAppId') == APP_ID]
 for p in pages:
     print(p['id'], p['name'])
 ```
@@ -330,7 +359,7 @@ Step 1: 确认 appId + tenantId（必须询问用户）
 Step 2: 确认仪表盘名称
 Step 3: 在 bi_utils.init_api 中设置 extra_headers
 Step 4: 调用 /drag/page/add 创建页面，body 中必须显式传 lowAppId: APP_ID（不传 isLowApp）
-Step 5: 添加每个统计图表前，必须执行【三步询问流程】（见下方）
+Step 5: 添加每个统计图表前，必须执行【四步询问流程】（见下方）
 Step 6: 将仪表盘菜单归入目标分组（见下方「QQY 仪表盘菜单归组」章节）
 Step 7: 创建完成后输出仪表盘 ID 和分享地址（格式：{前端域名}:{端口}/drag/share/{appId}/{pageId}）
 ```
@@ -373,24 +402,51 @@ r = requests.put(f'{API_BASE}/online/lowAppMenu/edit', headers=HEADERS, json=bod
 
 ---
 
-### 🚨 QQY 统计图表三步询问流程（强制，每个统计图表都必须执行）
+### 🚨 QQY 统计图表四步询问流程（强制，每个统计图表都必须执行）
 
-每次在 QQY 仪表盘中添加**任意一个统计图表**（30个范围内），必须严格执行以下三步，**禁止自行假设表单或字段**：
+每次在 QQY 仪表盘中添加**任意一个统计图表**（30个范围内），必须严格执行以下四步，**禁止自行假设表单或字段**：
 
-**Step A：查询并展示可用表单 → 询问用户选择**
+**Step 0：询问使用当前应用还是其他应用的表单**
+```
+询问用户："请问使用当前应用下的表单，还是其他应用下的表单？"
+- 当前应用 → 用当前 APP_ID 继续 Step A
+- 其他应用 → 询问"请提供应用名称或应用ID"，等待用户提供后继续
+```
+
+**Step A：同时查询普通表单和聚合表，分两组展示 → 询问用户选择**
 ```python
-# 调用接口
-GET /desform/api/list/options?appId={APP_ID}
-# 向用户展示：
-# | formCode | 表单名称 |
-# 询问："请问使用哪个表单？"
+# 同时调用两个接口（携带 X-Low-App-ID 头）：
+GET /desform/api/list/options?appId={APP_ID}          # 普通设计器表单
+GET /drag/onlDragTableRelation/list?pageSize=20        # 聚合表
+
+# 向用户分两组展示（对应前端 FormSelectModal 两个 Tab）：
+# 【表单（普通）】
+# | formCode | 表单名称 | type |
+# | ding_dan_guan_li_oaf0 | 订单管理 | design |
+#
+# 【聚合表】
+# | id | 聚合表名称 | 类型标签 |
+# | 1207232765004226560 | [聚合] 测试 | aggregation |
+# （类型标签判断：relationForms.formType=='aggregation' → '[聚合工厂]'，否则 '[聚合]'）
+#
+# 询问："请问使用哪个表单？（请指明普通表单 / 聚合表）"
 # 等待用户选择后继续
 ```
 
 **Step B：查询并展示字段 → 询问用户选择维度/数值字段**
 ```python
-# 调用接口
+# 根据用户选择分两种情况：
+
+# ① 普通表单（type=design）：
 GET /desform/api/fields/{formCode}
+# result 是 dict，字段列表在 result['fields']
+# 跳过 file-upload 类型字段
+
+# ② 聚合表（type=aggregation）：
+GET /drag/onlDragTableRelation/getFields/{aggregationId}
+# result 直接是字段数组，计算字段格式：{"title":"总额","type":"number","value":"总额fc37c"}
+# 跳过 file-upload/imgupload/location 类型字段
+
 # 向用户展示字段列表（字段名 + 显示名 + 控件类型），询问：
 # "请选择要显示的字段：
 #  - 维度字段（nameFields，文字/选项类）
@@ -400,12 +456,68 @@ GET /desform/api/fields/{formCode}
 
 **Step C：按用户选定的表单 + 字段，构建 dataType=4 完整 config 创建图表**
 
+普通表单与聚合表的 config 关键字段差异：
+
+| 字段 | 普通表单（design） | 聚合表（aggregation） |
+|------|-------------------|----------------------|
+| `type` | `'design'` | `'aggregation'` |
+| `formType` | `'design'` | `'design'`（保持不变） |
+| `formId` | formCode（如 `ding_dan_guan_li_oaf0`） | 聚合表 id（如 `1207232765004226560`） |
+| `tableName` | formCode | 聚合表 id（与 formId 相同） |
+| `formName` | 表单显示名 | `[聚合] 聚合表名`（如 `[聚合] 测试`） |
+| filterField 来源 | `/desform/api/fields/{formCode}` | `/drag/onlDragTableRelation/getFields/{id}` |
+
+聚合表 config 示例（以 JBar 为例）：
+```python
+comp_config = {
+    'dataType': 4,
+    'formType': 'design',              # 聚合表 formType 仍为 'design'
+    'formId': '1207232765004226560',   # 聚合表 id
+    'formName': '[聚合] 测试',
+    'tableName': '1207232765004226560',# 与 formId 相同
+    'type': 'aggregation',             # 🚨 关键区别：type='aggregation'
+    'appId': APP_ID,
+    'appType': 'current',
+    'nameFields': [{'fieldName': 'input_xxx', 'fieldTxt': '名称', 'fieldType': 'string',
+                    'widgetType': 'input', 'fieldShow': True, 'options': [], 'customDateType': ''}],
+    'valueFields': [{'fieldName': '总额fc37c', 'fieldTxt': '总额', 'fieldType': 'number',
+                     'widgetType': 'number', 'fieldShow': True, 'groupField': '', 'options': [], 'customDateType': ''}],
+    'typeFields': [], 'assistYFields': [], 'assistTypeFields': [], 'calcFields': [],
+    'seriesType': [],
+    'sorts': {'name': '', 'type': ''},
+    'filter': {'queryField': 'create_time', 'queryRange': 'all',
+               'conditionMode': 'and', 'conditionFields': [], 'customTime': []},
+    'filterField': SYSTEM_FIELDS + form_filter_fields,  # 系统字段 + 聚合表字段
+    'chart': {'category': 'Bar', 'subclass': 'JBar', 'isGroup': False},
+    'turnConfig': {'url': ''}, 'jsConfig': '', 'drillData': [],
+    'authFieldShowResult': [], 'timeOut': 0, 'chartData': '[]',
+    'background': '#FFFFFF', 'borderColor': '#E8E8E8',
+    'size': {'height': 385},
+    'compStyleConfig': DEFAULT_COMP_STYLE_CONFIG,
+    'analysis': DEFAULT_ANALYSIS,
+    'option': {
+        'card': {'title': '', 'size': 'default', 'headColor': '#FFFFFF',
+                 'textStyle': {'color': '#464646', 'fontSize': 16, 'fontWeight': 'bold'},
+                 'extra': '', 'rightHref': ''},
+        'title': {'show': True, 'text': '基础柱形图'},
+        'series': [{'type': 'bar'}],
+        'xAxis': {'type': 'category'},
+        'yAxis': {'type': 'value'},
+        'grid': {'top': 70, 'bottom': 60, 'left': 50, 'right': 30, 'containLabel': True},
+        'tooltip': {'trigger': 'axis'},
+        'legend': {'show': True},
+    },
+}
+```
+
 **禁止行为：**
+- ❌ 禁止跳过 Step 0，不询问应用来源直接查询当前应用表单
+- ❌ 禁止只展示普通表单，忽略聚合表（前端有两个 Tab，AI 流程必须还原）
 - ❌ 禁止自行推断"复用页面已有组件的表单"
 - ❌ 禁止跳过询问、直接用某个表单或字段
 - ❌ 即使应用只有一个表单，也要展示让用户确认
 - ❌ 禁止使用 dataType=1 静态数据兜底
-
+- ❌ 聚合表 filterField 禁止调用 /desform/api/fields，必须用 /drag/onlDragTableRelation/getFields/{id}
 
 **QQY 也支持 dataType=2（SQL/API 数据集），只需额外携带 appId/tenantId 头。**
 
@@ -629,7 +741,7 @@ GET /desform/api/fields/{formCode}
 
 | 脚本 | 功能 | 常用命令 |
 |------|------|---------|
-| `comp_ops.py` | 组件增删改查 | `list`, `delete`, `edit`, `add`, `batch-add`, `move` |
+| `comp_ops.py` | 组件增删改查 | `list`, `delete`, `edit`, `add`, `batch-add`, `move`, `switch-type` |
 | `page_ops.py` | 页面配置（背景/主题）| `info`, `set-bg`, `set-bgimg`, `set-theme`, `rename`。**rename 参数格式：** `py page_ops.py rename API_BASE TOKEN PAGE_ID --name "新名称"`（`--name` 是命名参数）。**delete：** `bi_utils._request('DELETE','/drag/page/delete',params={'id':PAGE_ID})`。**⚠️ 水印仅大屏有，仪表盘无此命令** |
 | `dataset_ops.py` | 数据集管理 | `list`, `create-sql`, `create-api`, `test`, `delete`, `bind` |
 | `template_ops.py` | 模板操作 | `list`, `preview`, `search`, `copy` |
@@ -637,8 +749,8 @@ GET /desform/api/fields/{formCode}
 | `map_ops.py` | 地图数据管理 | `list`, `check`, `upload`, `add-map` |
 | `style_ops.py` | 批量样式修改 | `show-colors`, `set-title-color`, `set-palette`, `batch-edit` |
 | `datasource_ops.py` | 数据源管理（含签名） | `list`, `detail`, `create`, `test`, `delete`, `parse-sql`。**create 参数：** `--db`（非 --db-name）、`--user`（非 --username）；**test 支持 `--id` 或 `--name`** |
-| `dict_ops.py` | 字典管理 | `list`, `items`, `create`, `add-item`, `delete`, `bind` |
-| `files_ops.py` | 多文件数据集 | `create-bind`（上传→建数据集→绑图表一体化）。JOIN 模式必须传 `--group-by <列名> --join-on <关联列> --agg <聚合列>`；列名未知时先问用户 |
+| `dict_ops.py` | 字典管理 | `list`（无过滤参数）, `items --code <编码>`（**不是 --dict-code**）, `create --name --code [--items "1=男,2=女"]`, `add-item --code --value --text [--sort]`, ~~`delete`~~（**有 bug，禁用**）, `bind`。**list 不支持按编码过滤，需过滤时直接调 `/jmreport/dict/list?dictCode=xxx`；delete 改用直接 API（见 dict-guide.md）** |
+| `files_ops.py` | 文件数据集（singleFile/FILES） | `create-bind`（上传→建数据集→绑图表一体化，支持 `--single` 参数创建单文件数据集）。JOIN 模式必须传 `--group-by <列名> --join-on <关联列> --agg <聚合列>`；列名未知时先问用户 |
 | `link_ops.py` | 外部链接/自定义JS | `set`（外部链接）, `set-js`（自定义JS）, `show`（查看）, `remove`（删除链接）, `remove-js`（删除JS） |
 | `yapi_ops.py` | YApi Mock 管理 | `create-mock`（**必填 `--title`，不是 `--name`**；`--template single/multi/pie/gauge/table/bar_multi`），`list`，`delete`。**⚠️ 创建前必须先 `list` 查已有接口，复用勿重建** |
 | `multi_chart_linkage.py` | 批量图表+联动 | 单脚本完成多图+联动，节省80%耗时 |
@@ -647,10 +759,10 @@ GET /desform/api/fields/{formCode}
 
 **使用前准备（所有脚本通用）：**
 ```bash
-# <skill_base_dir> = skill 加载时显示的 Base directory for this skill（Windows 路径，Git Bash 下需转为 /c/Users/... 格式）
-cp "<skill_base_dir>/references/scripts/脚本名.py" .
-cp "<skill_base_dir>/references/bi_utils.py" .
-# 执行完后清理: rm 脚本名.py bi_utils.py
+# PYTHONPATH 让脚本内部 import bi_utils 成功；脚本文件本身必须用全路径，py 不会在 PYTHONPATH 中搜索脚本
+# $HOME 在 Windows Git Bash / Mac / Linux 均可自动解析当前用户目录
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/脚本名.py" ...
 ```
 
 ### 快捷操作：comp_ops.py（增删改查）
@@ -658,34 +770,37 @@ cp "<skill_base_dir>/references/bi_utils.py" .
 > **⚠️ 添加/编辑/删除组件必须使用 comp_ops.py，严禁直接调用 bi_utils.add_xxx() + save_page()。**
 > 原因：bi_utils.add_component() 内部将 `_page_components[page_id]` 初始化为空列表，save_page 时会用空列表覆盖页面已有的全部组件，造成不可恢复的数据丢失。
 
-**使用前准备（add 命令需额外复制 default_configs.json）：**
+**使用前准备：**
 ```bash
-cp "<skill_base_dir>/references/scripts/comp_ops.py" .
-cp "<skill_base_dir>/references/bi_utils.py" .
-cp "<skill_base_dir>/references/scripts/default_configs.json" .
-# 执行完后清理
-rm comp_ops.py bi_utils.py default_configs.json
+# PYTHONPATH 让 import bi_utils 成功；脚本文件必须用全路径（py 不在 PYTHONPATH 中搜索脚本文件）
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+COMP_OPS="$SKILL_REFS/scripts/comp_ops.py"
+# add/batch-add 命令自动从 SKILL_REFS/scripts/default_configs.json 读取默认配置
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" ...
 ```
 
 **核心命令（坐标为栅格单位，w 之和≤24）：**
 ```bash
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+COMP_OPS="$SKILL_REFS/scripts/comp_ops.py"
+
 # 查看组件
-py comp_ops.py list $API_BASE $TOKEN $PAGE_ID
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" list $API_BASE $TOKEN $PAGE_ID
 
 # 删除组件
-py comp_ops.py delete $API_BASE $TOKEN $PAGE_ID --name "组件名"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" delete $API_BASE $TOKEN $PAGE_ID --name "组件名"
 
 # 编辑组件属性（单属性）
-py comp_ops.py edit $API_BASE $TOKEN $PAGE_ID --name "组件名" --set "option.title.text=新标题"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" edit $API_BASE $TOKEN $PAGE_ID --name "组件名" --set "option.title.text=新标题"
 
 # 编辑组件属性（多属性：每个属性一个 --set）
-py comp_ops.py edit $API_BASE $TOKEN $PAGE_ID --name "组件名" --set "option.showValue=true" --set "option.unit=个"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" edit $API_BASE $TOKEN $PAGE_ID --name "组件名" --set "option.showValue=true" --set "option.unit=个"
 
 # 添加单个组件（静态数据，栅格坐标）⚠️ 严禁并行调用多个 add，会因乐观锁丢失组件
-py comp_ops.py add $API_BASE $TOKEN $PAGE_ID --comp "JBar" --title "柱形图" --x 0 --y 0 --w 12 --h 30
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" add $API_BASE $TOKEN $PAGE_ID --comp "JBar" --title "柱形图" --x 0 --y 0 --w 12 --h 30
 
 # 批量添加多个组件（一次 save，彻底消除并发锁冲突）——添加≥2个组件时必须用此命令
-py comp_ops.py batch-add $API_BASE $TOKEN $PAGE_ID --specs '[
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" batch-add $API_BASE $TOKEN $PAGE_ID --specs '[
   {"comp":"JBar","title":"柱形图","x":0,"y":0,"w":12,"h":30},
   {"comp":"JPie","title":"饼图","x":12,"y":0,"w":12,"h":30},
   {"comp":"JProgress","title":"进度图","x":0,"y":30,"w":12,"h":28},
@@ -696,7 +811,12 @@ py comp_ops.py batch-add $API_BASE $TOKEN $PAGE_ID --specs '[
 # 推荐：先 dataset_ops.py create-sql，再 batch-add 传 "config" 绑定；复杂场景用全流程自定义脚本
 
 # 移动/缩放组件
-py comp_ops.py move $API_BASE $TOKEN $PAGE_ID --name "组件名" --x 0 --y 17
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" move $API_BASE $TOKEN $PAGE_ID --name "组件名" --x 0 --y 17
+
+# 切换组件类型（保留公共配置：数据绑定/title/card/customColor/tooltip/legend/grid/xAxis/yAxis）
+# --title 可选，不填则沿用原名；笛卡尔图互换时 xAxis/yAxis 结构自动保留（data 清空）
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" switch-type $API_BASE $TOKEN $PAGE_ID --name "基础柱形图" --to "JLine"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$COMP_OPS" switch-type $API_BASE $TOKEN $PAGE_ID --id "组件i值" --to "JPie" --title "新标题"
 ```
 
 **四种数据模式：**
@@ -712,21 +832,20 @@ py comp_ops.py move $API_BASE $TOKEN $PAGE_ID --name "组件名" --x 0 --y 17
 > **适用场景**：普通 SQL（无 FreeMarker 动态参数），字段手动已知。视觉配置由 `default_configs.json` 自动提供，**无需手写 option**。
 
 ```bash
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+
 # Step 1: 创建 SQL 数据集（获取 DS_ID）
-py dataset_ops.py create-sql $API_BASE $TOKEN \
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/dataset_ops.py" create-sql $API_BASE $TOKEN \
   --name "每年大屏创建数量" --code "yearly_bigscreen_count" \
   --db-source "数据源ID" \
   --sql "SELECT YEAR(create_time) AS name, COUNT(*) AS value FROM onl_drag_page WHERE del_flag=0 GROUP BY YEAR(create_time)" \
   --fields "name:String,value:Integer"
 
 # Step 2: 验证数据集
-py dataset_ops.py test $API_BASE $TOKEN --id "DS_ID"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/dataset_ops.py" test $API_BASE $TOKEN --id "DS_ID"
 
 # Step 3: 批量绑定图表（视觉配置自动取 default_configs.json，只需传数据绑定字段）
-cp "<skill_base_dir>/references/scripts/comp_ops.py" . && \
-cp "<skill_base_dir>/references/bi_utils.py" . && \
-cp "<skill_base_dir>/references/scripts/default_configs.json" . && \
-PYTHONIOENCODING=utf-8 py comp_ops.py batch-add $API_BASE $TOKEN $PAGE_ID --specs '[
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/comp_ops.py" batch-add $API_BASE $TOKEN $PAGE_ID --specs '[
   {"comp":"JBar","title":"基础柱形图","x":0,"y":0,"w":12,"h":35,
    "config":{"dataType":2,"dataSetId":"DS_ID","dataSetName":"每年大屏创建数量",
              "dataSetType":"sql","dataSetApi":"SELECT ...","dataSetMethod":"GET","dataSetIzAgent":"1",
@@ -735,8 +854,7 @@ PYTHONIOENCODING=utf-8 py comp_ops.py batch-add $API_BASE $TOKEN $PAGE_ID --spec
              "dictOptions":{},"paramOption":[],"chartData":"[]"}},
   {"comp":"JPie","title":"饼图","x":12,"y":0,"w":12,"h":35,
    "config":{"dataType":2,"dataSetId":"DS_ID",...}}
-]' && \
-rm comp_ops.py bi_utils.py default_configs.json
+]'
 ```
 
 > **config 只需传数据绑定字段**：`dataType/dataSetId/dataSetName/dataSetType/dataSetApi/dataSetMethod/dataSetIzAgent/dataMapping/fieldOption/dictOptions/paramOption/chartData`。`option/background/borderColor/size/w/h` 等视觉字段**全部**由 `default_configs.json` 自动补全，不要手写。
@@ -750,6 +868,9 @@ rm comp_ops.py bi_utils.py default_configs.json
 
 ```python
 # 全流程自定义脚本（SQL数据集 + 图表绑定，适用于含 FreeMarker 的复杂 SQL）
+import sys, os
+# 动态导入 bi_utils，跨机器兼容（$HOME 自动解析当前用户目录）
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references'))
 import json, time, random, hashlib, urllib.request
 import bi_utils, copy
 
@@ -903,27 +1024,32 @@ print(f'预览: {API_BASE}/drag/page/view/{PAGE_ID}')
 
 **使用前准备：**
 ```bash
-cp "<skill_base_dir>/references/scripts/linkage_ops.py" .
-cp "<skill_base_dir>/references/bi_utils.py" .
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+LINK_OPS="$SKILL_REFS/scripts/linkage_ops.py"
+# 脚本文件必须用全路径；PYTHONPATH 只解决 import bi_utils，不解决脚本文件查找
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" ...
 ```
 
 **核心命令：**
 ```bash
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+LINK_OPS="$SKILL_REFS/scripts/linkage_ops.py"
+
 # 查看页面所有联动配置
-py linkage_ops.py show $API_BASE $TOKEN $PAGE_ID
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" show $API_BASE $TOKEN $PAGE_ID
 
 # 添加联动（--mapping 格式：src=tgt，多个逗号分隔）
-py linkage_ops.py add-linkage $API_BASE $TOKEN $PAGE_ID --source "源组件名" --target "目标组件名" --mapping "value=age"
-py linkage_ops.py add-linkage $API_BASE $TOKEN $PAGE_ID --source "柱形图" --target "饼图" --mapping "name=name,value=keyword"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" add-linkage $API_BASE $TOKEN $PAGE_ID --source "源组件名" --target "目标组件名" --mapping "value=age"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" add-linkage $API_BASE $TOKEN $PAGE_ID --source "柱形图" --target "饼图" --mapping "name=name,value=keyword"
 
 # 删除联动
-py linkage_ops.py remove-linkage $API_BASE $TOKEN $PAGE_ID --source "源组件名" --target "目标组件名"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" remove-linkage $API_BASE $TOKEN $PAGE_ID --source "源组件名" --target "目标组件名"
 
 # 添加钻取（自刷新下钻，--comp 为源组件，无 --target）
-py linkage_ops.py add-drill $API_BASE $TOKEN $PAGE_ID --comp "组件名" --mapping "name=year"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" add-drill $API_BASE $TOKEN $PAGE_ID --comp "组件名" --mapping "name=year"
 
 # 删除钻取
-py linkage_ops.py remove-drill $API_BASE $TOKEN $PAGE_ID --comp "组件名"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" remove-drill $API_BASE $TOKEN $PAGE_ID --comp "组件名"
 ```
 
 **联动 vs 钻取核心区别：**
@@ -955,11 +1081,12 @@ py linkage_ops.py remove-drill $API_BASE $TOKEN $PAGE_ID --comp "组件名"
 
 ```
 步骤1：查询图表配置，取 nameFields[0].fieldName
-  py comp_ops.py list API_BASE TOKEN PAGE_ID
+  SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+  PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/comp_ops.py" list API_BASE TOKEN PAGE_ID
   # 再用 py -c 取 config 中的 nameFields，读取 fieldName
 
 步骤2：写入钻取配置
-  py linkage_ops.py add-drill API_BASE TOKEN PAGE_ID \
+  PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/linkage_ops.py" add-drill API_BASE TOKEN PAGE_ID \
     --comp "图表名" --mapping "name=<nameFields[0].fieldName>"
 ```
 
@@ -984,7 +1111,7 @@ for comp in tmpl:
         break
 "
 # 输出 nameField: input_xxxx_xxxx 后，直接执行：
-py linkage_ops.py add-drill API_BASE TOKEN PAGE_ID --comp "目标图表名" --mapping "name=input_xxxx_xxxx"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/linkage_ops.py" add-drill API_BASE TOKEN PAGE_ID --comp "目标图表名" --mapping "name=input_xxxx_xxxx"
 ```
 
 **⚠️ QQY 钻取的 mapping target 是表单字段名（不是语义名）：**
@@ -996,26 +1123,37 @@ py linkage_ops.py add-drill API_BASE TOKEN PAGE_ID --comp "目标图表名" --ma
 
 ### 快捷操作：link_ops.py（外部链接/自定义JS）
 
+**使用前准备：**
+```bash
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+LINK_OPS="$SKILL_REFS/scripts/link_ops.py"
+# 脚本文件必须用全路径；PYTHONPATH 只解决 import bi_utils，不解决脚本文件查找
+```
+
 **核心命令：**
 ```bash
-# 查看页面所有链接配置
-py link_ops.py show $API_BASE $TOKEN $PAGE_ID
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+LINK_OPS="$SKILL_REFS/scripts/link_ops.py"
 
-# 设置外部链接（按名称/类型/ID 定位组件）
-py link_ops.py set $API_BASE $TOKEN $PAGE_ID --name "饼图名" --url "https://example.com/detail?category=\${name}"
-py link_ops.py set $API_BASE $TOKEN $PAGE_ID --type "JPie" --url "https://www.baidu.com/s?wd=\${name}&value=\${value}"
+# 查看页面所有链接配置
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" show $API_BASE $TOKEN $PAGE_ID
+
+# 设置外部链接（按名称/类型/ID 定位组件）——已验证：2026-04-24，JBar 点击跳转 jeecg.com
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" set $API_BASE $TOKEN $PAGE_ID --name "基础柱形图" --url "https://www.jeecg.com"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" set $API_BASE $TOKEN $PAGE_ID --name "饼图名" --url "https://example.com/detail?category=\${name}"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" set $API_BASE $TOKEN $PAGE_ID --type "JPie" --url "https://www.baidu.com/s?wd=\${name}&value=\${value}"
 
 # 删除外部链接
-py link_ops.py remove $API_BASE $TOKEN $PAGE_ID --name "饼图名"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" remove $API_BASE $TOKEN $PAGE_ID --name "饼图名"
 
 # 设置自定义JS脚本
-py link_ops.py set-js $API_BASE $TOKEN $PAGE_ID --name "基础柱形图" --js 'window.open("http://example.com");return false;'
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" set-js $API_BASE $TOKEN $PAGE_ID --name "基础柱形图" --js 'window.open("http://example.com");return false;'
 
 # 从文件读取复杂脚本
-py link_ops.py set-js $API_BASE $TOKEN $PAGE_ID --type "JBar" --js-file script.js
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" set-js $API_BASE $TOKEN $PAGE_ID --type "JBar" --js-file script.js
 
 # 删除自定义JS脚本
-py link_ops.py remove-js $API_BASE $TOKEN $PAGE_ID --name "基础柱形图"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$LINK_OPS" remove-js $API_BASE $TOKEN $PAGE_ID --name "基础柱形图"
 ```
 
 **URL 参数占位符（来自 ECharts 点击事件 params）：**
@@ -1059,7 +1197,8 @@ return false;
 
 **也可用 comp_ops.py edit 快速设置：**
 ```bash
-py comp_ops.py edit $API_BASE $TOKEN $PAGE_ID --name "基础柱形图" --set "jsConfig=window.open(\"http://example.com\");return false;"
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/comp_ops.py" edit $API_BASE $TOKEN $PAGE_ID --name "基础柱形图" --set "jsConfig=window.open(\"http://example.com\");return false;"
 ```
 
 ### 组件 dataMapping 槽位配置（SLOT_CONFIGS）速查
@@ -1103,26 +1242,25 @@ NO_BIND = {'JImg', 'JText', 'JCurrentTime', 'JIframe', 'JDragEditor',
 ### Step 3: 调用 API 创建仪表盘
 
 **优先使用共通工具库 `bi_utils.py`**（从 Skills 目录复制到后端项目根目录使用）：
-- Skills 目录（权威副本）：`<skill_base_dir>\references\bi_utils.py`
-
-> 如果后端项目根目录没有 `bi_utils.py`，先从 skills 目录复制过去再使用。
-
 **执行步骤：**
 ```
-1. 确认后端项目根目录有 bi_utils.py（没有则从 skills 复制）
-2. Write 工具 → 写入业务脚本 create_xxx_dashboard.py（项目根目录）
-3. Bash 工具 → cd <项目根目录> && python create_xxx_dashboard.py
-4. Bash 工具 → rm create_xxx_dashboard.py（清理临时脚本）
+1. Write 工具 → 写入业务脚本（开头用 sys.path.insert 动态导入 bi_utils，无需 cp）
+2. Bash 工具 → PYTHONIOENCODING=utf-8 py create_xxx_dashboard.py
+3. Bash 工具 → rm create_xxx_dashboard.py（清理临时脚本）
 ```
 
 **仪表盘创建示例：**
 ```python
+import sys, os
+# 动态导入 bi_utils，无需 cp，跨机器兼容
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references'))
 from bi_utils import *
 
 init_api('<api_base>', '<token>')
 
 # 创建仪表盘（style='default'，栅格坐标）
 page_id = create_page('运营数据看板', style='default', theme='default')
+# ⚠️ create_page 内部已保存一次，不要再调 save_page（否则 updateCount 不一致报乐观锁错误）
 
 # 第一行：4 个数字卡片（w=6×4=24，h=17）
 add_number(page_id, '总用户数', x=0, y=0, w=6, h=17, value=15890, suffix='人')
@@ -1143,7 +1281,7 @@ add_chart(page_id, 'JPie', '用户来源', x=14, y=17, w=10, h=35,
               {'name':'其他','value':10},
           ])
 
-save_page(page_id)
+save_page(page_id)  # 添加了组件后调一次 save_page
 print(f'仪表盘创建成功！ID: {page_id}')
 ```
 
@@ -1365,8 +1503,9 @@ config = {
 使用 `datasource_ops.py` 管理数据源：`list`, `detail`, `create`, `test`, `delete`
 
 ```bash
-py datasource_ops.py list "API_BASE" "TOKEN"
-py datasource_ops.py create "API_BASE" "TOKEN" --name "名称" --db "MYSQL5.7" \
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/datasource_ops.py" list "API_BASE" "TOKEN"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/datasource_ops.py" create "API_BASE" "TOKEN" --name "名称" --db "MYSQL5.7" \
   --url "jdbc:mysql://..." --user "root" --password "root"
 ```
 
@@ -1388,14 +1527,15 @@ SQL 支持 FreeMarker 动态条件：`<#if isNotEmpty(sex)> AND sex = '${sex}' <
 
 **推荐方式（普通SQL，无FreeMarker）**：
 ```bash
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
 # 1. 创建SQL数据集
-PYTHONIOENCODING=utf-8 py dataset_ops.py create-sql $API_BASE $TOKEN \
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/dataset_ops.py" create-sql $API_BASE $TOKEN \
   --name "数据集名" --db-source "数据源ID" \
   --sql "SELECT name, value FROM t GROUP BY name" \
   --fields "name:String,value:Integer"
 
 # 2. 批量添加图表并绑定
-PYTHONIOENCODING=utf-8 py comp_ops.py batch-add $API_BASE $TOKEN $PAGE_ID --specs '[
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/comp_ops.py" batch-add $API_BASE $TOKEN $PAGE_ID --specs '[
   {"comp":"JBar","title":"柱形图","x":0,"y":0,"w":12,"h":35,
    "config":{"dataType":2,"dataSetId":"<DS_ID>",
              "dataMapping":[{"filed":"维度","mapping":"name"},{"filed":"数值","mapping":"value"}]}}
@@ -1405,6 +1545,92 @@ PYTHONIOENCODING=utf-8 py comp_ops.py batch-add $API_BASE $TOKEN $PAGE_ID --spec
 **全流程自定义脚本（含FreeMarker SQL / 需queryFieldBySql回写）**：见 `references/datasource-dataset-chart-guide.md`
 
 **API 数据集**：`dataset_ops.py create-api` + `comp_ops.py add --dataset-name`（2轮完成）
+
+### JSON 数据集 + 图表（内联静态 JSON，无需外部数据源）
+
+> **适用场景**：演示/示例数据，数据量小，不需要数据库或外部 API。
+
+**关键规则（强制）：**
+- `dataType: 'json'`，**数据必须放在 `querySql` 字段**（JSON 数组字符串）
+- **禁止放 `content` 字段**：`content` 对 JSON 类型无效，`getAllChartData` 不读取 `content`，会返回 `data: null`
+- 不需要 `dbSource`（无数据库）
+- 不需要 `queryFieldBySql`（字段在创建时手动指定）
+- 绑定组件时 `dataSetType: 'json'`，`dataSetIzAgent: ''`
+
+**完整流程（自定义脚本）：**
+
+```python
+import sys, os, json, time, random, copy
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references'))
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references', 'scripts'))
+import bi_utils
+
+bi_utils.API_BASE = '<api_base>'
+bi_utils.TOKEN = '<token>'
+
+# Step 1: 获取/创建"示例数据集"分组
+groups_resp = bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup')
+parent_id = '0'
+for g in (groups_resp.get('result') or []):
+    if g.get('name') == '示例数据集' and g.get('dataType') is None:
+        parent_id = g.get('id', '0'); break
+if parent_id == '0':
+    bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup', data={'groupName': '示例数据集'})
+    for g in (bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup').get('result') or []):
+        if g.get('name') == '示例数据集' and g.get('dataType') is None:
+            parent_id = g.get('id', '0'); break
+
+# Step 2: 创建 JSON 数据集（数据放 querySql，不是 content）
+json_data = [
+    {'name': '类别A', 'value': 3200},
+    {'name': '类别B', 'value': 5800},
+    {'name': '类别C', 'value': 1900},
+]
+resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
+    'name': '数据集名称',
+    'code': 'dataset_code',
+    'dataType': 'json',
+    'querySql': json.dumps(json_data, ensure_ascii=False),  # ✅ 数据在 querySql
+    'content': '',                                           # ❌ content 无效，留空
+    'apiMethod': 'GET',
+    'parentId': parent_id,
+    'datasetItemList': [
+        {'fieldName': 'name', 'fieldTxt': '名称', 'fieldType': 'String', 'izShow': 'Y', 'orderNum': 0},
+        {'fieldName': 'value', 'fieldTxt': '数值', 'fieldType': 'Integer', 'izShow': 'Y', 'orderNum': 1},
+    ],
+    'datasetParamList': [],
+})
+result = resp.get('result', {})
+DS_ID = result.get('id') if isinstance(result, dict) else result
+
+# Step 3: 绑定图表（batch-add，config 中传数据绑定字段）
+# comp_ops.py batch-add specs 中：
+spec_config = {
+    'dataType': 2,
+    'dataSetId': DS_ID,
+    'dataSetName': '数据集名称',
+    'dataSetType': 'json',   # 对应 dataType:'json' 的数据集
+    'dataSetApi': '',
+    'dataSetMethod': 'GET',
+    'dataSetIzAgent': '',    # JSON 类型留空
+    'dataMapping': [
+        {'filed': '维度', 'mapping': 'name'},
+        {'filed': '数值', 'mapping': 'value'},
+    ],
+    'fieldOption': [
+        {'fieldName': 'name', 'fieldTxt': '名称', 'fieldType': 'String'},
+        {'fieldName': 'value', 'fieldTxt': '数值', 'fieldType': 'Integer'},
+    ],
+    'dictOptions': {}, 'paramOption': [], 'chartData': '[]',
+}
+```
+
+**数据集踩坑：**
+
+| 问题 | 原因 | 解决 |
+|------|------|------|
+| `getAllChartData` 返回 `data: null` | JSON 数据放在 `content` 而非 `querySql` | 把 JSON 数组字符串放 `querySql`，`content` 留空 |
+| 数据集管理 UI 无数据预览 | 同上 | 同上 |
 
 ### 文件数据集（单文件 singleFile / 多文件 FILES）
 
@@ -1417,10 +1643,13 @@ PYTHONIOENCODING=utf-8 py comp_ops.py batch-add $API_BASE $TOKEN $PAGE_ID --spec
 | `dataType`（数据集） | `'singleFile'` | `'FILES'` | `'sql'` | `'api'` |
 | `dbSource` | **reportId**（页面 ID） | **reportId**（页面 ID） | 数据库源 ID | `None` |
 | `querySql` | `select * from {tableName}` | 可跨表 SQL 查询 | SQL 语句 | API URL |
+| `dataSetIzAgent`（组件config）| `''`（空字符串） | `'1'`（后端代理） | `'0'` | `'0'`/`'1'` |
 | 文件上传 | 1 个文件（`isSingle=true`） | 多个文件 | 不需要 | 不需要 |
 | `content` | `JSON.stringify(fileList)` | 不需要 | 不需要 | 不需要 |
-| 字段解析 API | 自动从文件解析 | `queryFileFieldBySql`（非 `queryFieldBySql`） | `queryFieldBySql` | `queryFieldByApi` |
+| 字段解析 API | `queryFileFieldBySql`（非 `queryFieldBySql`） | `queryFileFieldBySql`（非 `queryFieldBySql`） | `queryFieldBySql` | `queryFieldByApi` |
 | 支持格式 | `.csv .xls .xlsx .json` | `.csv .xls .xlsx .json` | — | — |
+
+> **🚨 `dataSetIzAgent` 区别**：FILES 必须设 `'1'`（走后端代理读文件），singleFile 必须设 `''`（空字符串，**非 `'0'`**）。写错会导致图表无数据或请求失败。
 
 #### 文件上传 API
 
@@ -1453,7 +1682,12 @@ PYTHONIOENCODING=utf-8 py comp_ops.py batch-add $API_BASE $TOKEN $PAGE_ID --spec
 }
 ```
 
-> **表名命名规则**：`jmf.{SheetName}_{fileName}_{ext}`（XLS 取 Sheet 名）或 `jmf.{fileName}_{ext}`（CSV/JSON）。
+> **表名命名规则**：
+> - **XLS/XLSX**：`jmf.{SheetName}_{fileName}_excel`（取第一个 Sheet 名），如 `jmf.Sheet1_default_excel`
+> - **CSV**：`jmf.{fileName}_csv`，如 `jmf.sales_csv`
+> - **JSON**：`jmf.{fileName}_json`，如 `jmf.orders_json`
+>
+> ⚠️ **文件字段名必须为英文**：H2/Calcite 引擎不支持中文列名，上传含中文列名的 Excel 会导致字段解析异常。上传前将列名改为英文。
 
 #### Python 文件上传函数
 
@@ -1486,18 +1720,33 @@ result = upload_file(FILE_PATH, PAGE_ID, is_single=True)
 file_list = json.loads(result['result']['dbUrl'])
 table_name = file_list[0]['name']  # 如 jmf.Sheet1_default_excel
 
-# 2. 创建数据集
+# 2. 解析字段（必须用 queryFileFieldBySql，非 queryFieldBySql）
+fields_resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/queryFileFieldBySql', data={
+    'sql': f'select * from {table_name}',
+    'dbCode': PAGE_ID,   # 注意：参数名是 dbCode，值是页面ID（非数据库ID）
+})
+fields = fields_resp.get('result', [])  # [{fieldName, fieldTxt, fieldType}, ...]
+
+# 3. 创建数据集（🚨 code 必须等于 table_name，不能自造随机字符串）
 ds = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
-    'name': '销售数据(单文件)', 'code': 'sales_single',
+    'name': '销售数据(单文件)',
+    'code': table_name,              # 🚨 必须等于 table_name（如 jmf.Sheet1_default_excel）
     'dataType': 'singleFile',        # 关键
-    'dbSource': PAGE_ID,             # 关键：页面ID
+    'dbSource': PAGE_ID,             # 关键：页面ID（非数据库连接ID）
     'querySql': f'select * from {table_name}',
-    'content': json.dumps(file_list, ensure_ascii=False),  # 文件列表
-    'datasetItemList': [...], 'datasetParamList': []
+    'content': json.dumps(file_list, ensure_ascii=False),  # 文件列表 JSON
+    'apiMethod': 'GET',
+    'datasetItemList': fields, 'datasetParamList': [],
 })
 
-# 3. 组件 config 绑定
-config = {'dataType': 2, 'dataSetType': 'singleFile', 'dataSetApi': f'select ...', ...}
+# 4. 组件 config 绑定（dataSetIzAgent 必须是空字符串，非 '0'）
+config = {
+    'dataType': 2, 'dataSetType': 'singleFile',
+    'dataSetId': ds['result']['id'],
+    'dataSetApi': f'select * from {table_name}',
+    'dataSetIzAgent': '',            # 🚨 单文件必须是空字符串（不是 '0'）
+    'dataMapping': [{'filed': '维度', 'mapping': 'col1'}, {'filed': '数值', 'mapping': 'col2'}],
+}
 ```
 
 #### 创建多文件数据集（FILES）
@@ -1520,8 +1769,14 @@ ds = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
     'datasetItemList': [...], 'datasetParamList': []
 })
 
-# 4. 组件 config 绑定
-config = {'dataType': 2, 'dataSetType': 'FILES', 'dataSetApi': 'select ...', ...}
+# 4. 组件 config 绑定（dataSetIzAgent 必须是 '1'，走后端代理读文件）
+config = {
+    'dataType': 2, 'dataSetType': 'FILES',
+    'dataSetId': ds['result']['id'],
+    'dataSetApi': f'select * from {table_name}',
+    'dataSetIzAgent': '1',           # 🚨 多文件必须是 '1'（后端代理），不能是 '' 或 '0'
+    'dataMapping': [{'filed': '维度', 'mapping': 'col1'}, {'filed': '数值', 'mapping': 'col2'}],
+}
 ```
 
 ---
@@ -1549,6 +1804,9 @@ config = {'dataType': 2, 'dataSetType': 'FILES', 'dataSetApi': 'select ...', ...
 | **XLS 文件表名含 Sheet 名** | 系统从 Excel 的 Sheet 名生成表名 | 表名格式 `jmf.{SheetName}_{fileName}_{ext}`，如 `jmf.Sheet1_default_excel` |
 | **CSV 编码问题** | UTF-8 BOM 头导致字段名乱码 | 上传前确保文件为纯 UTF-8（无 BOM），或系统会自动处理 |
 | **文件上传 isSingle 参数** | 单文件和多文件的区别标志 | 单文件上传传 `isSingle=true`，多文件不传此参数 |
+| **🚨 文件数据集 dataSetIzAgent 值不同** | FILES 需要后端代理读文件，singleFile 不需要 | FILES：`dataSetIzAgent='1'`；singleFile：`dataSetIzAgent=''`（空字符串，**非 `'0'`**）；填错导致图表无数据 |
+| **🚨 文件列名必须为英文** | H2/Calcite 引擎不支持中文列名 | 上传含中文列名的 Excel/CSV 会导致字段解析异常，上传前将列名改为英文 |
+| **🚨 文件数据集字段解析必须用 queryFileFieldBySql** | 文件引擎与 SQL 数据库引擎不同 | 单/多文件数据集的字段解析必须调用 `/queryFileFieldBySql`，参数 `dbCode=PAGE_ID`；用 `queryFieldBySql` 会失败 |
 
 ---
 
@@ -1812,6 +2070,172 @@ jtabs_comp = {
 - Tab 内组件 resize 时会触发重新渲染（watch size → reloadKey++，解决组件尺寸失配问题）
 - `rightText`/`rightHref` 不填时不显示右上角按钮
 
+**⚠️ JTabs 不能用 `comp_ops.py batch-add` 直接创建**（child 嵌套结构含动态 parentId，CLI 无法表达）。必须用自定义 Python 脚本。
+
+#### JTabs 完整实操脚本（含 SQL 数据集 + API 数据集，已验证可用）
+
+> 验证日期：2026-04-24；场景：Tab1=散点地图（SQL数据集），Tab2=饼状图（API数据集）
+
+```python
+# -*- coding: utf-8 -*-
+import sys, os, json, time, random
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references'))
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references', 'scripts'))
+import bi_utils
+
+API_BASE  = '<api_base>'
+TOKEN     = '<token>'
+PAGE_ID   = '<page_id>'
+DB_SOURCE = '<datasource_id>'   # SQL 数据集所用数据源 ID
+
+bi_utils.API_BASE = API_BASE
+bi_utils.TOKEN    = TOKEN
+
+def _key():
+    return f'{int(time.time()*1000)}_{random.randint(100000,999999)}'
+
+# Step 1: 缓存模板（必须！防止 save_page 覆盖已有组件）
+page = bi_utils.query_page(PAGE_ID)
+tmpl = page.get('template') or []
+if isinstance(tmpl, str): tmpl = json.loads(tmpl)
+# 若要替换已有 JTabs，先过滤掉旧的
+tmpl = [c for c in tmpl if c.get('component') != 'JTabs']
+
+# Step 2: 获取/创建"示例数据集"分组
+groups = (bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup').get('result') or [])
+parent_id = next((g['id'] for g in groups if g.get('name') == '示例数据集' and g.get('dataType') is None), '0')
+if parent_id == '0':
+    bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup', data={'groupName': '示例数据集'})
+    groups = (bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup').get('result') or [])
+    parent_id = next((g['id'] for g in groups if g.get('name') == '示例数据集' and g.get('dataType') is None), '0')
+
+# Step 3: 创建 SQL 数据集（Tab1 使用）
+SQL = "SELECT '北京' AS name, 320 AS value UNION ALL SELECT '上海', 285 ..."
+ds_resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
+    'name': '城市散点分布', 'code': 'city_scatter_dist',
+    'dataType': 'sql', 'dbSource': DB_SOURCE, 'querySql': SQL, 'apiMethod': 'GET',
+    'parentId': parent_id,
+    'datasetItemList': [
+        {'fieldName': 'name',  'fieldTxt': '城市名称', 'fieldType': 'String',  'izShow': 'Y', 'orderNum': 0},
+        {'fieldName': 'value', 'fieldTxt': '数值',     'fieldType': 'Integer', 'izShow': 'Y', 'orderNum': 1},
+    ],
+    'datasetParamList': []
+})
+result = ds_resp.get('result', {})
+SQL_DS_ID = result.get('id') if isinstance(result, dict) else result
+
+# Step 4: 构建 JTabs——tabs_i 必须先生成，child 的 parentId 指向它
+tabs_i = _key()
+map_i  = _key()
+pie_i  = _key()
+
+jtabs_comp = {
+    'component': 'JTabs', 'componentName': '选项卡',
+    'visible': True, 'i': tabs_i,
+    'x': 0, 'y': <Y>, 'w': 24, 'h': 45,
+    'pcX': 0, 'pcY': <Y>, 'pcW': 24, 'orderNum': 100,
+    'config': {
+        'w': 1800, 'h': 495,           # 像素：w*75, h*11
+        'size': {'width': 1800, 'height': 495},
+        'option': {'title': '选项卡'},
+        'child': [
+            {
+                'title': '散点地图',        # Tab 标签文字
+                'i': map_i,
+                'parentId': tabs_i,       # 🚨 必须是父 JTabs 的 i
+                'component': 'JBubbleMap',
+                'w': 24, 'x': 0, 'h': 40,
+                'config': {
+                    'dataType': 2, 'dataSetId': SQL_DS_ID,
+                    'dataSetName': '城市散点分布', 'dataSetType': 'sql',
+                    'dataSetApi': SQL, 'dataSetMethod': 'GET', 'dataSetIzAgent': '',
+                    'dataMapping': [{'filed': '维度', 'mapping': 'name'}, {'filed': '数值', 'mapping': 'value'}],
+                    'fieldOption': [
+                        {'fieldName': 'name',  'fieldTxt': '城市名称', 'fieldType': 'String'},
+                        {'fieldName': 'value', 'fieldTxt': '数值',     'fieldType': 'Integer'},
+                    ],
+                    'dictOptions': {}, 'paramOption': [], 'chartData': '[]',
+                    'chart': {'subclass': 'JBubbleMap', 'category': 'Map', 'isGroup': False},
+                    'commonOption': {
+                        'barSize': 10, 'gradientColor': False,
+                        'breadcrumb': {'drillDown': False, 'textColor': '#000000'},
+                        'areaColor': {'color1': '#f7f7f7', 'color2': '#fcc02e'},
+                        'barColor': '#fff176', 'barColor2': '#fcc02e',
+                        'inRange': {'color': ['#04387b', '#467bc0']},
+                    },
+                    'filter': {'conditionFields': [], 'conditionMode': 'and', 'queryRange': 'all'},
+                    'timeOut': 0, 'size': {'width': 1800, 'height': 440},
+                    'background': '#FFFFFF', 'turnConfig': {'url': ''},
+                    'option': {
+                        'drillDown': False,
+                        'area': {
+                            'markerColor': '#DDE330', 'shadowBlur': 10, 'markerCount': 5,
+                            'markerOpacity': 1, 'name': ['中国'], 'scatterLabelShow': False,
+                            'shadowColor': '#DDE330', 'value': ['china'], 'markerType': 'effectScatter',
+                        },
+                        'geo': {
+                            'top': 30, 'zoom': 1, 'roam': False,
+                            'itemStyle': {
+                                'normal': {'borderColor': '#a9a9a9', 'areaColor': '',
+                                           'borderWidth': 1, 'shadowColor': '#80d9f8',
+                                           'shadowBlur': 0, 'shadowOffsetX': 0, 'shadowOffsetY': 0},
+                                'emphasis': {'areaColor': '#fff59c', 'borderWidth': 0},
+                            },
+                            'label': {'emphasis': {'color': '#fff', 'show': False}},
+                        },
+                        'series': [], 'grid': {'bottom': 115, 'show': False},
+                        'legend': {'data': []}, 'graphic': [],
+                        'title': {'left': 10, 'show': True, 'text': '城市散点地图',
+                                  'textStyle': {'fontWeight': 'normal'}},
+                        'card': {'rightHref': '', 'size': 'default', 'extra': '',
+                                 'headColor': '#FFFFFF', 'title': ''},
+                        'visualMap': {
+                            'min': 0, 'top': 'bottom', 'max': 400, 'left': '5%',
+                            'calculable': True, 'show': False, 'type': 'continuous',
+                            'seriesIndex': [1],   # JBubbleMap 固定 [1]
+                        },
+                    },
+                },
+            },
+            {
+                'title': '饼状图',
+                'i': pie_i,
+                'parentId': tabs_i,       # 🚨 同样必须指向父 JTabs 的 i
+                'component': 'JPie',
+                'w': 24, 'x': 0, 'h': 40,
+                'config': {
+                    'dataType': 2, 'dataSetId': '<API_DATASET_ID>',
+                    'dataSetName': '<数据集名>', 'dataSetType': 'api',
+                    'dataSetApi': '<API_URL>', 'dataSetMethod': 'GET', 'dataSetIzAgent': '1',
+                    'dataMapping': [{'filed': '维度', 'mapping': 'name'}, {'filed': '数值', 'mapping': 'value'}],
+                    'fieldOption': [
+                        {'fieldName': 'name',  'fieldTxt': 'name',  'fieldType': 'String'},
+                        {'fieldName': 'value', 'fieldTxt': 'value', 'fieldType': 'Integer'},
+                    ],
+                    'dictOptions': {}, 'paramOption': [], 'chartData': '[]',
+                    'timeOut': 0, 'size': {'width': 1800, 'height': 440},
+                    'background': '#FFFFFF', 'turnConfig': {'url': ''},
+                    'option': {
+                        'series': [{'data': [], 'type': 'pie', 'radius': '55%'}],
+                        'tooltip': {'trigger': 'item'},
+                        'legend': {'orient': 'vertical', 'left': 'left'},
+                        'title': {'show': True, 'text': '饼状图标题',
+                                  'textStyle': {'fontWeight': 'normal', 'color': '#464646'}},
+                        'card': {'rightHref': '', 'size': 'default', 'extra': '',
+                                 'headColor': '#FFFFFF', 'title': ''},
+                    },
+                },
+            },
+        ],
+    },
+}
+
+# Step 5: 追加并保存（一次 save，避免乐观锁）
+tmpl.append(jtabs_comp)
+bi_utils._page_components[PAGE_ID] = tmpl
+bi_utils.save_page(PAGE_ID)
+```
+
 ---
 
 ### JGrid（栅格布局）
@@ -1870,6 +2294,10 @@ jgrid_comp = {
 - **可以** JGrid 嵌套在 JTabs 内（支持 `pid` 参数传递父 Tab ID）
 - 移动端响应式（来源：Grid.vue 第156-162行）：屏幕宽度 < 500px 时所有列 `span` 自动改为 24（全宽堆叠）
 - `child` 默认为空数组，需在 API 创建时直接填充 `child` 才能预设内容
+- **🚨 child 每项必须含 `w`/`x`/`h` 字段**（仅有 span/i/parentId/component/config 不够，缺少 w/x/h 时子组件高度为 0，内容不可见）
+- **🚨 JGrid 不能用 `comp_ops.py batch-add` 创建**（child 含动态 parentId 及完整子组件 config，CLI 无法表达；必须写自定义脚本）
+- **🚨 JGrid 顶层组件需要 `pcX`/`pcY`/`pcW` 字段**（与普通组件对齐，缺少时移动端布局异常）
+- **`config.w`/`config.h` 必须与像素 size 一致**：`config.w = w*75`，`config.h = h*11`
 
 **常见 span 分配方案：**
 
@@ -1880,6 +2308,151 @@ jgrid_comp = {
 | 4列 | 6 + 6 + 6 + 6 | 四等分 |
 | 左宽右窄 | 16 + 8 | 左图右说明 |
 | 左窄右宽 | 8 + 16 | 左说明右图 |
+
+#### JGrid 完整实操脚本（含 JSON 数据集 + API 数据集，已验证可用）
+
+> 验证日期：2026-04-24；场景：栅格1=热力地图（JSON数据集），栅格2=柱形图（API数据集）
+
+```python
+# -*- coding: utf-8 -*-
+import sys, os, json, time, random, copy
+
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references'))
+sys.path.insert(0, os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references', 'scripts'))
+import bi_utils
+
+API_BASE = '<api_base>'
+TOKEN    = '<token>'
+PAGE_ID  = '<page_id>'
+API_DS_ID = '<已有API数据集ID>'   # 可选：已有 API 数据集直接复用
+
+bi_utils.API_BASE = API_BASE
+bi_utils.TOKEN    = TOKEN
+
+def _key():
+    return f'{int(time.time()*1000)}_{random.randint(100000,999999)}'
+
+# Step 1: 缓存已有组件（必须！防止 save_page 覆盖）
+page = bi_utils.query_page(PAGE_ID)
+tmpl = page.get('template') or []
+if isinstance(tmpl, str): tmpl = json.loads(tmpl)
+bi_utils._page_components[PAGE_ID] = tmpl
+
+# Step 2: 获取/创建"示例数据集"分组
+groups = (bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup').get('result') or [])
+parent_id = next((g['id'] for g in groups if g.get('name') == '示例数据集' and g.get('dataType') is None), '0')
+if parent_id == '0':
+    bi_utils._request('POST', '/drag/onlDragDatasetHead/addGroup', data={'groupName': '示例数据集'})
+    groups = (bi_utils._request('GET', '/drag/onlDragDatasetHead/getAllGroup').get('result') or [])
+    parent_id = next((g['id'] for g in groups if g.get('name') == '示例数据集' and g.get('dataType') is None), '0')
+
+# Step 3: 创建 JSON 数据集（栅格1用）——数据放 querySql，禁止放 content
+json_data = [
+    {'name': '北京', 'value': 180}, {'name': '上海', 'value': 250},
+    {'name': '广州', 'value': 138}, {'name': '深圳', 'value': 200},
+    {'name': '成都', 'value': 120}, {'name': '杭州', 'value': 160},
+]
+ds_resp = bi_utils._request('POST', '/drag/onlDragDatasetHead/add', data={
+    'name': '城市热力数据', 'code': f'city_heatmap_{int(time.time())}',
+    'dataType': 'json',
+    'querySql': json.dumps(json_data, ensure_ascii=False),  # ✅ 数据放 querySql
+    'content': '',                                           # ❌ content 无效，留空
+    'apiMethod': 'GET', 'parentId': parent_id,
+    'datasetItemList': [
+        {'fieldName': 'name',  'fieldTxt': '城市名称', 'fieldType': 'String',  'izShow': 'Y', 'orderNum': 0},
+        {'fieldName': 'value', 'fieldTxt': '热力值',   'fieldType': 'Integer', 'izShow': 'Y', 'orderNum': 1},
+    ],
+    'datasetParamList': [],
+})
+result = ds_resp.get('result', {})
+JSON_DS_ID = result.get('id') if isinstance(result, dict) else result
+
+# Step 4: 加载 default_configs.json，深拷贝构建子组件 config
+_cfg_path = os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'jimubi-dashboard', 'references', 'scripts', 'default_configs.json')
+with open(_cfg_path, encoding='utf-8') as f:
+    defaults = json.load(f)
+
+GRID_H = 50   # 栅格高度（栅格单位）
+
+# 栅格1: JHeatMap + JSON 数据集
+cell1_cfg = copy.deepcopy(defaults.get('JHeatMap', {}))
+cell1_cfg.update({
+    'dataType': 2, 'dataSetId': JSON_DS_ID,
+    'dataSetName': '城市热力数据', 'dataSetType': 'json',
+    'dataSetApi': '', 'dataSetMethod': 'GET', 'dataSetIzAgent': '',
+    'dataMapping': [{'filed': '维度', 'mapping': 'name'}, {'filed': '数值', 'mapping': 'value'}],
+    'fieldOption': [
+        {'fieldName': 'name',  'fieldTxt': '城市名称', 'fieldType': 'String'},
+        {'fieldName': 'value', 'fieldTxt': '热力值',   'fieldType': 'Integer'},
+    ],
+    'dictOptions': {}, 'paramOption': [], 'chartData': '[]',
+    'background': '#FFFFFF', 'borderColor': '#E8E8E8',
+    'size': {'width': 900, 'height': GRID_H * 11},
+})
+cell1_cfg.setdefault('option', {}).setdefault('title', {})['text'] = '城市热力分布'
+
+# 栅格2: JBar + API 数据集
+cell2_cfg = copy.deepcopy(defaults.get('JBar', {}))
+cell2_cfg.update({
+    'dataType': 2, 'dataSetId': API_DS_ID,
+    'dataSetName': '柱形图数据', 'dataSetType': 'api',
+    'dataSetApi': '<API_URL>', 'dataSetMethod': 'GET', 'dataSetIzAgent': '0',
+    'dataMapping': [{'filed': '维度', 'mapping': 'name'}, {'filed': '数值', 'mapping': 'value'}],
+    'fieldOption': [
+        {'fieldName': 'name',  'fieldTxt': '名称', 'fieldType': 'String'},
+        {'fieldName': 'value', 'fieldTxt': '数值', 'fieldType': 'Integer'},
+    ],
+    'dictOptions': {}, 'paramOption': [], 'chartData': '[]',
+    'background': '#FFFFFF', 'borderColor': '#E8E8E8',
+    'size': {'width': 900, 'height': GRID_H * 11},
+})
+cell2_cfg.setdefault('option', {}).setdefault('title', {})['text'] = '数据统计柱形图'
+
+# Step 5: 计算 Y 坐标（追加在最底部）
+max_y = max((c.get('y', 0) + c.get('h', 0) for c in tmpl), default=0)
+
+# Step 6: 构建 JGrid——🚨 child 每项必须含 w/x/h，否则子组件高度为 0 不可见
+GRID_W = 24
+grid_i  = _key()
+cell1_i = _key()
+cell2_i = _key()
+
+jgrid_comp = {
+    'component': 'JGrid', 'componentName': '栅格布局',
+    'visible': True, 'i': grid_i,
+    'x': 0, 'y': max_y, 'w': GRID_W, 'h': GRID_H,
+    'pcX': 0, 'pcY': max_y, 'pcW': GRID_W,   # 🚨 必须填 pcX/pcY/pcW
+    'orderNum': len(tmpl) * 10 + 10,
+    'config': {
+        'w': GRID_W * 75,           # 🚨 config.w = w*75（像素）
+        'h': GRID_H * 11,           # 🚨 config.h = h*11（像素）
+        'size': {'width': GRID_W * 75, 'height': GRID_H * 11},
+        'option': {'card': {'title': '', 'extra': '', 'rightHref': '', 'size': 'default'}},
+        'child': [
+            {
+                'i': cell1_i, 'parentId': grid_i,   # 🚨 parentId 必须是父 JGrid 的 i
+                'span': 12,
+                'w': 12, 'x': 0, 'h': GRID_H,       # 🚨 必须含 w/x/h
+                'component': 'JHeatMap',
+                'config': cell1_cfg,
+            },
+            {
+                'i': cell2_i, 'parentId': grid_i,
+                'span': 12,
+                'w': 12, 'x': 12, 'h': GRID_H,      # 🚨 必须含 w/x/h
+                'component': 'JBar',
+                'config': cell2_cfg,
+            },
+        ],
+    },
+}
+
+# Step 7: 追加并保存（一次 save，避免乐观锁）
+tmpl.append(jgrid_comp)
+bi_utils._page_components[PAGE_ID] = tmpl
+bi_utils.save_page(PAGE_ID)
+print(f'JGrid 添加成功，预览: {API_BASE}/drag/page/view/{PAGE_ID}')
+```
 
 ---
 
@@ -1968,6 +2541,8 @@ jtabs_comp = {
 | **template 字段** | `query_page` 返回组件列表在 `template`（已是 list），不是 `pageTemplate`。**空页面时 `template` 为 `None`（非缺失键），必须用 `page.get('template') or []`，禁止 `.get('template',[])`** |
 | **bi_utils 初始化** | 直接赋值 `bi_utils.API_BASE/TOKEN`，无 init() 方法（有 init_api 封装） |
 | **Windows 命令** | 用 `py` 不是 `python`；所有脚本必须加 `PYTHONIOENCODING=utf-8`；脚本 print 禁用 emoji |
+| **⚠️ `comp_ops.py list` 不是查页面列表** | `comp_ops.py list` 是查某页面内的组件列表，`page_id` 必填，不传则报 `error: page_id required`。查所有页面：`bi_utils._request('GET', '/drag/page/list', params={'pageNo':1,'pageSize':50})` |
+| **⚠️ `py -c` 内 `sys.path.insert(0, '$HOME/...')` 无效** | Git Bash `$HOME` 展开为 `/c/Users/xxx`，Windows Python 不认 Unix 格式路径，`import bi_utils` 报 `ModuleNotFoundError`。必须改用 `PYTHONPATH` 环境变量：`SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"; PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py -c "import bi_utils; ..."` |
 | **cp 目标路径格式** | Git Bash 必须用 Unix 格式 `/c/Users/<用户名>/`，不能用 `C:/Users/` |
 | **cp 后必须 ls 验证** | cp 可能静默失败，必须 `&& ls *.py *.json` 验证，否则 ModuleNotFoundError |
 | **cp 与 py 必须同轮** | cp 依赖文件和 py 执行必须在同一命令链，不能拆成两轮 |
@@ -1980,6 +2555,8 @@ jtabs_comp = {
 | **🚨 签名算法不含时间戳** | X-Sign/V-Sign 的 MD5 字符串 = `json_str + SECRET`（无 `+ ts`）。加了时间戳必报"签名不匹配"。时间戳只放在请求头 `X-TIMESTAMP`，不参与 MD5 计算 |
 | **🚨 getAllGroup 字段是 name 不是 groupName** | `item.get('groupName')` 永远 None → 无限触发 addGroup。必须用 `item.get('name')`；addGroup 返回 null，必须重查取 `id` 作 `parentId` |
 | **🚨 SQL数据集创建后必须: queryFieldBySql+edit+getAllChartData+dictOptions** | 图表不渲染的根本原因：①缺少字段解析回写（fieldOption空）；②config缺dictOptions。全流程自定义脚本4步不可少；推荐方式(dataset_ops+batch-add)手动指定字段可跳过queryFieldBySql |
+| **🚨 JSON 数据集数据必须放 querySql，禁止放 content** | `dataType:'json'` 类型数据集，后端 `getAllChartData` 读取 `querySql` 字段（JSON 数组字符串），`content` 字段完全无效——放 content 则预览和图表均返回 `data:null`。正确：`'querySql': json.dumps(data_list)`；❌ 错误：`'content': json.dumps(data_list)` |
+| **🚨 JSON 数据集不需要 dbSource/queryFieldBySql** | `dataType:'json'` 无需数据库连接（`dbSource` 不传或留空），也无需调 `queryFieldBySql`（字段在 `datasetItemList` 中手动指定即可），`getAllChartData` 直接返回 querySql 中的 JSON 数据 |
 | **🚨 "singleFile脚本"术语禁用于SQL场景** | `singleFile` 是文件数据集的 dataType 值（`dataType:'singleFile'`，上传 Excel/CSV）。SQL 场景的自定义脚本应称为"全流程自定义脚本"，以免混淆 |
 | **SQL 数据集无 dbSource** | SQL 类型数据集必须指定 `dbSource`（数据库源 ID），否则报"数据源不存在" |
 | **datasetItemList 字段名** | 创建数据集用 `datasetItemList`，不是 `onlDragDatasetItemList` |
@@ -1995,15 +2572,30 @@ jtabs_comp = {
 | **response null 处理** | `result=null` 时 `.get('result',{})` 返回 None，必须用 `(resp.get('result') or {})` |
 | **componentName 必须用中文名** | 批量生成时图层名用中文（如"基础柱形图"），禁止用 compType（JBar/JPie） |
 | **singleFile 场景禁止 comp_ops.py --dataset-name** | 按索引映射导致字段错乱，必须在同一脚本内用 `bi_utils.add_component()` 显式语义映射 |
-| **singleFile code 字段保留 jmf. 前缀** | 缺前缀报 SQLException |
+| **🚨 singleFile code 必须等于 table_name（jmf.xxx）** | chart GROUP BY 查询使用 code 作为表名，code 与 querySql 中表名不一致则查询错误表。正确：`code=table_name`（如 `jmf.Sheet1_default_excel`），`querySql=f'select * from {table_name}'`。❌ 错误：`code='sf_1778313720'` → 生成 `FROM sf_1778313720` 而非正确表 |
+| **🚨 singleFile 删除数据集会清空 dbUrl + H2 表** | 删除任意 singleFile 数据集后，后端同步清空该 page 对应文件数据源的 dbUrl（置为 `[]`）并销毁 H2 表，导致同 page 其他 singleFile 数据集查询报 `Object not found`。**files_ops.py 的回退路径（queryFileFieldBySql 返回空时创建 `__tmp__` 临时数据集再 DELETE）踩中此坑**。修复：临时数据集不删除，改用 edit API 重命名+更新字段后直接复用；自定义脚本中同理，禁止在有其他 singleFile 数据集存活时执行 DELETE |
 | **singleFile 文件上传用 requests.post** | `bi_utils._request()` 不支持 files 参数 |
+| **🚨 文件数据集 dataSetIzAgent 必须区分** | FILES：`'1'`（后端代理）；singleFile：`''`（空字符串，**非 `'0'`**）。填错导致图表无数据 |
+| **🚨 文件列名必须英文** | H2/Calcite 不支持中文列名，上传前将 Excel/CSV 列名改为英文 |
+| **🚨 singleFile datasetItemList 的 fieldName 必须是表中真实列名，禁止用 SQL 别名（2026-05-09）** | 后端会用 `datasetItemList[].fieldName` 重建执行 SQL（`SELECT {f1},SUM({f2}) FROM table GROUP BY {f1}`）。若 fieldName 是 SQL 别名（如 `name`/`cnt`），H2 表中不存在这些列，必报 `Column 'name' not found`。**正确**：fieldName 必须是 Excel 真实列名（如 `bsl_pi_name`/`bsl_amount`）；SQL 用 `select * from {table_name}`，不用 GROUP BY 聚合 |
+| **🚨 singleFile 禁止在 SQL 中使用无别名聚合函数（count(*) 等）（2026-05-09）** | `count(*)` 无别名时 H2 引擎返回 `EXPR$1` 作为列名，这是 H2 内部名，不是表中真实列。若把 `EXPR$1` 写入 fieldName，后端重建 SQL 变成 `SUM(EXPR$1)` 再报错。singleFile 数据集禁止 GROUP BY，直接 `select * from {table_name}` 取全量数据 |
+| **🚨 文件字段解析必须用 queryFileFieldBySql** | 单/多文件数据集字段解析调用 `/queryFileFieldBySql`，参数 `dbCode=PAGE_ID`；用 `queryFieldBySql` 会失败 |
 | **FILES result 类型** | files/get 的 result 是 dict，`json.loads(result.get('dbUrl','[]'))` 取文件列表 |
 | **yapi_ops.py create-mock 参数** | 接口标题参数是 `--title`，不是 `--name` |
 | **subprocess 调用 yapi_ops.py** | 子命令必须在 YAPI_BASE 之前：`['py','yapi_ops.py', cmd, YAPI_BASE, EMAIL, PWD]` |
 | **YApi mock 前先 list** | 直接创建会重复，先 `yapi_ops.py list` 查已有接口，复用已存在的 |
+| **🚨 YApi mock 自定义 res_body 必须是纯数组** | 手写 mock body 时禁止包装成 `{"result":{"data":[...]}}` 格式，必须直接是 `[{"name":"...","value":...}]` 纯数组。包装格式导致 `getAllChartData` 返回 `data: null`，所有图表显示"暂无数据"（2026-04-24 实踩）|
+| **🚨 YApi `/api/interface/up` 用 `id` 字段不是 `_id`** | 更新 mock 时 payload 中接口 ID 必须是 `id`（无下划线），用 `_id` 报 `errcode=400: 请求参数 data 应当有必需属性 id`（2026-04-24 实踩）|
+| **🚨 API 数据集 `izAgent='0'` 时 `getAllChartData` 返回 `data: null` 是正常行为** | 前端直连模式下后端不代理外部 URL，服务端 `getAllChartData` 返回 `null` 是预期结果。数据由浏览器直接从 mock URL 获取。**禁止**因此修改 izAgent 或删除重建数据集（2026-04-24 实踩）|
+| **🚨 仪表盘需求必须先调用 jimubi-dashboard skill** | 收到任何仪表盘相关请求，第一步必须 `Skill jimubi-dashboard`，再在 skill 上下文中执行。禁止读 memory 凭据后直接用 curl/bash/Agent 子代理探测 API 端点，无论操作多简单（2026-04-24 实踩：联动配置需求未调 skill，自行探索接口路径浪费大量时间）|
 | **写 Java 接口** | 禁止自行 Grep 搜索 Controller 文件，必须问用户路径；完成后脚本末尾必须输出接口 URL + 重启提示 |
 | **lockd/解锁组件** | 锁定字段是顶层 `disabled`，解锁必须用自定义脚本操作顶层：`comp['disabled']=False; comp['selected']=False` |
 | **多图表+联动场景** | 必须用 `multi_chart_linkage.py`，禁止逐个调 comp_ops.py |
+| **🚨 联动源图表 fieldOption 必须用前端 DataSource.vue 格式** | 配置联动时 `config.fieldOption` 必须用 `{value:fieldName, label:fieldTxt, text:fieldTxt, show:'Y', type:fieldType}`。用 `{fieldName,fieldTxt,fieldType}` 时，联动设置弹窗"映射字段"列显示为空（`LinkConfig.vue` 第322行：`field.value==item.mapping`，`fieldName` 键不等于 `value` 键 → filter 返回 undefined）。联动功能本身仍可运行，只是 UI 弹窗看不到映射字段。❌ `{'fieldName':'name','fieldTxt':'性别','fieldType':'String'}`；✅ `{'value':'name','label':'性别','text':'性别','show':'Y','type':'String'}` |
+| **🚨 联动目标数据集必须同时满足三个条件才能真正刷新** | ① SQL 含 FreeMarker：`<#if isNotEmpty(name)>WHERE f='${name}'</#if>`；② 数据集 `datasetParamList` 声明参数：`{paramName:'name',...}`；③ 目标图表 `config.paramOption` 包含同名参数。三者缺一，点击源图表后目标图表不刷新（联动配置看起来正常，但无效果）|
+| **🚨 SQL GROUP BY 禁止用 SELECT 别名** | `SELECT DATE_FORMAT(x,'%Y') as name ... GROUP BY name` 在 MySQL 某些模式下报 `bad SQL grammar [...]`（2026-04-24 实踩）。必须用实际表达式：`GROUP BY DATE_FORMAT(x,'%Y')`，禁止用别名 `name` 做分组列 |
+| **🚨 SQL 中使用 IFNULL/COALESCE 被后端拦截导致报错** | `IFNULL(col,'default')` / `COALESCE(col,'default')` 等函数写在 SELECT 中会被后端 `SqlInjectionUtil` 检测拦截（2026-04-24 实踩）。应改用 `WHERE col IS NOT NULL` 在 WHERE 子句过滤空值，避免在 SELECT 中使用空值包装函数。❌ `SELECT IFNULL(style,'default') AS name`；✅ `SELECT style AS name ... WHERE style IS NOT NULL` |
+| **🚨 联动端到端完整配置三要素（缺一不可）** | 创建带联动的图表对时，必须同时满足：① 联动源图表 `fieldOption` 用 `{value, label, text, show:'Y', type}` 格式（否则设置 UI 映射字段列为空）；② 目标数据集 SQL 含 FreeMarker：`<#if isNotEmpty(name)>AND col='${name}'</#if>`，且 `datasetParamList` 声明参数；③ 目标图表 `config.paramOption` 包含同名参数 `{paramName:'name',paramTxt:'...',paramType:'String',paramValue:''}`。三者不会互相检测，全部缺失时联动外观正常但点击无效果 |
 | **设计器表单端点** | 固定端点 `/desform/api/list/options`、`/desform/api/fields/{tableName}`，禁止盲猜 |
 | **Online表单 dataType=4** | 最易漏！漏写则 dataType=0，读不到表单数据 |
 | **🚨 X-Low-App-ID 必须是应用 ID，不是仪表盘页面 ID** | QQY URL 格式：`/myapp/{appId}/drag/{pageId}`，appId ≠ pageId！`X-Low-App-ID` 填 appId，`query_page` 传 pageId。用错后 `/desform/api/list/options` 返回空列表，极易误判为"无表单"。若用户只给一个 ID，必须问清是应用 ID 还是页面 ID，或请提供完整 URL |
@@ -2011,6 +2603,7 @@ jtabs_comp = {
 | **🚨 QQY dataType=4 必须包含 compStyleConfig + analysis** | 缺少或为 `{}` 时前端 `useEChartsNew.ts` 访问 `.summary.showTotal` / `.showUnit.position` 抛 TypeError 白屏。禁止写 `'compStyleConfig': {}`，必须用完整默认值对象（见"组件 config 结构（dataType=4）"章节） |
 | **🚨 修复 compStyleConfig 时用 `not cfg.get()` 而非 `not in`** | 空对象 `{}` 是 truthy 的 key，`'compStyleConfig' not in cfg` 为 False（不覆盖）。必须用 `if not cfg.get('compStyleConfig'):` 检测空值 |
 | **仪表盘组件颜色设置** | JPie/JRose/JLine/JArea/JMixLineBar 等组件颜色必须用 `option.customColor`，格式 `[{"color1":"#FF","color":"#FF"}]`，`option.color` 无效 |
+| **🚨 饼图/折线图等颜色禁止写在 config 顶层** | `cfg['customColor']`（config 顶层）前端不读取，颜色不生效。必须写在 `option.customColor`：`cfg['option']['customColor'] = [{"color":"#FF0000","color1":"#FF0000"},...]`。❌ 错误：`cfg['customColor'] = [...]`；✅ 正确：`cfg['option']['customColor'] = [...]` |
 | **api.jeecg.com 是 YApi 服务器** | 禁止对其尝试 JeecgBoot /sys/login，YApi 登录路径是 /api/user/login |
 | **组件默认背景色** | `config.background` 必须为 `#FFFFFF`（白色），禁止使用 `#FFFFFF00`（透明）或 `transparent` |
 | **坐标单位** | 仪表盘用**栅格**坐标（24列），不是像素 |
@@ -2047,6 +2640,8 @@ jtabs_comp = {
 | **🚨 QQY formName 必须精确匹配表单显示名** | `formName` 是表单显示名称（如"测试表单"），不是 formCode（如 jeecg_1111_vjav），写错不影响数据查询但会导致配置面板显示混乱。必须先查询确认表单名：`GET /desform/api/list/options?appId={APP_ID}` 取 label 字段 |
 | **🚨 /desform/api/fields result 是 dict 非 list** | `result` 结构：`{desformCode, titleField, desformName, id, fields:[...]}` —— 字段列表在 `result.get('fields', [])`，不可直接迭代 result。字段属性：`model`=字段名，`name`=显示名，`type`=控件类型（input/number/money/select/textarea/file-upload）。直接 `for f in fields_resp.get('result', []):` 会报 `AttributeError: 'str' object has no attribute 'get'` |
 | **🚨 设计器表单字段类型映射（必须小写）** | 控件类型→BI fieldType：input/textarea/select/radio/checkbox→`string`，number/money→`number`，date/datetime→`string`；❌ 大写 `String`/`Integer`/`Double` 与手工配置不一致，导致字段类型判断异常；`file-upload` 必须跳过（不能作维度/指标，强制加入 filterField 会导致前端解析报错） |
+| **🚨 QQY 聚合表 type/formId/tableName/字段接口与普通表单不同** | 聚合表（FormSelectModal Tab2）config 必须：`type:'aggregation'`（普通表单是 `'design'`）；`formId`/`tableName` 均填聚合表 id（`onlDragTableRelation.id`，不是 formCode）；`formName` 填 `[聚合] 名称`；字段必须调 `/drag/onlDragTableRelation/getFields/{id}`（result 是数组，计算字段格式 `{title,type,value}`），禁止调 `/desform/api/fields`；`formType` 仍为 `'design'` |
+| **🚨 QQY 统计图表表单选择必须先询问应用来源，再分两组展示普通表单+聚合表** | 添加任意统计图表前，Step 0 询问"当前应用还是其他应用"；Step A 同时调用 `/desform/api/list/options`（普通表单）和 `/drag/onlDragTableRelation/list`（聚合表），分两组展示让用户选择；Step B 根据类型调不同接口取字段。❌ 禁止只展示普通表单跳过聚合表 |
 | **🚨 QQY 30个统计图表必须绑定表单（dataType=4），且必须先询问用户选表单和字段** | QQY（敲敲云）模式下添加**任意统计图表**，必须执行三步询问流程（见「QQY 统计图表三步询问流程」章节）：**① 调用 `/desform/api/list/options?appId={APP_ID}` 列出表单 → 展示给用户，询问"使用哪个表单" → ② 调用 `/desform/api/fields/{formCode}` 列出字段 → 展示给用户，询问"选哪些维度字段和数值字段" → ③ 用用户选定的表单+字段构建 dataType=4 完整 config 创建组件**。❌ 禁止自行复用已有组件的表单信息；❌ 禁止跳过询问直接执行；❌ 即使只有一个表单也要展示确认；❌ 禁止 dataType=1 静态数据兜底。**例外（dataType=1）：JCustomButton/JText/JFilterQuery/JCarousel/JDragEditor/JIframe/JCurrentTime 这7个UI功能组件** |
 | **🚨 QQY 全组件不能用 dataType=1（静态数据）** | QQY 前端无论 dataType 是否为 4，`useEChartsNew.ts` 都会访问 `compStyleConfig.summary.showTotal`；`useDataSource.ts` 会访问 `filter.conditionFields`。用 dataType=1 但不加这些字段，同样报 TypeError 白屏。结论：QQY 仪表盘**统计图表**统一用 dataType=4；**JCustomButton 按钮组件例外，固定用 dataType=1** |
 | **🚨 JCustomButton 按钮组件 dataType 必须为 1** | JCustomButton 不走表单数据接口，`dataType` 必须为 `1`，禁止设为 `4`。用户已明确验证。 |
@@ -2073,6 +2668,20 @@ jtabs_comp = {
 | **🚨 QQY JGauge 与 JColorGauge/JAntvGauge option 结构不同** | JGauge 需要完整 `series:[{min:0,data:[],max:100,axisTick:{lineStyle:{color:'#eee'},show:True},detail:{formatter:'{value}'},type:'gauge'}]`；JColorGauge/JAntvGauge 只需 `{title,card}`（无series） |
 | **🚨 QQY JPivotTable pivotTable 必须包含所有 num_fields** | `columnSummary.controlList` / `lineSummary.controlList` / `unitList` 对每个数值字段建一个条目（用 `key:fieldName`），只用第一个值字段导致多值字段汇总列缺失 |
 | **🚨 QQY filterField 必须在表单字段前预置5个系统字段** | filterField 数组**开头必须先放5个系统字段**：`create_by(select-user)` / `update_by(select-user)` / `update_time(date)` / `create_time(date)` / `bpm_status(select,dictCode:bpm_status)`，再拼表单字段。缺少系统字段导致筛选面板看不到这些维度，联动过滤不完整 |
+| **🚨 JIframe URL 必须设置在 `config.option.body.url`，禁止设置 `config.option.url`** | JIframe 组件前端读取的地址字段是 `option.body.url`，`option.url` 是无效字段不会被渲染。用 `comp_ops.py edit --set` 时应写 `option.body.url=https://...`，禁止写 `option.url=https://...` |
+| **🚨 JTabs 不能用 comp_ops.py batch-add 创建** | JTabs 的 child 含动态 `parentId`（指向父 i），且每个子组件 config 结构复杂，CLI 无法表达。必须写自定义 Python 脚本（query_page → 过滤旧 JTabs → 构建新 JTabs → append → save_page）。见「JTabs 完整实操脚本」章节 |
+| **🚨 JGrid 不能用 comp_ops.py batch-add 创建** | JGrid 与 JTabs 同理，child 含动态 parentId 及完整子组件 config，CLI 无法表达。必须用自定义 Python 脚本（query_page → 缓存 template → 构建 JGrid → append → save_page）。见「JGrid 完整实操脚本」章节 |
+| **🚨 JGrid child 每项必须含 `w`/`x`/`h` 字段** | child 子对象除 span/i/parentId/component/config 外，还必须显式带 `w`/`x`/`h`（如 `w:12, x:0, h:50`），缺少时子组件高度为 0，栅格内容完全不可见 |
+| **🚨 JGrid 顶层组件必须含 `pcX`/`pcY`/`pcW` 字段** | 与普通组件对齐所需字段，缺失时移动端布局可能异常。值与 `x`/`y`/`w` 保持相同即可 |
+| **🚨 JGrid `config.w`/`config.h` 必须是像素值** | `config.w = w*75`，`config.h = h*11`（与 `config.size.width/height` 保持一致）；填栅格单位导致子组件尺寸计算错误 |
+| **🚨 JTabs child 每项必须含 parentId，值为父 JTabs 的 i** | 前端 Tabs.vue 渲染时 `:pid="item.parentId"` 传给子组件；缺少 parentId 则子组件无法接收父容器 ID，Tab 内组件尺寸/联动异常。i 必须先生成（`tabs_i = _key()`），再在 child 中写 `'parentId': tabs_i` |
+| **🚨 JTabs child 每项必须含 w/x/h 字段** | child 子对象除 title/i/parentId/component/config 外，还必须显式带 `w/x/h`（`w:24, x:0, h:40`），缺少则前端渲染时尺寸为 0，Tab 内容不可见 |
+| **🚨 JBubbleMap 在 JTabs 内使用 dataType=2 时用 dataMapping，不是 nameFields/valueFields** | nameFields/valueFields 是 dataType=4（表单绑定）专属字段；dataType=2（SQL/API 数据集）必须用 dataMapping（`[{filed:'维度',mapping:'name'},{filed:'数值',mapping:'value'}]`）。混用导致地图无数据 |
+| **🚨 JTabs 替换已有实例：先过滤旧组件再追加新组件，一次 save** | 不能调两次 save_page（第二次 updateCount 过期报乐观锁）。正确模式：`tmpl = [c for c in tmpl if c.get('component') != 'JTabs']` → append 新 JTabs → `bi_utils._page_components[PAGE_ID] = tmpl` → `save_page(PAGE_ID)`（一次保存完成替换）|
+| **🚨 钻取 drillData 必须与 dataset config 在同一次 save_page 写入** | 先绑定数据集 save，再单独写 drillData save → 第二次 save 覆盖整个 config，drillData 丢失。正确：一个脚本一次 save_page，config dict 中同时包含 dataSetId/dataMapping 和 drillData。详见 `references/pitfalls.md`「钻取指南」 |
+| **🚨 钻取图表 fieldOption 必须用 `{value,label,text,show,type}` 格式** | EventConfig.vue 第134行：`field.value == item.mapping`，用 `{fieldName}` 格式时 value 键不存在 → 钻取「原始」下拉永远为空。❌ `{fieldName:'name',fieldTxt:'名称'}`；✅ `{value:'name',label:'名称',text:'名称',show:'Y',type:'String'}` |
+| **🚨 钻取图表必须含 `query:[]`、`actionConfig`、`linkageConfig:[]`、`dataSetIzAgent:null`** | 缺少时前端交互面板异常。SQL 数据集 `dataSetIzAgent` 必须为 `None`（JSON null），不能是 `""` |
+| **🚨 钻取 paramOption 必须为 `[]`（空数组）** | FreeMarker 参数通过 drillData.target → SQL 参数名自动传递，paramOption 放参数对象反而干扰重查逻辑，导致点击后数据不变 |
 
 > 完整踩坑记录见 `references/pitfalls.md`
 
@@ -2115,7 +2724,35 @@ print(json.loads(urllib.request.urlopen(req2).read()))
 
 大屏/仪表盘字典使用 `jimu_dict`/`jimu_dict_item`（**不是** sys_dict）。API 前缀：`/jmreport/dict/*` 和 `/jmreport/dictItem/*`
 
-使用 `dict_ops.py`：`list`, `items`, `create`, `add-item`, `delete`, `bind`
+**dict_ops.py 参数速查（必须严格使用，禁止盲猜）：**
+
+```bash
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+
+# 列出所有字典（无任何过滤参数）
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/dict_ops.py" list "$API" "$TOKEN"
+
+# 查看字典项（--code 字典编码，不是 --dict-code）
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/dict_ops.py" items "$API" "$TOKEN" --code "sex"
+
+# 创建字典（--items 格式：value=text,value=text）
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/dict_ops.py" create "$API" "$TOKEN" \
+  --name "性别" --code "sex" --desc "性别字典" --items "1=男,2=女,3=其他"
+
+# 添加单个字典项
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/dict_ops.py" add-item "$API" "$TOKEN" \
+  --code "sex" --value "3" --text "其他" --sort 3
+```
+
+**⚠️ list 不支持按编码过滤，需要查找特定字典时直接调 API：**
+```bash
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py -c "
+import sys, json; sys.path.insert(0, r'$SKILL_REFS'); sys.path.insert(0, r'$SKILL_REFS/scripts')
+import bi_utils; bi_utils.API_BASE='$API'; bi_utils.TOKEN='$TOKEN'
+r = bi_utils._request('GET', '/jmreport/dict/list', params={'dictCode': 'sex', 'pageNo': 1, 'pageSize': 10})
+for d in (r.get('result') or {}).get('records', []): print(d['dictCode'], d['dictName'], d['id'])
+"
+```
 
 > 完整操作流程 → 见 `references/dict-guide.md`
 
@@ -2125,7 +2762,8 @@ print(json.loads(urllib.request.urlopen(req2).read()))
 
 使用 `template_ops.py copy` 一键复制：
 ```bash
-PYTHONIOENCODING=utf-8 py template_ops.py copy $API_BASE $TOKEN --template-name "模板名称" --new-name "新仪表盘名"
+SKILL_REFS="$HOME/.claude/skills/jimubi-dashboard/references"
+PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_REFS/scripts/template_ops.py" copy $API_BASE $TOKEN --template-name "模板名称" --new-name "新仪表盘名"
 ```
 
 **原则**：只替换图表组件（JBar/JLine/JPie等）的 chartData 和标题，不修改图片/文本等其他组件的样式位置。

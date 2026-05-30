@@ -29,7 +29,8 @@ from jimureport_chart import (
 )
 from jimureport_link import create_link, parallel_create_links, save_mastersub_link
 from jimureport_datasource import (
-    resolve_db_source, find_datasource, ensure_datasource, get_ds_connection, query_mysql,
+    resolve_db_source, find_datasource, resolve_ds_id, generate_sql_via_ai, save_dataset,
+    ensure_datasource, get_ds_connection, query_mysql,
     execute_ds,
 )
 
@@ -44,6 +45,6 @@ __all__ = [
     "chart_entry", "virtual_row", "build_chart_layout",
     "update_chart_config", "parallel_fill_charts",
     "create_link", "parallel_create_links",
-    "resolve_db_source", "find_datasource", "ensure_datasource", "get_ds_connection", "query_mysql",
+    "resolve_db_source", "find_datasource", "resolve_ds_id", "generate_sql_via_ai", "save_dataset", "ensure_datasource", "get_ds_connection", "query_mysql",
     "execute_ds",
 ]
