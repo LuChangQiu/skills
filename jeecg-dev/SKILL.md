@@ -1,6 +1,6 @@
 ---
 name: jeecg-dev
-description: JeecgBoot 开发规范。当编写/修改 JeecgBoot 代码、应用 GitHub PR/issue 的改动、修复 bug、新增功能、重构代码、代码生成时自动触发。Use when writing or modifying any JeecgBoot code, applying changes from a GitHub PR/issue (e.g. user shares a PR URL, says "改这个PR", "合入这个issue", "按这个PR改"), code generation, bug fix, feature addition, or refactoring. Enforces update-begin/end markers, naming conventions, entity/controller/service patterns, API conventions, database design rules, and log practices.
+description: JeecgBoot 开发规范（仅手动触发）。⚠️ 本技能只在用户显式输入 /jeecg-dev 命令时使用，禁止自动触发——编写/修改 JeecgBoot 代码、应用 GitHub PR/issue 改动、修复 bug、新增功能、重构、代码生成等场景都不要自动调用本技能。内容涵盖 update-begin/end 痕迹注释、命名规范、实体/控制器/服务模式、API 约定、建表规则与修改日志实践。MANUAL ONLY: invoke ONLY when the user explicitly runs the /jeecg-dev command. Do NOT auto-trigger on any code editing, bug fix, PR/issue application, refactoring, or code generation.
 ---
 
 # JeecgBoot 开发规范

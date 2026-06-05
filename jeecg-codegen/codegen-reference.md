@@ -861,6 +861,25 @@ export const formSchema: FormSchema[] = [
   //   },
   // },
 
+  // --- 新版关联记录（JLinkTableCard，classType=link_table）---
+  // [QQYUN-14906] 直连业务表，无需在线报表，queryMode 固定 "table"
+  // tableName: 关联业务表名；valueField: 存储字段；textField: 展示字段
+  // imageField（可选）: 关联表图片字段，用于卡片展示
+  // multi: bool，false=单选（默认），true=多选（对应 queryMode:"multi"）
+  // {
+  //   label: '关联商品',
+  //   field: 'relatedGoodsId',
+  //   component: 'JLinkTableCard',
+  //   componentProps: {
+  //     tableName: 'biz_goods',
+  //     valueField: 'id',
+  //     textField: 'name',
+  //     queryMode: 'table',
+  //     // imageField: 'imgUrl',  // 可选：卡片图片列
+  //     multi: false,
+  //   },
+  // },
+
   // --- Popup字典（JPopupDict）---
   // multi: bool，默认 false（单选），true 为多选
   // dictCode: '报表code,显示字段,值字段'（三段用逗号分隔）
@@ -907,6 +926,7 @@ export const superQuerySchema = {
 - dept_select → `sel_depart`
 - JPopup → `popup`, 需要 `code/orgFields/destFields/popupMulti`
 - JPopupDict → `popup_dict`, 需要 `code/orgFields/destFields/popupMulti`
+- JLinkTableCard（link_table）→ `sel_search`, 带 `dictTable/dictCode/dictText`
 - JAreaLinkage(省市区) → `pca`
 - DatePicker year/quarter/month/week → `date` + `fieldExtendJson: "{\"picker\":\"year\"}"`（picker 可为 year/quarter/month/week）
 
@@ -1807,6 +1827,20 @@ function searchReset() {
               </a-form-item>
             </a-col> -->
 
+            <!-- === 新版关联记录（JLinkTableCard，classType=link_table）===
+            <!-- 直连业务表，无需在线报表；queryMode 固定 "table" -->
+            <!-- <a-col :span="24">
+              <a-form-item label="关联商品" v-bind="validateInfos.relatedGoodsId" id="{{entityName}}Form-relatedGoodsId" name="relatedGoodsId">
+                <JLinkTableCard v-model:value="formData.relatedGoodsId"
+                  tableName="biz_goods"
+                  valueField="id"
+                  textField="name"
+                  queryMode="table"
+                  :multi="false" />
+                  <!-- imageField="imgUrl"  可选：有图片时加 -->
+              </a-form-item>
+            </a-col> -->
+
             <!-- === JPopup 弹窗（source=报表字段名，target=表单字段名，默认 report_user）=== -->
             <!-- <a-col :span="24">
               <a-form-item label="弹窗选择" v-bind="validateInfos.popupField" id="{{entityName}}Form-popupField" name="popupField">
@@ -1846,6 +1880,7 @@ function searchReset() {
   // import JTreeSelect from '/@/components/Form/src/jeecg/components/JTreeSelect.vue';
   // import JPopup from '/@/components/Form/src/jeecg/components/JPopup.vue';
   // import JPopupDict from '/@/components/Form/src/jeecg/components/JPopupDict.vue';
+  // import JLinkTableCard from '/@/components/Form/src/jeecg/components/JLinkTableCard/JLinkTableCard.vue'; // link_table
 
   const props = defineProps({
     formDisabled: { type: Boolean, default: false },

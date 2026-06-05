@@ -2815,7 +2815,6 @@ PYTHONIOENCODING=utf-8 PYTHONPATH="$SKILL_REFS:$SKILL_REFS/scripts" py "$SKILL_R
 - `references/page-config-guide.md` — 页面配置（背景/水印/主题）
 - `references/map-guide.md` + `references/map-static-data.md` — 地图组件配置
 - `references/dict-guide.md` — 字典翻译操作
-- `references/group-guide.md` — 组件组合操作
 - `references/template-copy-guide.md` — 模板复制详细流程
 - `references/signing-datasource-guide.md` — 签名接口与 NoSQL 数据源
 - `references/datasource-dataset-chart-guide.md` — 数据源+数据集+图表完整流程

@@ -119,6 +119,35 @@ description: Use when user asks to generate JeecgBoot CRUD code, create a new mo
 >
 > **违反此铁律的代价：** 用户发现问题后，所有已生成文件都需要重新生成或逐一修改。
 
+### Step 0 前置：判断前端目标（PC 端 / 移动端 / 两者都要）
+
+> **此步骤必须在 Step 0 之前执行。前端目标直接决定 Step 2 中需要询问哪些选项。**
+
+**识别移动端关键词：** "移动端"、"手机端"、"UniApp"、"uniapp"、"APP端"、"小程序"、"H5"、"移动页面"、"APP页面"
+
+根据用户描述判断：
+
+| 用户意图 | 判定结果 | Step 2 调整 |
+|---------|---------|------------|
+| 明确只要移动端（含以上关键词，无 PC 相关词） | **仅移动端** | 跳过 PC 前端选项（选项2、3、6、8、9），改为询问 UniApp3 项目根路径 |
+| 明确只要 PC 端（含 "vue3"、"PC端"、"web端" 等词，无移动端词） | **仅 PC 端** | 按原流程 |
+| 两者都提到，或描述模糊（如"前后端代码"、"CRUD代码"） | **不确定** | 在 Step 2 前先询问用户：**"请问需要生成哪端的前端代码？① 仅 PC 端（Vue3） ② 仅移动端（UniApp3） ③ 两者都要"** |
+
+**仅移动端时的 Step 2 选项调整：**
+- 删除：前端风格（vue3/vue3Native）
+- 删除：PC 前端视图目录
+- 删除：PC 前端项目根路径
+- 删除：一对多布局风格（PC 端特有）
+- 删除：表单列数（PC 端特有）
+- 新增：**UniApp3 项目根路径**（必填）
+- 保留：后端模块、是否读取系统字典、后端项目根路径、数据库名称
+
+**两者都要时：** 同时展示 PC 端和移动端的选项，分两组列出。
+
+> ⚠️ **禁止默认跳过任何一端！** 无法判断时必须询问用户，不得自行假设"用户可能只要 PC"或"用户只要移动端"。
+
+---
+
 ### Step 0: 判断操作类型 — 全量生成 or 增量修改？
 
 **识别增量修改的关键词：** "加字段"、"增加字段"、"新增字段"、"加一个XX字段"、"删除字段"、"修改字段"、"改一下XX"、"给XX模块加"、"给XX表加"
@@ -262,13 +291,21 @@ description: Use when user asks to generate JeecgBoot CRUD code, create a new mo
 
 ### Step 4: 执行
 
-**全量生成流程：**
+**全量生成流程（根据前端目标选择执行路径）：**
+
+> 前端目标由 Step 0 前置判断确定：**仅 PC 端** / **仅移动端** / **两者都要**。
+
 1. **并行读取**对应子文件（见顶部"参考模板读取规则"），在同一轮 response 中发出全部 Read 调用
 2. **分轮并行写入**文件——无依赖的文件在同一轮 response 中批量发出 Write 调用，**禁止逐文件串行等待**：
    - **第 1 轮前（强制）**：对每个待写后端文件，确认其路径与 `codegen-reference.md` 文件清单一致（譬如Mapper XML）
    - **第 1 轮**（并行）：Entity + Mapper + IService + ServiceImpl + Controller + Mapper.xml（后端 6 文件）
-   - **第 2 轮前（强制）**：①对每个待写前端文件，确认路径与 `codegen-reference.md` 文件清单一致；②确认所有 FormSchema（主表 + 子表 Form）首位都有 `{ field: 'id', show: false }`
-   - **第 2 轮**（并行）：data.ts + api.ts + List.vue + Modal.vue + 子表 Vue 文件（前端全部）
+   - **第 2 轮（PC 端前端，仅"仅PC端"或"两者都要"时执行）**：
+     - 第 2 轮前（强制）：①确认路径；②确认 FormSchema 首位有 `{ field: 'id', show: false }`
+     - 第 2 轮（并行）：data.ts + api.ts + List.vue + Modal.vue + 子表 Vue 文件
+   - **第 2 轮（移动端前端，仅"仅移动端"或"两者都要"时执行，可与 PC 端第 2 轮并行）**：
+     - 读取 `uniapp/SKILL.md` 和 `uniapp/references/code-templates.md`
+     - 生成：`{EntityName}List.vue` + `{EntityName}Form.vue` + `{EntityName}Data.ts`（UniApp3 三件套）
+     - 更新 `pages.json` 注册路由
    - **第 3 轮前（强制）**：①确认 Flyway SQL 路径正确；②Read `references/ref-menu-sql.md` 获取菜单权限 SQL 模板，**禁止凭记忆生成 SQL**
    - **第 3 轮**（并行）：Flyway 建表 SQL + 菜单权限 SQL（严格按 ref-menu-sql.md 模板填充变量）
 
@@ -284,8 +321,9 @@ description: Use when user asks to generate JeecgBoot CRUD code, create a new mo
 ### Step 6: 询问是否生成移动端代码（仅全量生成时执行）
 
 > ⚠️ **增量修改（场景C）跳过此步骤。**
+> ⚠️ **"仅移动端"场景（Step 0 前置已判定）也跳过此步骤**，移动端代码已在 Step 4 中一并生成，无需重复询问。
 
-文件清单输出完毕后，**必须**向用户询问：
+**适用场景：** 仅当前端目标为"仅 PC 端"时，文件清单输出完毕后，**必须**向用户询问：
 
 > "是否同时生成对应的移动端（UniApp3）CRUD 代码？（回复"是"/"y"/"需要"确认，其他内容跳过）"
 
@@ -1308,6 +1346,62 @@ relatedUser: { title: '关联记录', order: 0, view: 'sel_search',
 customeRuleMap.put("relatedUser", QueryRuleEnum.LIKE_WITH_OR);
 ```
 
+#### JLinkTableCard（新版关联记录 — 表模式，classType=link_table）
+
+> **[QQYUN-14906] 2025-06-01 新增**。与旧版"关联记录（JPopup）"的核心区别：
+> - 旧版 `classType='popup'`：依赖**在线报表 code**，通过 JPopup 弹窗选择
+> - 新版 `classType='link_table'`：直接连**业务表**，通过 JLinkTableCard 卡片选择，无需建在线报表
+
+**对应 ctx.json 字段配置：**
+- `dictTable`：关联业务表名（如 `biz_goods`）
+- `dictField`：存储到当前表的值字段（如 `id`）
+- `dictText`：卡片展示字段（如 `name`）
+- `extendParams.imageField`（可选）：关联表的图片字段名，用于卡片图片展示
+- `queryMode`：设为 `"multi"` 时开启多选，默认单选
+
+```java
+// Entity — 同表字典，@Dict 实现列表翻译
+@Excel(name = "关联商品", width = 15, dictTable = "biz_goods", dicText = "name", dicCode = "id")
+@Dict(dictTable = "biz_goods", dicText = "name", dicCode = "id")
+private String relatedGoodsId;
+```
+```typescript
+// columns — 用 _dictText 后缀展示关联表文本
+{ title: '关联商品', align: 'center', dataIndex: 'relatedGoodsId_dictText' }
+
+// formSchema — vue3 封装风格
+{ label: '关联商品', field: 'relatedGoodsId', component: 'JLinkTableCard',
+  componentProps: {
+    tableName: 'biz_goods',
+    valueField: 'id',
+    textField: 'name',
+    queryMode: 'table',
+    // imageField: 'imgUrl',  // 可选：卡片图片字段
+    multi: false,
+  } }
+```
+```html
+<!-- vue3Native 原生风格 Form.vue 模板写法 -->
+<!-- import JLinkTableCard from '/@/components/Form/src/jeecg/components/JLinkTableCard/JLinkTableCard.vue'; -->
+
+<JLinkTableCard
+  v-model:value="formData.relatedGoodsId"
+  tableName="biz_goods"
+  valueField="id"
+  textField="name"
+  queryMode="table"
+  :multi="false" />
+<!-- 若有图片字段：imageField="imgUrl" -->
+```
+```typescript
+// superQuerySchema — 同表字典 sel_search
+relatedGoodsId: { title: '关联商品', order: 0, view: 'sel_search',
+  dictTable: 'biz_goods', dictCode: 'id', dictText: 'name' }
+
+// Controller
+customeRuleMap.put("relatedGoodsId", QueryRuleEnum.LIKE_WITH_OR);
+```
+
 #### Popup 组件生成流程总结
 
 生成含 Popup/关联记录/Popup字典的字段时，按以下步骤操作：
@@ -1508,8 +1602,9 @@ ALTER TABLE xxx ADD COLUMN `markdown` blob COMMENT 'markdown内容';
 | Popup弹窗 | JPopup | varchar | String | 否 | 无 | 无 |
 | Popup回填 | Input(disabled) | varchar | String | 否 | 无 | 无 |
 | Popup字典 | JPopupDict | varchar | String | 否 | 无 | 无 |
-| 关联记录 | JPopup | varchar | String | 表字典 | _dictText | LIKE_WITH_OR |
+| 关联记录（JPopup旧版）| JPopup | varchar | String | 表字典 | _dictText | LIKE_WITH_OR |
 | 他表字段 | Input(disabled) | varchar | String | 否 | 无 | 无 |
+| 关联记录（表模式）| JLinkTableCard | varchar | String | 表字典 | _dictText | LIKE_WITH_OR |
 | 省市区 | JAreaLinkage | varchar | String | 否 | 无 | 无 |
 | 联动组件 | JDictSelectTag/JSearchSelect | varchar | String | 按级别 | 无 | 无 |
 | 图片上传 | JImageUpload | varchar(1000) | String | 否 | renderImage | 无 |
