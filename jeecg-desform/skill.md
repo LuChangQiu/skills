@@ -329,7 +329,7 @@ echo '<json_config>' | python "<skill目录>/scripts/desform_creator.py" --api-b
 
 如果用户只是添加/修改/删除个别字段：
 - **添加字段**：`add_widget(code, widget)` — 向已有表单追加控件
-- **修改字段属性**：`update_widget(code, changes_dict, *, key=None, model=None)` — 修改指定控件属性，优先传 `key=`
+- **修改字段属性**：`update_widget(code, changes_dict, *, key=None, model=None)` — 修改指定控件属性，优先传 `key=`。⚠️ 调用前先确认目标属性是否属于组件选项（options 子层），如果是必须套 `{"options": {...}}`，否则后端静默失败
 - **删除字段**：`delete_widget(code, *, key=None, model=None)` — 删除指定控件，优先传 `key=`
 - 操作后自动同步权限：`sync_auth(code, design_list, form_id)`
 
@@ -549,7 +549,7 @@ desform 有两种完全独立的视图概念：
 - `references/desform-validation-rules.md` — 涉及校验规则时阅读（rules/defaultRules/pattern/unique）
 - `references/desform-option-datasource.md` — 涉及选项数据源时阅读（静态/系统字典/关联表单/远程函数）
 - `references/desform-remote-api.md` — 涉及远程API取值（remoteAPI）时阅读（动态参数语法、${字段model}传参、返回值规则、触发时机）
-- `references/desform-js-enhance.md` — 涉及 JS 增强时阅读（自定义 JavaScript、API 方法、事件监听）
+- `references/desform-js-enhance.md` — 涉及 JS 增强时阅读（自定义 JavaScript、API 方法、事件监听、子表控件选项设置 `setSubTableOptions`）
 - `references/desform-layout.md` — 涉及布局模式时阅读（auto/half/full/word 四种模式的说明和适用场景）
 - `references/desform-css-enhance.md` — 涉及 CSS 增强时阅读（自定义样式、Word 风格定制）
 - `references/desform-layout-controls.md` — 涉及复杂布局时阅读（AutoGrid/Card/Grid/Tabs）
